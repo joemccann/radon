@@ -35,10 +35,6 @@ EXEMPT: dict[str, str] = {
     "RADON_DEMO_MODE": "Optional server demo guard, unset disables demo mode.",
     "RADON_UW_STREAM_ENABLED": "Optional UW collector admission flag, unset keeps collection disabled.",
     "RADON_AI_CYCLE_DB_PATH": "optional isolated SQLite verification override; unset selects the production direct-cloud store",
-    # Set by the unit itself, not by the env file: the fleet drop-in
-    # radon-.service.d/common.conf and per-unit `Environment=` lines own these.
-    "RADON_DB_NO_REPLICA": "set by cloud/services/radon-.service.d/common.conf",
-    "RADON_DB_USE_REPLICA": "explicit replica opt-in; unset is the production state (DUR-07)",
     "CREDENTIALS_DIRECTORY": "injected by systemd from LoadCredentialEncrypted; never stored in /etc/radon/env",
     "RADON_SECRET_STORE_PATH": "optional host override; container runtime pins the durable data-volume path",
     "RADON_SECRET_STORE_KEY_FILE": "optional development/rollback fallback; production uses the systemd credential",

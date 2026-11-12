@@ -194,11 +194,6 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(fcs, "CREDIT_SPREAD_JSON", tmp_path / "credit_spread.json")
     monkeypatch.setattr(
         fcs.writer,
-        "ensure_no_replica_for_writers",
-        lambda: calls.append(("guard",)),
-    )
-    monkeypatch.setattr(
-        fcs.writer,
         "upsert_credit_spread_rows",
         lambda rows, recorded_at: calls.append(("rows", len(rows))),
     )
@@ -237,7 +232,6 @@ class TestPersistResult:
         rows = [{"date": "2026-08-20", "hyg_close": HYG_LAST, "spx_close": SPX_LAST}]
         persist_result(build_output(rows), rows)
         assert persist_calls == [
-            ("guard",),
             ("rows", 1),
             ("snapshot", "credit-spread"),
             ("health", "credit-spread", "ok"),

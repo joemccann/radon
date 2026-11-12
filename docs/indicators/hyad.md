@@ -105,8 +105,7 @@ Composed-method style, stdlib parsing. Pure functions: `parse_breadth_rows(envel
   (retryable soft failure — do not latch ok, do not persist). Weekend/holiday runs
   where the newest date already exists in Turso are unchanged-day heartbeats
   ("source unchanged; refreshing snapshot only").
-- Writes, in order, every cycle: `ensure_no_replica_for_writers()` →
-  `upsert_hyad_rows(rows, recorded_at=scan_time)` (changed rows only) →
+- Writes, in order, every cycle: `upsert_hyad_rows(rows, recorded_at=scan_time)` (changed rows only) →
   `upsert_scan_snapshot("hy-ad", scan_time, payload)` →
   `record_service_health("hy-ad", "ok", finished_at=scan_time)` → atomic JSON
   fallback `data/hyad.json`. Turso is the source of truth.
@@ -196,7 +195,6 @@ on 2025-01-09); never forward-fill or interpolate them.
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
   `EnvironmentFile=/etc/radon/env` (canonical path — cloud tests enforce it),
-  `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_hyad.py`,
   `TimeoutStartSec=300`.
 - Timer: `OnCalendar=Tue..Sat 11:00 UTC` — T+1 morning after TRACE end-of-day

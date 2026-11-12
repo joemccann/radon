@@ -10,7 +10,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # R-127: this job and radon-iei-hyg share IB client IDs 56/69. The
 # 21:45/21:55 gap is not a mutex — RandomizedDelaySec=300 on both timers
 # can start credit-spread at 21:50 with 300s of work left to run. -w

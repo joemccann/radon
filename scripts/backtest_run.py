@@ -82,9 +82,8 @@ def _persist(strategy: str, horizon: int, result: dict) -> None:
     """Dual-write: Turso ``backtest_runs`` + ``data/backtest/{strategy}.json``."""
     _write_disk_fallback(strategy, result)
     try:
-        from db.writer import ensure_no_replica_for_writers, upsert_backtest_run
+        from db.writer import upsert_backtest_run
 
-        ensure_no_replica_for_writers()
         upsert_backtest_run(
             strategy, result["run_at"], horizon=horizon, payload=result
         )

@@ -49,7 +49,6 @@ def record_scan_degraded(
     try:
         from db import writer
 
-        writer.ensure_no_replica_for_writers()
         writer.record_service_health(
             service,
             "error",

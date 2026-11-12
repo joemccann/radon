@@ -50,7 +50,6 @@ def _wire(monkeypatch, *, ib=None, rh=None, uw=None, yahoo=None, persist=None):
     monkeypatch.setattr(portfolio_risk, "_fetch_rh_closes", rung("rh", rh))
     monkeypatch.setattr(portfolio_risk, "_fetch_uw_closes", rung("uw", uw))
     monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", rung("yahoo", yahoo))
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     monkeypatch.setattr(
         writer,
         "upsert_price_history_rows",

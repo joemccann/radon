@@ -58,7 +58,6 @@ def _mirror_to_db(payload: dict) -> None:
 
         from db import writer as db_writer
 
-        db_writer.ensure_no_replica_for_writers()
         scan_time = str(payload.get("scan_time") or "") or (
             datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         )

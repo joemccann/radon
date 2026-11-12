@@ -10,7 +10,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # Without this every vix-pc UW hit is counted but unattributed in
 # /uw/usage top_callers.
 Environment=RADON_UW_CALLER=vix-pc

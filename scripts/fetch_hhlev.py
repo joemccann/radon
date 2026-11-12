@@ -303,7 +303,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     re-upserts ALL rows - deliberately no unchanged-day fast path.
     """
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     writer.upsert_hhlev_rows(rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
     writer.record_service_health(SERVICE, "ok", finished_at=scan_time)

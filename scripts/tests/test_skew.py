@@ -377,7 +377,6 @@ class TestRunIncremental:
         import db.writer as writer
 
         self.monkeypatch.setattr(writer, "record_service_health", fake_health, raising=False)
-        self.monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
 
         class BoomClient:
             def __init__(self):

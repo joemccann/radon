@@ -301,7 +301,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(fh, "HHLEV_JSON", tmp_path / "hhlev.json")
-    monkeypatch.setattr(fh.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(
         fh.writer,
         "upsert_hhlev_rows",
@@ -327,7 +326,6 @@ class TestPersistResult:
         rows = parse_fredgraph_csv(CSV_TEXT)
         persist_result(_build_payload(), rows)
         assert persist_calls == [
-            ("guard",),
             ("rows", 304),
             ("snapshot", "hhlev"),
             ("health", "hhlev", "ok"),

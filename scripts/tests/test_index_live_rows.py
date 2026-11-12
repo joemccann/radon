@@ -36,9 +36,6 @@ class _Recorder:
         self.health: list[tuple] = []
         self.row_upserts = 0
 
-    def ensure_no_replica_for_writers(self):
-        pass
-
     def upsert_scan_snapshot(self, service, scan_time, payload):
         self.snapshots.append((service, scan_time, payload))
 

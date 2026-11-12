@@ -155,9 +155,6 @@ def default_deps() -> Deps:
     from research.dropbox_writer import DropboxWriter, marketdesk_path
 
     def record_health(service, state, *, started_at=None, finished_at=None, error=None):
-        ensure = getattr(db_writer, "ensure_no_replica_for_writers", None)
-        if ensure is not None:
-            ensure()
         db_writer.record_service_health(service, state, started_at=started_at, finished_at=finished_at, error=error)
 
     def research_root():

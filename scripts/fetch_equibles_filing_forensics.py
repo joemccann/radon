@@ -625,7 +625,6 @@ def _write_db_row(dossier: dict[str, Any]) -> None:
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         db = get_db()
         db.execute(
             EQUIBLES_FILING_FORENSICS_UPSERT_SQL,

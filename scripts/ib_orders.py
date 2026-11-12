@@ -312,14 +312,12 @@ def _dual_write_orders_to_db(data: dict, heartbeat: bool = True) -> None:
     try:
         from db.service_cycle import service_cycle
         from db.writer import (
-            ensure_no_replica_for_writers,
             replace_open_orders_for_session,
             upsert_executed_orders_for_session,
             upsert_position_execution_facts,
         )
     except ImportError:
         return
-    ensure_no_replica_for_writers()
 
     try:
         # Open orders: full snapshot replace. IB returns the entire open

@@ -129,7 +129,6 @@ def _write_db(
         return
     row_error: Optional[dict[str, Any]] = None
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_vixts_rows(payload["series"], recorded_at=scan_time)
     except Exception as exc:  # noqa: BLE001

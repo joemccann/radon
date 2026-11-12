@@ -424,13 +424,9 @@ class TestVixPcStorage:
 
 class _FakeWriter:
     def __init__(self):
-        self.replica_guards = 0
         self.vix_pc_rows: list[tuple[list[dict[str, Any]], Optional[str]]] = []
         self.snapshots: list[tuple[str, str, dict[str, Any]]] = []
         self.health: list[tuple[str, str, Optional[dict[str, Any]]]] = []
-
-    def ensure_no_replica_for_writers(self):
-        self.replica_guards += 1
 
     def upsert_vix_pc_rows(self, rows, recorded_at=None):
         self.vix_pc_rows.append((list(rows), recorded_at))
@@ -483,7 +479,6 @@ class TestRunHappyPath:
         assert payload["current"]["percentile"] == pytest.approx(PIN_LAST_PERCENTILE, abs=1e-9)
         assert payload["current"]["regime"] == "CAUTIOUS"
         assert payload["scan_time"].endswith("Z")
-        assert fake.replica_guards >= 1
         assert [snap[0] for snap in fake.snapshots] == ["vix-pc"]
         assert fake.health == [("vix-pc", "ok", None)]
         assert len(fake.vix_pc_rows) == 1

@@ -116,8 +116,7 @@ Seams monkeypatched by tests: `_fetch_source(if_modified_since) -> (payload_or_N
    No cache still exits non-zero. A standing empty origin goes stale
    inside the 26-hour window because the ok heartbeat is not refreshed.
 
-Write order in `persist_result`: `writer.ensure_no_replica_for_writers()` →
-`writer.upsert_calm_streak_rows(rows, recorded_at=scan_time)` (skipped when `rows`
+Write order in `persist_result`: `writer.upsert_calm_streak_rows(rows, recorded_at=scan_time)` (skipped when `rows`
 is empty) → `writer.upsert_scan_snapshot("calm-streak", scan_time, payload)` →
 `writer.record_service_health("calm-streak", "ok", finished_at=scan_time)` → atomic
 JSON fallback. CLI: `--json` payload to stdout, progress to stderr; `--no-db`.
@@ -208,8 +207,7 @@ while bounding the snapshot size). `current` is the latest daily row.
 ## Timer: `cloud/services/radon-calm-streak.{service,timer}`
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
-  `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_calm_streak.py`,
+  `EnvironmentFile=/etc/radon/env`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_calm_streak.py`,
   `TimeoutStartSec=300`, journald.
 - Timer: `OnCalendar=*-*-* 02:40:00 UTC` (evening regeneration, 5 min after
   radon-vixcor's 02:35 Cboe pull) and `OnCalendar=*-*-* 14:30:00 UTC` (after the

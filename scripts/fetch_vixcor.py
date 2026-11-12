@@ -218,7 +218,6 @@ def _write_db(
         return
     row_error: Optional[dict[str, Any]] = None
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             if vix_tail:
                 writer.upsert_price_history_rows(VIX_SYMBOL, vix_tail)

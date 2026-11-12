@@ -126,8 +126,7 @@ had nothing new, reuse the previous payload with a fresh `scan_time` and
 (never cache empty). An index whose closes are unavailable is emitted with
 `current: null` and an empty `top`, and the run still succeeds.
 
-Persistence per cycle: `ensure_no_replica_for_writers()` →
-`upsert_msr_rows(rows, recorded_at)` (only when changed) →
+Persistence per cycle: `upsert_msr_rows(rows, recorded_at)` (only when changed) →
 `upsert_scan_snapshot("msr", scan_time, payload)` →
 `record_service_health("msr", "ok", finished_at=scan_time)` → atomic JSON
 `data/msr.json` (Python readers only). CLI `--json` → payload on stdout;
@@ -257,7 +256,6 @@ Panel:
   [daily(3, 0)];` + `web/tests/refresh-schedule.test.ts` case.
 - `cloud/services/radon-msr.service`: oneshot, `User=radon`,
   `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/etc/radon/env`,
-  `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_msr.py`,
   `TimeoutStartSec=900` (first run seeds ~17y of NDX/RUT closes).
 - `cloud/services/radon-msr.timer`: `OnCalendar=*-*-* 03:00:00 UTC`

@@ -313,7 +313,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(ros, "RSI_OVERSOLD_JSON", tmp_path / "rsi_oversold.json")
-    monkeypatch.setattr(ros.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(
         ros.writer,
         "upsert_rsi_oversold_rows",
@@ -339,7 +338,6 @@ class TestPersistResult:
         payload = _build_payload()
         persist_result(payload, payload["series"])
         assert persist_calls == [
-            ("guard",),
             ("rows", len(payload["series"])),
             ("snapshot", "rsi-oversold"),
             ("health", "rsi-oversold", "ok"),
@@ -372,7 +370,6 @@ class TestHeartbeatTimeout:
             "fetch_spx_overlay_closes",
             lambda yahoo, **kwargs: (dict(yahoo), "yahoo"),
         )
-        monkeypatch.setattr(ros.writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(
             ros.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: None
         )

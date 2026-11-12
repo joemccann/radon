@@ -23,9 +23,6 @@ StateDirectory=radon
 StateDirectoryMode=0750
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-# Direct-to-cloud only; never resurrect the retired embedded replica
-# (every other radon-* unit sets this). See feedback_libsql_replica_one_writer.
-Environment=RADON_DB_NO_REPLICA=1
 # IBC scheduled/cold restarts are disabled. Retain only the observed 00:00 UTC
 # server-session rollover grace, matching the in-code default.
 Environment=RADON_GW_RESTART_QUIET_WINDOWS_UTC=23:40-00:15

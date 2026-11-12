@@ -10,7 +10,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # Shares IB client IDs 56/69 with radon-credit-spread and radon-iei-hyg.
 # -w outlasts the peer's 300s work budget.
 ExecStart=/usr/bin/flock -w 360 -E 75 /run/lock/radon-ib-history-5669.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_credit_vix.py

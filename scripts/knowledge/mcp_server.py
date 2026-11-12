@@ -12,12 +12,11 @@ embedder are acquired lazily on first tool call — importing this module has
 no side effects. This module contains SELECTs only; a pin test greps the
 source for SQL write keywords.
 
-Registered project-scoped in .mcp.json (env RADON_DB_NO_REPLICA=1):
+Registered project-scoped in .mcp.json:
     .venv/bin/python scripts/knowledge/mcp_server.py
 """
 from __future__ import annotations
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -218,7 +217,6 @@ def _get_db():
 
 
 def _connect_production_db():
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     from dotenv import load_dotenv
 
     project_root = Path(__file__).resolve().parents[2]

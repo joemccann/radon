@@ -234,7 +234,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(fih, "IEI_HYG_JSON", tmp_path / "iei_hyg.json")
-    monkeypatch.setattr(fih.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(fih.writer, "upsert_iei_hyg_rows", lambda rows, recorded_at: calls.append(("rows", len(rows))))
     monkeypatch.setattr(fih.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: calls.append(("snapshot", service)))
     monkeypatch.setattr(
@@ -266,7 +265,7 @@ class TestPersistResult:
         import fetch_iei_hyg as fih
 
         persist_result(build_output([ROW]), [ROW])
-        assert persist_calls == [("guard",), ("rows", 1), ("snapshot", "iei-hyg"), ("health", "iei-hyg", "ok")]
+        assert persist_calls == [("rows", 1), ("snapshot", "iei-hyg"), ("health", "iei-hyg", "ok")]
         assert json.loads(fih.IEI_HYG_JSON.read_text())["count"] == 1
 
     def test_unchanged_day_heartbeats_without_row_upserts(self, persist_calls):

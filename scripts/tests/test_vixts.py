@@ -401,9 +401,6 @@ class _FakeWriter:
         self.health = []
         self.rows = []
 
-    def ensure_no_replica_for_writers(self):
-        return None
-
     def upsert_vixts_rows(self, rows, recorded_at=None):
         if self.rows_raise:
             raise RuntimeError("hrana 502")

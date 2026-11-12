@@ -527,7 +527,6 @@ def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         _chunked_upsert(SHORT_INTEREST_UPSERT_SQL, _short_interest_args(payload, scan_time))
         _write_squeeze_rows(payload, scan_time)
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

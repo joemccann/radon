@@ -368,9 +368,8 @@ def _write_disk(path: Path, payload: dict[str, Any]) -> None:
 def _persist(strategy_key: str, result: dict[str, Any]) -> None:
     _write_disk(_DATA_DIR / "quant" / f"{strategy_key}_execution.json", result)
     if result.get("orders"):
-        from db.writer import ensure_no_replica_for_writers, insert_quant_orders
+        from db.writer import insert_quant_orders
 
-        ensure_no_replica_for_writers()
         insert_quant_orders(strategy_key, result["orders"], placed_at=result["run_at"])
 
 

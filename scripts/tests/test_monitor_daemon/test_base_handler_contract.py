@@ -185,7 +185,7 @@ class TestStatusErrorDoesNotLatch:
 
 
 class TestDomainSpecificStatusLatches:
-    """Handlers like ``replica_watchdog`` use richer status vocabularies
+    """Handlers may use richer status vocabularies
     (``healthy``, ``healed``, ``throttled``, ``heal_failed``) for their
     own bookkeeping. The contract only intercepts ``error`` — every
     other status is treated as success and latches ``last_run`` so the

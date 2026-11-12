@@ -13,8 +13,7 @@ heartbeat from ``run()`` itself:
   - handlers that record richer rows themselves call
     ``self.record_cycle_health(...)`` which marks the cycle recorded so the
     base never clobbers their state (writer-state-not-event-content);
-  - ``service_name = None`` (e.g. replica_watchdog's bespoke event-driven
-    writer) opts out entirely.
+  - ``service_name = None`` opts out entirely.
 
 The directory conftest mocks db.writer so nothing touches a real DB.
 """
@@ -258,9 +257,3 @@ class TestExistingHandlersDeclareServiceNames:
         cls = getattr(importlib.import_module(module_name), class_name)
         assert cls.service_name == expected
 
-    def test_replica_watchdog_opts_out(self):
-        """Event-driven writer with bespoke ok/syncing/error semantics —
-        a structural ok after execute would clobber its own rows."""
-        from monitor_daemon.handlers.replica_watchdog import ReplicaWatchdogHandler
-
-        assert ReplicaWatchdogHandler.service_name is None

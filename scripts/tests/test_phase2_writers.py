@@ -152,20 +152,3 @@ class TestAnalystRatings:
         rows = db_with_schema.execute("SELECT payload FROM analyst_ratings").fetchall()
         assert len(rows) == 1
         assert json.loads(rows[0][0])["buy_pct"] == 75
-
-
-# ── ensure_no_replica_for_writers helper ─────────────────────────────
-
-class TestEnsureNoReplicaForWriters:
-    def test_sets_env_var_when_unset(self, writer, monkeypatch):
-        import os
-        monkeypatch.delenv("RADON_DB_NO_REPLICA", raising=False)
-        writer.ensure_no_replica_for_writers()
-        assert os.environ.get("RADON_DB_NO_REPLICA") == "1"
-
-    def test_does_not_override_existing_value(self, writer, monkeypatch):
-        import os
-        monkeypatch.setenv("RADON_DB_NO_REPLICA", "0")
-        writer.ensure_no_replica_for_writers()
-        # setdefault semantics — pre-existing value preserved
-        assert os.environ.get("RADON_DB_NO_REPLICA") == "0"
