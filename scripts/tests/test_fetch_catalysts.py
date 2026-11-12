@@ -13,6 +13,7 @@ under pytest by design).
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -396,3 +397,56 @@ def test_apply_fred_actuals_swallows_overlay_failure():
     out = fc.apply_fred_actuals([released, other], boom, FIXED_NOW)
     assert out[0]["actual"] is None
     assert out[1] == other_snapshot
+
+
+def test_apply_fred_actuals_log_redacts_api_key(capsys):
+    key = "abc+def/secret"
+    released = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-18T12:30:00Z",
+    )
+
+    def fetch_obs(_series_id: str):
+        raise RuntimeError(
+            "400 Client Error for url: "
+            "https://api.stlouisfed.org/fred/series/observations?series_id=ICSA"
+            f"&api_key={key}&file_type=json"
+        )
+
+    fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
+    err = capsys.readouterr().err
+    assert key not in err
+    assert "api_key=[redacted]" in err
+    assert "FRED" in err
+
+
+def test_fetch_fred_latest_observation_http_error_omits_api_key(monkeypatch):
+    key = "abc+def/secret"
+    monkeypatch.setenv("FRED_API_KEY", key)
+
+    class Response:
+        status_code = 400
+        url = (
+            "https://api.stlouisfed.org/fred/series/observations"
+            "?series_id=ICSA&api_key=abc%2Bdef%2Fsecret&file_type=json"
+        )
+
+        def raise_for_status(self):
+            raise RuntimeError(f"400 Client Error: Bad Request for url: {self.url}")
+
+        def json(self):
+            raise AssertionError("error body is not parsed")
+
+    class Requests:
+        @staticmethod
+        def get(url, params, timeout):
+            assert params["api_key"] == key
+            return Response()
+
+    monkeypatch.setitem(sys.modules, "requests", Requests)
+    with pytest.raises(RuntimeError) as caught:
+        fc._fetch_fred_latest_observation("ICSA")
+    message = str(caught.value)
+    assert key not in message
+    assert "abc%2Bdef" not in message
+    assert "400" in message
