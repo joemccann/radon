@@ -1560,6 +1560,71 @@ def test_blackholed_noaa_address_walk_does_not_consume_the_daily_deadline(tmp_pa
     assert called[1][1] is True
 
 
+def test_backfill_deadline_during_publisher_get_exits_zero(tmp_path, monkeypatch, capsys):
+    """2026-11-12 05:38Z radon-ai-cycle-backfill: NOAA started with a few
+    seconds of the 500s run budget left. The shrunk GET timed out as that
+    deadline passed. The handler labeled the timeout Publisher transport
+    failed, so the oneshot exited 1. The next source then recorded
+    Per-run time budget exhausted. A deadline timeout is the budget stop.
+    """
+    import requests
+
+    from scripts.ai_cycle import collectors as col
+    from scripts.ai_cycle.collect import main
+
+    now = [1_000.0]
+    monkeypatch.setattr(col.time, "monotonic", lambda: now[0])
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, url, **kwargs):
+            self.calls.append(url)
+            now[0] += float(kwargs.get("timeout") or 0)
+            raise requests.Timeout("The read operation timed out")
+
+    holder = {}
+
+    def factory():
+        holder["session"] = Session()
+        return holder["session"]
+
+    monkeypatch.setattr(col.requests, "Session", factory)
+    real_init = col.Transport.__init__
+
+    def init(self, archive, **kwargs):
+        real_init(self, archive, **kwargs)
+        self.deadline = col.time.monotonic() + 4
+
+    monkeypatch.setattr(col.Transport, "__init__", init)
+    code = main(
+        [
+            "--record",
+            "--backfill",
+            "--database",
+            str(tmp_path / "cycle.sqlite"),
+            "--sources",
+            "noaa,openrouter",
+            "--start",
+            "2026-08-18",
+            "--end",
+            "2026-11-11",
+            "--archive",
+            str(tmp_path / "raw"),
+            "--checkpoint",
+            str(tmp_path / "checkpoint.json"),
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert [item["source_id"] for item in report["sources"]] == ["noaa"]
+    assert report["sources"][0]["status"] == "unavailable"
+    assert report["sources"][0]["reason"] == "Per-run time budget exhausted"
+    assert holder["session"].calls
+    assert "ncei.noaa.gov" in holder["session"].calls[0]
+
+
 def test_publisher_retry_obeys_remaining_request_budget(tmp_path):
     import requests
 
