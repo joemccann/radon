@@ -104,8 +104,7 @@ closes strictly below the latest close.
   log `[cor] all sources unchanged (304); refreshing snapshot only`. Any change
   → refetch missing, rebuild everything.
 - Empty guard: zero-row series raises (`persist` never caches empty).
-- Writes per cycle (order): `ensure_no_replica_for_writers()` →
-  `upsert_cor_rows(series, recorded_at=scan_time)` only when rows changed →
+- Writes per cycle (order): `upsert_cor_rows(series, recorded_at=scan_time)` only when rows changed →
   `upsert_scan_snapshot("cor", scan_time, payload)` →
   `record_service_health("cor", "ok", finished_at=scan_time)` → atomic
   `data/cor.json`. Db mirror is best-effort try/except like STRADDLE.
@@ -213,7 +212,6 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (40, dateti
 - `radon-cor.service`: `Type=oneshot`, `User=radon`,
   `WorkingDirectory=/home/radon/radon`,
   `EnvironmentFile=/etc/radon/env`,
-  `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_cor.py`
   (venv python direct, never run_*.sh), `TimeoutStartSec=300`.
 - `radon-cor.timer`: `OnCalendar=*-*-* 02:20:00 UTC` — after Cboe's EOD

@@ -89,7 +89,6 @@ def test_newer_snapshot_replaces_older_rows(db):
 def test_build_orders_data_carries_snapshot_time_to_the_writer(monkeypatch):
     calls = []
     fake = types.ModuleType("db.writer")
-    fake.ensure_no_replica_for_writers = lambda: None
     fake.replace_open_orders_for_session = lambda rows, **kw: calls.append(kw)
     fake.upsert_executed_orders_for_session = lambda rows: 0
     fake.upsert_position_execution_facts = lambda rows: SimpleNamespace(written=0, failures=[])
@@ -106,7 +105,6 @@ def test_build_orders_data_carries_snapshot_time_to_the_writer(monkeypatch):
 
 def test_mirror_write_does_not_heartbeat_orders_sync(monkeypatch):
     fake = types.ModuleType("db.writer")
-    fake.ensure_no_replica_for_writers = lambda: None
     fake.replace_open_orders_for_session = lambda rows, **kw: True
     fake.upsert_executed_orders_for_session = lambda rows: 0
     fake.upsert_position_execution_facts = lambda rows: SimpleNamespace(written=0, failures=[])

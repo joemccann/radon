@@ -154,7 +154,6 @@ class TestServiceCatalogContract:
 
         non_ib_expected = {
             "newsfeed-scraper",
-            "replica-watchdog",
             "cash-flow-sync",
             "flex-token-check",
             "cta-sync",
@@ -284,7 +283,7 @@ class TestBuckets:
 
         cont = set(svc_mod.BUCKETS["continuous"])
         assert "newsfeed-scraper" in cont
-        assert "replica-watchdog" in cont
+        assert "replica-watchdog" not in cont
         assert "fill-monitor" in cont
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont

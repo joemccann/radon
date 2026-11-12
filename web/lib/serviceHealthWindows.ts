@@ -463,11 +463,6 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // (Mon-Fri 14:00 / 17:00 / 20:00 UTC). UW-only data flow, no IB dependency.
   "garch-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
 
-  // Retain the watchdog's 24h window for installations that still have an
-  // embedded replica. Server response boundaries suppress this row entirely
-  // when data/replica.db is absent; the static entry remains so a present
-  // replica is still monitored and the Python/TypeScript catalogs stay aligned.
-  "replica-watchdog": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
   // ``watchdog-alerts`` is event-driven: a quiet interval is healthy, so a
   // tight window would turn the last dispatched alert into false stale noise.
   "watchdog-alerts": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },

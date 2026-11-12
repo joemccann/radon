@@ -298,7 +298,6 @@ upserts.
 ### E.2 Write order (every cycle)
 
 ```python
-writer.ensure_no_replica_for_writers()
 if rows_changed:
     writer.upsert_vix_pc_rows(payload["series"], recorded_at=scan_time)
 writer.upsert_scan_snapshot("vix-pc", scan_time, payload)
@@ -385,8 +384,7 @@ rail `asOf`.
   plus the daily-bucket list, comment naming 02:00 UTC
 - `cloud/services/radon-vix-pc.service`  -  copy `radon-ivrank.service`
   (`Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
-  `Environment=RADON_UW_CALLER=vix-pc`, venv python directly,
+  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_UW_CALLER=vix-pc`, venv python directly,
   `TimeoutStartSec=300`)
 - `cloud/services/radon-vix-pc.timer`  -  `OnCalendar=*-*-* 02:00:00 UTC`,
   `Persistent=true`, `RandomizedDelaySec=120`, comment the 02:00 UTC

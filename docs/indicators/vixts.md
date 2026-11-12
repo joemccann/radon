@@ -370,15 +370,14 @@ empty result** (`feedback_dont_cache_empty_results`).
 
 ### E.4 Writes, in order, every cycle
 
-1. `writer.ensure_no_replica_for_writers()`
-2. `writer.upsert_vixts_rows(payload["series"], recorded_at=scan_time)` — **only
+1. `writer.upsert_vixts_rows(payload["series"], recorded_at=scan_time)` — **only
    when `rows_changed`**. Must be the **chunked** form modelled on
    `upsert_hhlev_rows` (~4,200 rows; per-row statements caused the rv-ratio
    2026-07-21 Hrana 502).
-3. `writer.upsert_scan_snapshot("vixts", scan_time, payload)` — every cycle
-4. `writer.record_service_health("vixts", "ok"|"error", finished_at=scan_time,
+2. `writer.upsert_scan_snapshot("vixts", scan_time, payload)` — every cycle
+3. `writer.record_service_health("vixts", "ok"|"error", finished_at=scan_time,
    error=...)` — every cycle, or error rows latch
-5. Atomic write of `data/vixts.json` — fallback only; **Turso is the source of
+4. Atomic write of `data/vixts.json` — fallback only; **Turso is the source of
    truth**
 
 `_write_db` reproduces `fetch_vixcor.py`'s R-192 isolation exactly: a failed row
@@ -525,7 +524,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_vixts.py
 StandardOutput=journal
 StandardError=journal

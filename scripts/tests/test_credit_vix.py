@@ -256,7 +256,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(fcv, "CREDIT_VIX_JSON", tmp_path / "credit_vix.json")
-    monkeypatch.setattr(fcv.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(fcv.writer, "upsert_credit_vix_rows", lambda rows, recorded_at: calls.append(("rows", len(rows))))
     monkeypatch.setattr(fcv.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: calls.append(("snapshot", service)))
     monkeypatch.setattr(
@@ -288,7 +287,6 @@ class TestPersistResult:
 
         persist_result(build_output([ROW]), [ROW])
         assert persist_calls == [
-            ("guard",),
             ("rows", 1),
             ("snapshot", SERVICE),
             ("health", SERVICE, "ok"),

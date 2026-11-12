@@ -14,7 +14,6 @@ def cycle(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(mod, 'CREDIT_VIX_JSON', tmp_path / 'credit.json')
     monkeypatch.setattr(mod, 'load_cached_series', lambda **kw: [copy.deepcopy(ROW)])
-    monkeypatch.setattr(mod.writer, 'ensure_no_replica_for_writers', lambda: None)
     monkeypatch.setattr(mod.writer, 'upsert_credit_vix_rows',
                         lambda *a, **k: calls.append(('rows', a)))
     monkeypatch.setattr(mod.writer, 'upsert_scan_snapshot',

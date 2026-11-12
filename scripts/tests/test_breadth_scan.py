@@ -466,7 +466,6 @@ def test_scan_mirror_registers_breadth_scan_with_date_keyed_upsert(monkeypatch) 
 
     upserts: list[tuple] = []
     heartbeats: list[tuple] = []
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     monkeypatch.setattr(
         writer,
         "upsert_breadth_snapshot",

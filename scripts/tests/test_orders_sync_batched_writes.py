@@ -291,7 +291,6 @@ def test_orders_sync_cycle_statement_count_is_bounded(db, monkeypatch, capsys):
 
     monkeypatch.setattr(writer, "record_service_health", lambda *a, **kw: None)
     monkeypatch.setattr(writer, "replace_open_orders_for_session", lambda rows: None)
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     if "ib_orders" in sys.modules:
         del sys.modules["ib_orders"]
     import ib_orders

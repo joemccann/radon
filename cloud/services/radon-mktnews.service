@@ -12,7 +12,6 @@ User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 Environment=WS_BIND_HOST=127.0.0.1
 ExecStart=/usr/bin/node /home/radon/radon/scripts/mktnews/index.js --serve
 Restart=on-failure

@@ -149,8 +149,7 @@ recorded_at)`, idempotent `ON CONFLICT(date) DO UPDATE`, chunked.
 ## Timer — `cloud/services/radon-hhlev.{service,timer}`
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
-  `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_hhlev.py`,
+  `EnvironmentFile=/etc/radon/env`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_hhlev.py`,
   `TimeoutStartSec=300`.
 - Timer: `OnCalendar=*-*-* 13:20:00 UTC` (comment: daily cheap conditional check of
   a quarterly source, offset from radon-margin-debt's 13:10 pass), `Persistent=true`,

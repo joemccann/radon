@@ -473,14 +473,13 @@ order, each a pure function over the list.
 
 ### E.4 Writes, in order, every cycle
 
-1. `writer.ensure_no_replica_for_writers()`
-2. `writer.upsert_panic_index_rows(payload["series"], recorded_at=scan_time)` —
+1. `writer.upsert_panic_index_rows(payload["series"], recorded_at=scan_time)` —
    **only when `rows_changed`**. Chunked multi-row `INSERT ... ON CONFLICT(date)
    DO UPDATE`, modelled on `upsert_vixts_rows` (~4,300 rows; per-row statements
    caused the 2026-07-21 Hrana 502).
-3. `writer.upsert_scan_snapshot("panic-index", scan_time, payload)` — every cycle
-4. `writer.record_service_health("panic-index", "ok"|"error", finished_at=scan_time, error=...)` — every cycle
-5. Atomic write of `data/panic_index.json` — fallback only; **Turso is the truth**
+2. `writer.upsert_scan_snapshot("panic-index", scan_time, payload)` — every cycle
+3. `writer.record_service_health("panic-index", "ok"|"error", finished_at=scan_time, error=...)` — every cycle
+4. Atomic write of `data/panic_index.json` — fallback only; **Turso is the truth**
 
 `_write_db` reproduces `fetch_vixts._write_db` exactly, including the split
 try blocks (R-192, R-331): a failed row upsert or snapshot must not take the

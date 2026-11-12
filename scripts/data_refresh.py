@@ -77,9 +77,6 @@ def _heartbeat_soft_fail(script: str, reason: str) -> None:
     # suppression. R-395.
     try:
         from db import writer  # noqa: PLC0415 — optional on stripped hosts
-        ensure = getattr(writer, "ensure_no_replica_for_writers", None)
-        if ensure is not None:
-            ensure()
         writer.record_service_health(
             service,
             "error",

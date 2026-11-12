@@ -11,7 +11,6 @@ import {
 import {
   filterApplicableServiceHealthBaseline,
   filterApplicableServiceHealthRows,
-  replicaDatabaseExists,
 } from "@/lib/serviceHealthApplicability";
 
 // Serves the append-only service_health_events history (migration 0011) for
@@ -83,14 +82,12 @@ export async function GET(): Promise<Response> {
       READ_CACHE_TTL_MS,
       readReliabilityPayload,
     );
-    // Apply live subsystem applicability after the DB cache. Latest-state and
-    // transition rows persist after retirement, while disk state can change
-    // during the cache window.
-    const replicaPresent = replicaDatabaseExists();
+    // Latest-state and transition rows persist after a writer retires; drop
+    // them from the response, never from storage.
     const payload: ReliabilityHistoryPayload = {
       ...cachedPayload,
-      events: filterApplicableServiceHealthRows(cachedPayload.events, replicaPresent),
-      baseline: filterApplicableServiceHealthBaseline(cachedPayload.baseline, replicaPresent),
+      events: filterApplicableServiceHealthRows(cachedPayload.events),
+      baseline: filterApplicableServiceHealthBaseline(cachedPayload.baseline),
     };
     return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);
   } catch {

@@ -122,8 +122,7 @@ Small pure functions (composed-method), stdlib `json` parsing, `requests` fetch:
   }
   ```
 - `persist_result(payload, rows_changed_rows, *, health_error=None)` — refuses empty
-  `series`; else `writer.ensure_no_replica_for_writers()`;
-  `writer.upsert_credit_spread_rows(new_rows, recorded_at=scan_time)` only when
+  `series`; else `writer.upsert_credit_spread_rows(new_rows, recorded_at=scan_time)` only when
   changed; `writer.upsert_scan_snapshot("credit-spread", ...)` EVERY cycle;
   `writer.record_service_health("credit-spread", "ok" | "error", finished_at=scan_time,
   error=...)` EVERY cycle; atomic JSON to `data/credit_spread.json`.
@@ -242,7 +241,6 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
 - `scripts/watchdog/services.py`: same 26h window + append to the daily-bucket list.
 - `cloud/services/radon-credit-spread.service`: Type=oneshot, User=radon,
   WorkingDirectory=/home/radon/radon, EnvironmentFile=/etc/radon/env,
-  Environment=RADON_DB_NO_REPLICA=1,
   ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_credit_spread.py,
   TimeoutStartSec=300, journal out/err, StartLimitIntervalSec=300, StartLimitBurst=5.
 - `cloud/services/radon-credit-spread.timer`: `OnCalendar=*-*-* 21:45:00 UTC` (comment:

@@ -269,7 +269,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(fh, "HYAD_JSON", tmp_path / "hyad.json")
-    monkeypatch.setattr(fh.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(
         fh.writer,
         "upsert_hyad_rows",
@@ -294,7 +293,6 @@ class TestPersistResult:
 
         persist_result(_build_payload(), _synthetic_rows(2))
         assert persist_calls == [
-            ("guard",),
             ("rows", 2),
             ("snapshot", "hy-ad"),
             ("health", "hy-ad", "ok"),
@@ -308,7 +306,6 @@ class TestPersistResult:
         persist_result(_build_payload(), [])
         kinds = [call[0] for call in persist_calls]
         assert "rows" not in kinds
-        assert persist_calls[0] == ("guard",)
         assert ("snapshot", "hy-ad") in persist_calls
         assert ("health", "hy-ad", "ok") in persist_calls
 

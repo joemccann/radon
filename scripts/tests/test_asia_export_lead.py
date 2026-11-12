@@ -109,16 +109,15 @@ def test_zero_denominator_does_not_create_infinite_growth():
 def test_persistence_skips_unchanged_rows_but_always_refreshes_snapshot_and_health(monkeypatch, tmp_path):
     from db import writer
     calls = []
-    monkeypatch.setattr(writer, 'ensure_no_replica_for_writers', lambda: calls.append('direct'))
     monkeypatch.setattr(writer, 'upsert_asia_export_lead_rows', lambda rows, recorded_at=None: calls.append('rows'))
     monkeypatch.setattr(writer, 'upsert_scan_snapshot', lambda service, stamp, body: calls.append(('snapshot', service)))
     monkeypatch.setattr(writer, 'record_service_health', lambda service, state, **kw: calls.append(('health', service, state)))
     value = payload()
     indicator.persist_result(value, path=tmp_path/'cache.json')
-    assert calls == ['direct', 'rows', ('snapshot', 'asia-export-lead'), ('health', 'asia-export-lead', 'ok')]
+    assert calls == ['rows', ('snapshot', 'asia-export-lead'), ('health', 'asia-export-lead', 'ok')]
     calls.clear()
     indicator.persist_result(value, previous=copy.deepcopy(value), path=tmp_path/'cache.json')
-    assert calls == ['direct', ('snapshot', 'asia-export-lead'), ('health', 'asia-export-lead', 'ok')]
+    assert calls == [('snapshot', 'asia-export-lead'), ('health', 'asia-export-lead', 'ok')]
     assert json.loads((tmp_path/'cache.json').read_text())['current'] == value['current']
 
 
@@ -243,7 +242,6 @@ def test_db_failure_keeps_disk_cache_and_never_records_ok(monkeypatch, tmp_path)
     from db import writer
     path = tmp_path / 'cache.json'
     path.write_text('last-good')
-    monkeypatch.setattr(writer, 'ensure_no_replica_for_writers', lambda: None)
     def fail(*a, **kw): raise RuntimeError('database unavailable')
     monkeypatch.setattr(writer, 'upsert_asia_export_lead_rows', fail)
     monkeypatch.setattr(writer, 'record_service_health', lambda *a, **kw: pytest.fail('false ok heartbeat'))

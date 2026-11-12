@@ -33,7 +33,7 @@ def test_structural_uw_failure_is_not_healthy_after_yahoo(monkeypatch, module_na
     monkeypatch.setattr(mod, '_robinhood_degradation', lambda sources: None)
     monkeypatch.setattr(mod, '_read_cached_series' if module_name == 'fetch_credit_spread' else 'load_cached_series', lambda: [])
     heartbeats = []
-    for name in ('ensure_no_replica_for_writers', 'upsert_credit_spread_rows', 'upsert_iei_hyg_rows', 'upsert_scan_snapshot'):
+    for name in ('upsert_credit_spread_rows', 'upsert_iei_hyg_rows', 'upsert_scan_snapshot'):
         monkeypatch.setattr(mod.writer, name, lambda *args, **kwargs: None)
     monkeypatch.setattr(mod.writer, 'record_service_health', lambda *args, **kwargs: heartbeats.append((args, kwargs)))
     monkeypatch.setattr(mod, '_write_json_cache', lambda payload: None)

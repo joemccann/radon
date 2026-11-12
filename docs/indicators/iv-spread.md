@@ -264,7 +264,6 @@ but `0.449/0.393 = 1.14`, so only one neighbour qualifies).
 ### D.3 Write order (every cycle)
 
 ```python
-writer.ensure_no_replica_for_writers()
 if rows_changed and rows:
     writer.upsert_iv_spread_rows(rows, recorded_at=scan_time)   # own try/except, folded into the heartbeat
 _persist_snapshot(scan_time, payload)   # EVERY cycle, hrana, PERSIST_BUDGET_S
@@ -297,7 +296,7 @@ heartbeats.
 `cloud/services/radon-iv-spread.service` — copy `radon-ivrank.service` minus
 the `RADON_UW_CALLER` line (oneshot, `User=radon`,
 `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/etc/radon/env`,
-`Environment=RADON_DB_NO_REPLICA=1`, venv python directly, journald,
+venv python directly, journald,
 `TimeoutStartSec=300`, `StartLimitIntervalSec=300` / `StartLimitBurst=5`).
 `cloud/services/radon-iv-spread.timer` — `Persistent=true`,
 `RandomizedDelaySec=120`, comment naming the 22:15 UTC reasoning.

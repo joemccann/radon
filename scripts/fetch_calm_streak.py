@@ -215,7 +215,6 @@ def _record_ok_heartbeat(scan_time: str) -> None:
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]], *, use_db: bool = True) -> None:
     scan_time = payload["scan_time"]
     if use_db:
-        writer.ensure_no_replica_for_writers()
         if rows:
             writer.upsert_calm_streak_rows(rows, recorded_at=scan_time)
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

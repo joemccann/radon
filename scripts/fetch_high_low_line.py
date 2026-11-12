@@ -11,7 +11,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -317,20 +316,12 @@ def persist_result(payload, previous=None):
             raise ValueError(f"Source lost prior session {min(lost)}")
         _validate_payload(previous)
     changed = previous is None or any(previous[key] != payload[key] for key in ("series", "weekly_series"))
-    prior_replica = os.environ.get("RADON_DB_NO_REPLICA")
-    try:
-        writer.ensure_no_replica_for_writers()
-        if changed:
-            for interval, field in (("daily", "series"), ("weekly", "weekly_series")):
-                writer.upsert_high_low_line_rows(payload[field], interval=interval, recorded_at=payload["scan_time"])
-        writer.upsert_scan_snapshot(SERVICE, payload["scan_time"], payload, bounded=True)
-        writer.record_service_health(SERVICE, "ok", finished_at=payload["scan_time"])
-        atomic_save(str(CACHE_PATH), payload)
-    finally:
-        if prior_replica is None:
-            os.environ.pop("RADON_DB_NO_REPLICA", None)
-        else:
-            os.environ["RADON_DB_NO_REPLICA"] = prior_replica
+    if changed:
+        for interval, field in (("daily", "series"), ("weekly", "weekly_series")):
+            writer.upsert_high_low_line_rows(payload[field], interval=interval, recorded_at=payload["scan_time"])
+    writer.upsert_scan_snapshot(SERVICE, payload["scan_time"], payload, bounded=True)
+    writer.record_service_health(SERVICE, "ok", finished_at=payload["scan_time"])
+    atomic_save(str(CACHE_PATH), payload)
 
 
 def _read_previous():

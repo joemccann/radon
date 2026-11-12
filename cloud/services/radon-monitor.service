@@ -27,13 +27,6 @@ UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=PYTHONPATH=/home/radon/radon/scripts
-# Bypass the libsql embedded replica and write direct to Turso cloud.
-# Reason: replica.db can only have ONE long-running writer per host before
-# WalConflicts cascade (feedback_libsql_replica_one_writer.md). nextjs and
-# api are the high-throughput writers and keep the replica; the monitor
-# daemon's lower write rate accepts the ~50ms cloud round-trip in exchange
-# for eliminating contention.
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.monitor_daemon.run --daemon
 Restart=always
 RestartSec=10

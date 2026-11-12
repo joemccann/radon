@@ -109,9 +109,6 @@ class _Recorder:
     def record_service_health(self, service, state, **kwargs):
         self.rows.append((service, state, kwargs))
 
-    def ensure_no_replica_for_writers(self):
-        pass
-
     def upsert_scan_snapshot(self, *args, **kwargs):
         self.snapshots.append((args, kwargs))
 

@@ -23,9 +23,6 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=WS_BIND_HOST=127.0.0.1
 Environment=RADON_WS_REQUIRE_CLERK=1
-# Relay is push-only - IB ticks fan out via WebSocket, no Turso reads.
-# Avoid opening a second embedded replica on this host (one-writer rule).
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/node scripts/ib_realtime_server.js
 Restart=always
 RestartSec=5

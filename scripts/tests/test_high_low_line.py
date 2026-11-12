@@ -116,7 +116,7 @@ def test_prior_session_loss_is_rejected_before_any_database_write(monkeypatch, t
     previous["series"].append({**previous["series"][-1], "date": "2003-07-01"})
     calls = []
     fake = SimpleNamespace(**{name: lambda *args, _name=name, **kwargs: calls.append(_name) for name in (
-        "ensure_no_replica_for_writers", "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")})
+        "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")})
     monkeypatch.setattr(scan, "writer", fake)
     monkeypatch.setattr(scan, "CACHE_PATH", tmp_path / "high_low_line.json")
     with pytest.raises(ValueError):
@@ -128,7 +128,7 @@ def test_unchanged_content_still_updates_snapshot_and_heartbeat(monkeypatch, tmp
     data = sample()
     calls = []
     fake = SimpleNamespace(**{name: lambda *args, _name=name, **kwargs: calls.append(_name) for name in (
-        "ensure_no_replica_for_writers", "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")})
+        "upsert_high_low_line_rows", "upsert_scan_snapshot", "record_service_health")})
     monkeypatch.setattr(scan, "writer", fake)
     monkeypatch.setattr(scan, "CACHE_PATH", tmp_path / "high_low_line.json")
     scan.persist_result(data, previous=deepcopy(data))

@@ -189,11 +189,6 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(fyc, "YIELD_CURVE_JSON", tmp_path / "yield_curve.json")
     monkeypatch.setattr(
         fyc.writer,
-        "ensure_no_replica_for_writers",
-        lambda: calls.append(("guard",)),
-    )
-    monkeypatch.setattr(
-        fyc.writer,
         "upsert_yield_curve_rows",
         lambda rows, recorded_at: calls.append(("rows", len(rows))),
     )
@@ -226,7 +221,6 @@ class TestPersistResult:
         rows = [_pt("2026-07-31", 4.28, 4.75)]
         fyc.persist_result(_payload(rows), rows)
         assert persist_calls == [
-            ("guard",),
             ("rows", 1),
             ("snapshot", "yield-curve"),
             ("health", "yield-curve", "ok"),

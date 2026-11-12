@@ -14,7 +14,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # Default media root matches Caddy media.radon.run file_server root.
 Environment=RADON_MEDIA_DIR=/var/lib/radon/media
 # Script ships with the monorepo cloud/ tree and lands on the next deploy.

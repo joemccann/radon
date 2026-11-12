@@ -595,13 +595,11 @@ def persist_result(
         # banner notices a silent writer (feedback_service_health_heartbeat)
         # — but the SNAPSHOT is not rewritten, so `scan_time` keeps naming
         # the last cycle that actually produced data.
-        writer.ensure_no_replica_for_writers()
         _record_health(payload["scan_time"], health_error)
         _log("no new samples or daily rows; leaving the stored scan_time untouched")
         _write_json_cache(payload)
         return
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if new_samples:
         writer.upsert_trin_samples(new_samples, recorded_at=scan_time)
     if new_daily_rows:

@@ -46,7 +46,6 @@ def test_merge_into_empty():
 def health(monkeypatch):
     rows: list[tuple[str, str]] = []
     writer = types.SimpleNamespace(
-        ensure_no_replica_for_writers=lambda: None,
         record_service_health=lambda name, state, **_: rows.append((name, state)),
     )
     monkeypatch.setitem(sys.modules, "db.writer", writer)

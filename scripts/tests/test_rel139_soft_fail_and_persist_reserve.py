@@ -45,10 +45,6 @@ class TestSoftFailIsNotAnEmbargo:
 
         class _Writer:
             @staticmethod
-            def ensure_no_replica_for_writers():
-                return None
-
-            @staticmethod
             def record_service_health(service, state, **kwargs):
                 rows.append((service, state, kwargs))
 

@@ -150,9 +150,8 @@ def backfill_closes(symbols: Sequence[str], *, since: str, today: Optional[date]
                 break
     if fetched:
         try:
-            from db.writer import ensure_no_replica_for_writers, upsert_price_history_rows
+            from db.writer import upsert_price_history_rows
 
-            ensure_no_replica_for_writers()
             for symbol, closes in fetched.items():
                 upsert_price_history_rows(
                     symbol,

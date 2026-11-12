@@ -46,7 +46,7 @@ UPSERT_NAMES = [
 def _resolved_writer():
     """The module ``from db import writer`` resolves to at mirror call time.
 
-    Other test files (test_replica_watchdog, the monitor-daemon heartbeat
+    Other test files (the monitor-daemon heartbeat
     tests) permanently swap a bare stub in for ``db.writer``; patching the
     resolved module — whichever it is — keeps these tests order-independent
     without mutating global sys.modules state ourselves.
@@ -68,7 +68,6 @@ def writer_calls(monkeypatch):
         calls["health"].append((service, state, kwargs))
 
     monkeypatch.setattr(writer, "record_service_health", fake_health, raising=False)
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
     for name in UPSERT_NAMES:
         def fake_upsert(*args, _name=name, **kwargs):
             calls["upserts"].append((_name, args))

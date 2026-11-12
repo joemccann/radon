@@ -70,7 +70,6 @@ def test_record_scan_degraded_writes_distinguishable_error_row(monkeypatch) -> N
     from db import writer
 
     rows: list[tuple] = []
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     monkeypatch.setattr(
         writer, "record_service_health", lambda *a, **k: rows.append((a, k))
     )
@@ -98,7 +97,6 @@ def test_record_scan_degraded_never_raises(monkeypatch) -> None:
     def _boom(*_a, **_k):
         raise RuntimeError("no db in this environment")
 
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     monkeypatch.setattr(writer, "record_service_health", _boom)
     scan_health.record_scan_degraded(
         "theta-harvester", scan_health.SCAN_STATUS_COVERAGE_FAILED, "boom"

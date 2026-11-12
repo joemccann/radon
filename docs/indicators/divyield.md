@@ -88,8 +88,7 @@ Composed-method style, stdlib-preferred (`csv`, `json`, `urllib`/existing http h
 - **Empty/degenerate-payload guard**: refuse to persist when constituents < 400 or
   valid yield computations < 80% of constituents (`quote_errors` too high). On such a
   soft failure, raise (retryable) — do not latch `service_health` ok.
-- Writes, in order, every cycle: `ensure_no_replica_for_writers()` →
-  `upsert_divyield_rows(rows, recorded_at=scan_time)` (only when changed) →
+- Writes, in order, every cycle: `upsert_divyield_rows(rows, recorded_at=scan_time)` (only when changed) →
   `upsert_scan_snapshot("div-yield", scan_time, payload)` →
   `record_service_health("div-yield", "ok", finished_at=scan_time)` → atomic JSON
   fallback `data/divyield.json`. Turso is the source of truth.
@@ -174,8 +173,7 @@ ordered ascending by date, monthly `approximate:1` rows then daily rows.
 ## Timer — `cloud/services/radon-divyield.{service,timer}`
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
-  `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_divyield.py`
+  `EnvironmentFile=/etc/radon/env`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_divyield.py`
   (venv python directly, never the wrapper), `TimeoutStartSec=2100`
   (`SWEEP_BUDGET_S=1800` plus one in-flight Yahoo timeout; 900s SIGTERM'd a
   20s/chart night on 2026-08-24).
