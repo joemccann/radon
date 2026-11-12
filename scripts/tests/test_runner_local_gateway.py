@@ -117,6 +117,37 @@ def _post(path: str, url: str, payload: dict) -> tuple[int, dict]:
     return response.status, json.loads(response.read())
 
 
+def test_gateway_venv_carries_the_renewal_vault_dependency():
+    # subscription_tokens refuses to renew without its vault (secret_store,
+    # which needs cryptography): Grok renewal failed live on 2026-11-11 with
+    # "secret store unavailable: No module named 'secret_store'".
+    pins = re.findall(r"(?m)^([A-Za-z0-9_.-]+)==", (RUNNER / "gateway-requirements.txt").read_text(encoding="utf-8"))
+    assert "cryptography" in pins
+
+
+def test_staged_renewal_path_opens_its_vault(tmp_path):
+    """Stage the gateway, then open the renewal vault from the staged copy only."""
+    root = tmp_path / "gateway"
+    subprocess.run(["bash", str(INSTALL), "--stage-gateway", str(root)],
+                   env={**os.environ, "RADON_RUNNER_PYTHON": sys.executable},
+                   capture_output=True, text=True, timeout=60, check=True)
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    probe = (
+        "import sys; sys.path.insert(0, sys.argv[1]);"
+        "import subscription_tokens as t;"
+        "v = t.open_vault({}); v.seal('grok', 'sealed-value');"
+        "print(type(v).__name__)"
+    )
+    result = subprocess.run([sys.executable, "-I", "-c", probe, str(root / "src")],
+                            env={"PATH": "/usr/bin:/bin", "HOME": str(home), "LANG": "C"},
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == "Vault"
+    # The default store lands in the gateway account's own home.
+    assert (home / ".radon" / "secrets.db").is_file()
+
+
 def test_installed_file_list_is_enough_to_serve(tmp_path):
     """Stage the gateway with install.sh's own copy code, then start it.
 
