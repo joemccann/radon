@@ -10,8 +10,8 @@
  * weekday-only rather than guessing (see HOLIDAY_TABLE_YEARS).
  */
 
-import staticHolidays from "../../scripts/config/market_holidays.json";
-import earlyCloses from "../../scripts/config/market_early_closes.json";
+import staticHolidays from "../../scripts/config/market_holidays.json" with { type: "json" };
+import earlyCloses from "../../scripts/config/market_early_closes.json" with { type: "json" };
 
 export type MarketState = "open" | "extended" | "closed";
 export type MarketPhase = "pre" | "open" | "after" | "closed";
