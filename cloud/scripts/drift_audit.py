@@ -98,6 +98,11 @@ SYSTEMD_DIR = Path("/etc/systemd/system")
 OPTIONAL_RESPONDER_INVENTORY = Path("/etc/radon/grok-responder/installed-units.sha256")
 OPTIONAL_RESPONDER_UNITS = frozenset({
     "radon-grok-responder.service", "radon-grok-responder.timer",
+})
+# The upgrade pair left the responder domain (2026-11-11). Until the operator
+# refreshes the domain, its inventory still lists the whole pair; that is the
+# expected pre-refresh state, and the refresh removes the pair from disk.
+RETIRED_RESPONDER_UNITS = frozenset({
     "radon-grok-responder-upgrade.service", "radon-grok-responder-upgrade.timer",
 })
 # DS-2026-10-29-01: nothing provisions the legacy radon-UID responder any more.
@@ -735,9 +740,10 @@ def _optional_responder_units(drifts: list[dict]) -> dict[str, Path]:
         if len(text) > 8192:
             raise ValueError("optional inventory is oversized")
         lines = [line.split("  ", 1) for line in text.splitlines()]
-        if any(len(parts) != 2 or not re.fullmatch(r"[a-f0-9]{64}", parts[0]) or parts[1] not in OPTIONAL_RESPONDER_UNITS for parts in lines):
+        if any(len(parts) != 2 or not re.fullmatch(r"[a-f0-9]{64}", parts[0]) or parts[1] not in OPTIONAL_RESPONDER_UNITS | RETIRED_RESPONDER_UNITS for parts in lines):
             raise ValueError("optional inventory entries differ")
-        if {name for _, name in lines} != OPTIONAL_RESPONDER_UNITS or len(lines) != len(OPTIONAL_RESPONDER_UNITS):
+        names = {name for _, name in lines}
+        if names not in (OPTIONAL_RESPONDER_UNITS, OPTIONAL_RESPONDER_UNITS | RETIRED_RESPONDER_UNITS) or len(lines) != len(names):
             raise ValueError("optional inventory membership differs")
     except (OSError, UnicodeError, ValueError):
         drifts.append({"id": "optional-unit-inventory", "detail": "optional responder inventory is not canonical"})
