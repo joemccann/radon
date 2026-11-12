@@ -10,6 +10,14 @@ export const SNAPSHOT_STALE_THRESHOLD_MS = 60_000;
  * IB sync load the timer already carries.
  */
 export const PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS = 150_000;
+/**
+ * orders-sync runs every 5 minutes and the ib_orders subprocess budget is
+ * 30s. A 60s threshold marked every healthy flat book stale and the shell
+ * auto-posted /api/orders for the rest of the interval. 8 minutes covers
+ * one cycle plus the run and still goes stale inside the 10-minute
+ * watchdog window.
+ */
+export const ORDERS_SNAPSHOT_STALE_THRESHOLD_MS = 8 * 60_000;
 const STALENESS_TICK_MS = 30_000;
 
 /**
