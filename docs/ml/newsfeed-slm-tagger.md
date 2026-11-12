@@ -1,6 +1,6 @@
 # Newsfeed text-tagger SLM v1: build spec
 
-Status: IMPLEMENTED (code + fixture bakeoff; live Turso extract / Mini train / serve-host latency unmeasured). Rung stays `off`. Merged only by Joe.
+Status: UNWIRED (2026-11-11). The verdict below failed every gate, so the gateway rung, the `purpose: newsfeed-tags` SLM routing and the shadow writes were removed; newsfeed tagging uses only the model ladder and `RADON_SLM_TAGGER_MODE` is ignored. The package, admin page, units and GPU files are deleted in a follow-up PR. The rest of this document is the historical build spec.
 
 Fixture-limited bakeoff (n=5 synthetic posts; not gold_human; G0 unmeasured):
 

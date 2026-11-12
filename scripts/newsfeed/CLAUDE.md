@@ -20,9 +20,9 @@ Module split: `paths`, `browser`, `auth`, `authGate` (renewal window + failure b
 Router: vision tagger for posts with images; text tagger otherwise.
 
 - **Vision tagger:** sends bounded local image bytes and captions to the standalone gateway, which selects an image-capable provider.
-- **Text tagger:** same private gateway JSON interface with `purpose: newsfeed-tags`; the service owns Antigravity-first routing, optional SLM mode and shadow metrics, authentication and refresh. Soft-fail when the gateway cannot complete.
-- Optional local rung `slm-tagger` (ahead of paid/subscription rungs) behind `RADON_SLM_TAGGER_MODE` (default `off`). Closed vocabulary: exactly 3 uppercase kebab tags validated against live taxonomy; invalid or unknown tags abstain and fall through. Does not coin tags. Distill/reviewer never see the rung.
-- Exactly **3 tags per post**, free-form on the ladder; SLM is closed-vocabulary.
+- **Text tagger:** same private gateway JSON interface with `purpose: newsfeed-tags`; the service owns Antigravity-first routing, authentication and refresh. Soft-fail when the gateway cannot complete.
+- The `slm-tagger` experiment is unwired (its verdict failed every gate). No request path imports `scripts/newsfeed/slm`, the gateway refuses the `slm-tagger` provider, and `RADON_SLM_TAGGER_MODE` is ignored. The package, admin page and units are removed in a follow-up PR.
+- Exactly **3 tags per post**, free-form on the ladder.
 - **Naming** (`__normaliseTags`): UPPERCASE, multi-word `UPPERCASE-KEBAB-CASE` (`PUT-CALL-RATIO`), allowed `A-Z 0-9 - &`, case-insensitive dedup.
 - `hydrateTags` skips posts with `tags.length >= 3` unless `force=true`.
 - `data/tag_taxonomy.json` is untracked and runtime-owned (Turso `tag_taxonomy` is canonical). Filter chips on the dashboard auto-derive from it.
