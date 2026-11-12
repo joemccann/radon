@@ -224,33 +224,83 @@ function bboFromRows(
   return { bid: bestBidPrice(bids), ask: bestAskPrice(asks) };
 }
 
+/** The live L1 quote. Sizes are optional: only the Book tab has them. */
+export type L1Quote = {
+  bid: number | null;
+  ask: number | null;
+  bidSize?: number | null;
+  askSize?: number | null;
+};
+
+type SessionRows = { bid: DepthLevel[]; ask: DepthLevel[] };
+
+function isCrossed(rows: SessionRows): boolean {
+  const { bid, ask } = bboFromRows(rows.bid, rows.ask);
+  return bid != null && ask != null && ask < bid;
+}
+
+function crossesQuote(rows: SessionRows, l1: L1Quote): boolean {
+  if (!isValidMarket(l1.bid, l1.ask)) return false;
+  const { bid, ask } = bboFromRows(rows.bid, rows.ask);
+  return (bid != null && bid > (l1.ask as number)) || (ask != null && ask < (l1.bid as number));
+}
+
+function isLiveSession(rows: SessionRows, l1: L1Quote): boolean {
+  const hasRows = rows.bid.length + rows.ask.length > 0;
+  return hasRows && !isCrossed(rows) && !crossesQuote(rows, l1);
+}
+
+function l1Level(price: number | null, size: number | null | undefined): DepthLevel[] {
+  if (price == null || price <= 0 || size == null || size <= 0) return [];
+  return [{ price, size, marketMaker: null, exchange: "L1" }];
+}
+
+/** A stale session's rows can fill a side's whole row budget, so the live
+ *  venues never reach it. The L1 quote is the live inside for that side. */
+function withL1Inside(rows: SessionRows, l1: L1Quote): SessionRows {
+  if (!isValidMarket(l1.bid, l1.ask)) return rows;
+  return {
+    bid: rows.bid.length > 0 ? rows.bid : l1Level(l1.bid, l1.bidSize),
+    ask: rows.ask.length > 0 ? rows.ask : l1Level(l1.ask, l1.askSize),
+  };
+}
+
+function venueSessions(depth: DepthBook): SessionRows[] {
+  const overnight = (row: DepthLevel) => isOvernightVenue(row);
+  const lit = (row: DepthLevel) => !isOvernightVenue(row);
+  return [
+    { bid: depth.bid.filter(overnight), ask: depth.ask.filter(overnight) },
+    { bid: depth.bid.filter(lit), ask: depth.ask.filter(lit) },
+  ];
+}
+
 /**
- * SMART depth after hours mixes leftover lit (ARCA/NSDQ) quotes with live
- * overnight (IBEOS) quotes. Max-bid/min-ask across that mix is a crossed
- * composite, not a tradeable BBO. Prefer an uncrossed overnight book, then
- * an uncrossed lit book, then a valid L1 quote.
+ * IB SMART depth keeps a closed session's frozen book in the aggregate:
+ * overnight, ARCA's regular-session levels sit beside live IBEOS quotes, and
+ * before the open stale IBEOS rows can sit beside live lit venues. The mix
+ * crosses. Keep only the session (overnight first, then lit) that is
+ * uncrossed and agrees with the live L1 quote; failing that, show the L1
+ * quote alone. An uncrossed book is returned as is.
  */
+export function liveStockBook(depth: DepthBook, l1: L1Quote): DepthBook {
+  if (depth.kind !== "stock" || !isCrossed(depth)) return depth;
+  const live = venueSessions(depth).find((rows) => isLiveSession(rows, l1));
+  if (live) return { ...depth, ...withL1Inside(live, l1) };
+  if (!isValidMarket(l1.bid, l1.ask)) return depth;
+  return { ...depth, bid: l1Level(l1.bid, l1.bidSize), ask: l1Level(l1.ask, l1.askSize) };
+}
+
+/** Never report a crossed SMART composite as the BBO: read the live session,
+ *  then a valid L1 quote. */
 function uncrossStockBbo(
   depth: DepthBook,
-  l1: { bid: number | null; ask: number | null },
+  l1: L1Quote,
 ): { bid: number | null; ask: number | null } {
-  const full = bboFromRows(depth.bid, depth.ask);
-  if (isValidMarket(full.bid, full.ask)) return full;
-
-  const overnight = bboFromRows(
-    depth.bid.filter(isOvernightVenue),
-    depth.ask.filter(isOvernightVenue),
-  );
-  if (isValidMarket(overnight.bid, overnight.ask)) return overnight;
-
-  const lit = bboFromRows(
-    depth.bid.filter((row) => !isOvernightVenue(row)),
-    depth.ask.filter((row) => !isOvernightVenue(row)),
-  );
-  if (isValidMarket(lit.bid, lit.ask)) return lit;
-
+  const live = liveStockBook(depth, l1);
+  const bbo = bboFromRows(live.bid, live.ask);
+  if (isValidMarket(bbo.bid, bbo.ask)) return bbo;
   if (isValidMarket(l1.bid, l1.ask)) return { bid: l1.bid, ask: l1.ask };
-  return full;
+  return bbo;
 }
 
 /**
