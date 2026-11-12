@@ -680,3 +680,22 @@ active tab, rendered stroked paths, brush visible, missing-state copy.
 Ownership is disjoint by file. The UI implementer mocks the hook in unit tests, so
 it does not need the API worktree's files to go green; TypeScript integration is
 checked after the merge.
+
+## Intraday provisional row (2026-11-11)
+
+`radon-vixts.timer` now fires every 5 minutes 09:00-16:55 ET Mon-Fri and daily
+at 16:01 ET (13:01 PT), replacing the 02:45 UTC slot. The
+official Cboe CSV row still lands on the first fire after Cboe publishes it.
+
+Each run also reads VIX, VIX3M and SPX from one live source for all inputs
+(`scripts/utils/index_live.py`): IB pool daily bars unless `/health` names a
+non-authenticated state, else Cboe 15-minute delayed quotes
+(`https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_<SYMBOL>.json`),
+all on one session date or nothing. The row is `{date, vix, vix3m, ratio, spx}` with the ratio inside the existing sanity band, and `current` is the same card `build_current` makes.
+
+The row is written only to the `vixts:live` scan snapshot, never to history,
+and `/api/vixts` appends it with `provisional {source, quote_time,
+scan_time}` when it is newer than the official `data_date`. The panel labels
+it. An unchanged-source live tick heartbeats without rewriting the official
+snapshot unless that snapshot is over 12h old.
+

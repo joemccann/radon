@@ -207,6 +207,19 @@ def _stub_jvm_forensics_capture(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_index_quotes(monkeypatch):
+    """Daily-close indicators fetch a provisional live row on every run
+    (utils/index_live.py: IB pool bars, then Cboe delayed quotes). Tests that
+    drive ``run()`` must never reach the network for it; live-row tests set
+    their own ``_fetch_live`` after this.
+    """
+    for name in ("fetch_vixts", "fetch_panic_index"):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "_fetch_live"):
+            monkeypatch.setattr(module, "_fetch_live", lambda now: None)
+
+
+@pytest.fixture(autouse=True)
 def _neutralize_quiet_windows(monkeypatch):
     """The DUR-10 scheduled-restart quiet windows default to wall-clock UTC
     ranges (23:40-00:15, 09:00-09:30), which made watchdog ladder tests fail

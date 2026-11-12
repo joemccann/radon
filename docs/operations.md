@@ -739,7 +739,7 @@ Stable fx path (2026-09-26). `com.radon.fx-stable-sync` (installed by `bash scri
 | `radon-vixcor.timer` | daily 02:35 UTC | VIX x COR3M 20-session correlation, 15 min behind `radon-cor`. Spec: [`indicators/vixcor.md`](indicators/vixcor.md) |
 | `radon-msr.timer` | daily 03:00 UTC | Move Surprise Ratio for SPX, NDX and RUT. Spec: [`indicators/msr.md`](indicators/msr.md) |
 | `radon-vix-pc.timer` | every 5 min 09:00-16:55 ET Mon-Fri + daily 02:00 UTC | 5-session cumulative VIX put/call from UW options volume (in-progress session row intraday). Heartbeat `vix-pc` (26h). Spec: [`indicators/vix-pc.md`](indicators/vix-pc.md) |
-| `radon-panic-index.timer` | daily 02:50 + 13:15 UTC | Panic Proxy (not Goldman's index): equal-weight mean of 252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M, SKEW. First production run `--no-alert`. Spec: [`indicators/panic-index.md`](indicators/panic-index.md) |
+| `radon-panic-index.timer` | every 5 min 09:00-16:55 ET Mon-Fri + daily 16:01 ET + 13:15 UTC (provisional row in `panic-index:live`, never alerts) | Panic Proxy (not Goldman's index): equal-weight mean of 252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M, SKEW. First production run `--no-alert`. Spec: [`indicators/panic-index.md`](indicators/panic-index.md) |
 | `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then Robinhood (when configured), then UW, then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). |
 | `radon-iei-hyg.timer` | daily 21:55 UTC | IEI/HYG duration-vs-credit ratio. Spec: [`indicators/iei-hyg.md`](indicators/iei-hyg.md) |
 | `radon-credit-vix.timer` | daily 22:25 UTC | SHY minus HYG credit proxy vs VIX. Spec: [`indicators/credit-vix.md`](indicators/credit-vix.md) |
