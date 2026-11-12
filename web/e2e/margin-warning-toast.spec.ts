@@ -83,7 +83,37 @@ const ORDERS_EMPTY = {
   executed_count: 0,
 };
 
+// The price relay is not under test. Without a socket the app raises its own
+// "Connection lost" toast, which would be counted as a margin toast.
+async function installConnectedRelay(page: Page) {
+  await page.addInitScript(() => {
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+      constructor() {
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.onmessage?.({ data: JSON.stringify({ type: "status", ib_connected: true, subscriptions: [] }) });
+        }, 0);
+      }
+      send() {}
+      close() { this.readyState = MockWebSocket.CLOSED; this.onclose?.({}); }
+    }
+    // @ts-expect-error test-only replacement
+    window.WebSocket = MockWebSocket;
+  });
+}
+
 async function setupMocks(page: Page, account: AccountFixture) {
+  await installConnectedRelay(page);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
   await page.route("**/api/portfolio", (route) =>

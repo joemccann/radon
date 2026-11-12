@@ -194,7 +194,7 @@ test("historical trades refresh re-reads the journal-derived blotter on /orders"
 
   // The journal picked up the second fill; Refresh must surface it via GET.
   blotter.serveFresh();
-  await section.locator("button.sync-button").click();
+  await section.getByRole("button", { name: "Refresh", exact: true }).click();
 
   await expect(section.locator("text=2 TRADES")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("text=GOOG 20260320 180C")).toBeVisible({ timeout: 10_000 });
