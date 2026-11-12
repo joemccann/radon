@@ -7,8 +7,6 @@ rejected response resumes the server's opaque continuation.
 from __future__ import annotations
 
 import base64
-import os
-import json
 import time
 import mimetypes
 from pathlib import Path
@@ -153,45 +151,9 @@ def extract_via_vision(png_bytes: bytes, prompt: str, *, env=None, post=None,
                         model=reply["model"], attempted=tuple(reply.get("attempted", [])))
 
 
-def accept_slm_tags_payload(obj: Any, taxonomy: Sequence[str] | None = None) -> bool:
-    from newsfeed.slm.contract import classify_slm_tags
-    code, _ = classify_slm_tags(obj, taxonomy if taxonomy is not None else _load_slm_taxonomy(os.environ))
-    return code == "ok"
-
-
 __all__ = ["MODEL_LADDER_ORDER", "MODEL_LADDER_TIERS", "LadderResult", "VisionResult",
            "ModelLadderExhausted", "ModelResponseError", "complete_text_json",
            "complete_multimodal_json", "extract_via_vision", "wired_providers",
-           "accept_distill_payload", "accept_tags_payload", "accept_slm_tags_payload",
+           "accept_distill_payload", "accept_tags_payload",
            "parse_json_object", "parse_json_rows", "safe_error_message"]
 
-
-def _load_slm_taxonomy(env: Mapping[str, str]) -> list[str]:
-    raw = (env.get("RADON_SLM_TAXONOMY_JSON") or "").strip()
-    if raw:
-        parsed = json.loads(raw)
-        return [str(t) for t in parsed] if isinstance(parsed, list) else []
-    path = Path(env.get("RADON_SLM_TAXONOMY_PATH") or "data/tag_taxonomy.json")
-    if path.is_file():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        tags = payload.get("tags") if isinstance(payload, dict) else payload
-        if isinstance(tags, list):
-            return [str(t) for t in tags if isinstance(t, str)]
-    try:
-        from db.hrana_http import hrana_query
-
-        rows = hrana_query("SELECT tag FROM tag_taxonomy", ())
-        out: list[str] = []
-        for row in rows:
-            if isinstance(row, dict):
-                tag = row.get("tag") or row.get("name")
-            else:
-                tag = row[0] if row else None
-            if tag:
-                out.append(str(tag))
-        return out
-    except Exception:
-        return []

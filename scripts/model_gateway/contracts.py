@@ -30,7 +30,6 @@ MODEL_LADDER_TIERS = {
     "antigravity": "subscription",
     "nvidia": "nvidia",
     "cerebras": "cerebras",
-    "slm-tagger": "local",
 }
 
 _SECRET_PATTERN = re.compile(

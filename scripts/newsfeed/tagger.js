@@ -3,10 +3,9 @@
 // data/tag_taxonomy.json by the caller (scraper or backfill). The existing
 // taxonomy is shown to the model as context to encourage reuse.
 //
-// Provider routing, subscription grants and optional SLM shadow mode are
-// owned by the standalone model gateway. Node sends no caller credentials.
+// Provider routing and subscription grants are owned by the standalone
+// model gateway. Node sends no caller credentials.
 import { completeJson as gatewayCompleteJson } from "../model_gateway/client.js";
-import { recordSlmShadow } from "../db/writer.js";
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 // All tags are uppercase. Multi-word concepts are kebab-cased then uppercased
@@ -94,21 +93,13 @@ function buildUserPrompt(post) {
   return `Title: ${title}\nBody: ${content}`;
 }
 
-export function completeViaLadder({ system, instruction, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, requestImpl, post_id, taxonomy, writeShadow = recordSlmShadow } = {}) {
+export function completeViaLadder({ system, instruction, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, requestImpl, post_id, taxonomy } = {}) {
   return gatewayCompleteJson({
     system, instruction, ...(Array.isArray(taxonomy) ? { taxonomy: taxonomy.slice(0, 4096).filter(value => typeof value === "string" && value.length <= 128) } : {}), ...(typeof post_id === "string" && post_id.length <= 256 ? { post_id } : {}), accept: "tags", purpose: "newsfeed-tags", max_tokens: 800,
     read_timeout: Math.max(1, timeoutMs / 1000),
   }, {
     timeoutMs, ...(requestImpl ? { requestImpl } : {}),
     accept: data => normaliseTags(data?.tags).slice(0, 3).length === 3,
-    onResult: result => {
-      if (result.shadow && typeof result.shadow === "object") {
-        // Telemetry never consumes the remaining inference deadline. The
-        // existing DB writer bounds retries and logs only a safe failure.
-        try { Promise.resolve(writeShadow(result.shadow)).catch(() => console.warn("[tagger] SLM telemetry write dropped")); }
-        catch { console.warn("[tagger] SLM telemetry write dropped"); }
-      }
-    },
   });
 }
 
