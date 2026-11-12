@@ -1478,12 +1478,20 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
                 """,
                 (cutoff,),
             ),
+            (
+                """
+                SELECT state, last_attempt_finished_at
+                FROM service_health
+                WHERE service = ?
+                """,
+                ("orders-sync",),
+            ),
         ],
     )
     for result in results:
         if isinstance(result, Exception):
             raise result
-    open_rows, executed_rows = results
+    open_rows, executed_rows, health_rows = results
 
     from utils.working_orders import is_prior_session_day_order
 
@@ -1511,8 +1519,23 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
         if fill_time > latest_exec_sync:
             latest_exec_sync = fill_time
 
+    from utils.orders_sync_clock import resolve_orders_last_sync
+
+    health_state = None
+    health_finished_at = None
+    if health_rows:
+        health_row = health_rows[0]
+        health_state = str(health_row[0]) if health_row and health_row[0] else None
+        if health_row and len(health_row) > 1 and health_row[1]:
+            health_finished_at = str(health_row[1])
+
     return {
-        "last_sync": latest_open_sync or latest_exec_sync,
+        "last_sync": resolve_orders_last_sync(
+            health_state=health_state,
+            health_finished_at=health_finished_at,
+            latest_open_updated_at=latest_open_sync,
+            latest_fill_time=latest_exec_sync,
+        ),
         "open_orders": open_orders,
         "executed_orders": executed_orders,
         "open_count": len(open_orders),
