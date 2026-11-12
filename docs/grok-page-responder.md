@@ -84,8 +84,11 @@ Model readiness is checked through the private gateway socket.
 Preparation requires the standard root-installed Python, Node and Bun
 prerequisites and an already promoted model-client release. Dependency
 installation runs only as the dedicated account. Preparation never downloads,
-updates or logs into a provider CLI. The legacy upgrade service name remains
-a read-only gateway status check; its timer stays disabled.
+updates or logs into a provider CLI, and it no longer installs the upgrade
+controller. The responder domain is the responder service and timer only;
+`refresh` disables and removes a leftover
+`radon-grok-responder-upgrade.{service,timer}` pair from hosts prepared
+before 2026-11-11.
 
 ### Root-owned responder code (DS-2026-10-17-16)
 
@@ -160,7 +163,7 @@ As root, explicitly acknowledge that Mac pickup is configured:
 ```bash
 /usr/bin/python3.13 -I /usr/local/lib/radon/grok_responder_account.py finalize --pickup-configured
 systemctl is-active radon-grok-responder.timer
-systemctl is-enabled radon-grok-responder-upgrade.timer   # disabled
+systemctl cat radon-grok-responder-upgrade.timer   # not found after refresh
 systemctl show radon-grok-responder.service -p User -p ProtectProc -p ProtectHome
 systemctl is-enabled radon-grok-page-responder.timer
 ```
@@ -615,11 +618,13 @@ through the protected commit protocol. Consumer processes cannot update the
 release tree. See [model-gateway.md](model-gateway.md) for promotion, rollback
 and the separate inference/control sockets.
 
-`radon-grok-upgrade.timer` and `radon-grok-responder-upgrade.timer` remain
-disabled. Their service names provide a read-only gateway readiness check.
-The old root-owned controller under `/usr/local/lib/radon/grok-upgrade` and
-`cloud/scripts/install-grok-upgrade-controller.sh` are retained only for
-rollback compatibility; setup does not invoke an updater or seed mutable LKG.
+`radon-grok-upgrade.timer` remains disabled; its service name provides a
+read-only gateway readiness check. The responder domain no longer installs
+or inventories `radon-grok-responder-upgrade.{service,timer}`; its `refresh`
+retires a leftover pair. The old root-owned controller under
+`/usr/local/lib/radon/grok-upgrade` and
+`cloud/scripts/install-grok-upgrade-controller.sh` are retained only until
+their deletion PR; nothing invokes them.
 Its protected publication contract remains covered by
 `cloud/tests/test_grok_upgrade_controller.py`.
 
