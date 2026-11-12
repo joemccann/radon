@@ -392,7 +392,7 @@ def persist_json(payload: dict[str, Any]) -> None:
     """Atomic write of data/iv_spread.json."""
     IV_SPREAD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = IV_SPREAD_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, IV_SPREAD_JSON)
 
 
