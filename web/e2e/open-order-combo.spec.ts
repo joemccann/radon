@@ -279,7 +279,7 @@ test.describe("Orders open-order combo rendering", () => {
       .filter({ hasText: "Risk Reversal" });
 
     await expect(riskReversalRow).toBeVisible({ timeout: 10_000 });
-    await expect(riskReversalRow).toContainText("COMBO");
+    await expect(riskReversalRow.locator(".order-action-text")).toHaveText("Combo");
     await expect(riskReversalRow).toContainText("Short Put 150");
     await expect(riskReversalRow).toContainText("Long Call 165");
     await expect(riskReversalRow.getByRole("button", { name: "CANCEL ALL" })).toBeVisible();

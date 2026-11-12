@@ -127,6 +127,10 @@ const LIVE_BATCH = {
 
 async function setupMocks(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  // Unmocked, /api/index-quote asks Yahoo for a live print; keep the strip on the fixture.
+  await page.route("**/api/index-quote**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ price: null, source: "none" }) }),
+  );
 
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CRI_MOCK_OPEN) }),

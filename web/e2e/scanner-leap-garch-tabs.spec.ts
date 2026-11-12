@@ -113,7 +113,7 @@ test("mode=garch renders the GARCH panel with pairs", async ({ page }) => {
   await expect(section.getByText("GARCH Convergence")).toBeVisible();
   await expect(section.getByTestId("garch-row-NVDA-AMD")).toBeVisible();
   await expect(section.getByText("STRONG", { exact: true })).toBeVisible();
-  await expect(section.getByText("1 ACTIONABLE")).toBeVisible();
+  await expect(section.getByTestId("garch-actionable-count")).toHaveText("1 ACTIONABLE");
 });
 
 test("clicking the GARCH tab from flow mode switches the panel and URL", async ({ page }) => {

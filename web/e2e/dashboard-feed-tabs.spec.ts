@@ -71,7 +71,7 @@ test.describe("dashboard feed tabs", () => {
     await page.goto("/dashboard");
 
     const tabs = page.getByRole("tab");
-    await expect(tabs).toHaveText(["Commentary", "Headlines"]);
+    await expect(tabs).toHaveText(["Commentary", "PDFs", "Headlines"]);
     await expect(page.getByRole("tab", { name: "Commentary" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByText("Commentary fixture")).toBeVisible();
 
