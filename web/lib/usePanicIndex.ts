@@ -3,11 +3,11 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { PanicIndexData } from "./panicIndex";
 
-// GET-only: radon-panic-index.timer re-upserts the four-leg Cboe composite
-// twice a day, so an hourly poll of a twice-daily series is plenty.
+// GET-only: radon-panic-index.timer refreshes the provisional current-session
+// row every 5 minutes in ET trading hours, so the poll matches that cadence.
 const PANIC_INDEX_SYNC_CONFIG = {
   endpoint: "/api/panic-index",
-  interval: 3_600_000,
+  interval: 300_000,
   hasPost: false,
   extractTimestamp: (d: PanicIndexData) => d.scan_time || null,
 };

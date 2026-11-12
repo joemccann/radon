@@ -123,6 +123,21 @@ async function setupMocks(
 }
 
 test.describe("/regime/panic-index - Panic Proxy tab", () => {
+  test("labels a provisional current session in both themes", async ({ page }) => {
+    await setupMocks(page, {
+      ...PANIC_MOCK,
+      provisional: { source: "cboe_delayed", quote_time: "2026-09-17T17:00:19", scan_time: "2026-09-17T21:05:00Z" },
+    });
+    await page.goto("/regime/panic-index");
+    const note = page.getByTestId("panic-index-provisional");
+    await expect(note).toHaveText("Current session is provisional: Cboe 15-minute delayed quotes as of 17:00 ET, until the official close posts.");
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await note.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath(`panic-provisional-${theme}.png`) });
+    }
+  });
+
   test("activates the PANIC tab and shows the disclaimer", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime/panic-index");

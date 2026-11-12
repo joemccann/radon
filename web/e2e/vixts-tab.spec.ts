@@ -112,6 +112,25 @@ async function setupMocks(
 }
 
 test.describe("/regime/vixts - VIX term structure tab", () => {
+  test("labels a provisional current session in both themes", async ({ page }) => {
+    const today = daysAgo(0);
+    const row = { date: today, vix: 17.49, vix3m: 19.24, ratio: 0.909, spx: 6700.5 };
+    await setupMocks(page, {
+      ...VIXTS_MOCK, data_date: today, current: { ...row, regime: "CONTANGO" },
+      series: [...(VIXTS_MOCK.series as unknown[]), row],
+      provisional: { source: "cboe_delayed", quote_time: `${today}T15:44:32`, scan_time: new Date().toISOString() },
+    });
+    await page.goto("/regime/vixts");
+    await expect(page.locator('[data-testid="vixts-ratio"]')).toHaveText("0.9090");
+    const note = page.getByTestId("vixts-provisional");
+    await expect(note).toHaveText("Current session is provisional: Cboe 15-minute delayed quotes as of 15:44 ET, until the official close posts.");
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await note.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath(`vixts-provisional-${theme}.png`) });
+    }
+  });
+
   test("activates the VIX TS tab and renders the summary strip", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime/vixts");
