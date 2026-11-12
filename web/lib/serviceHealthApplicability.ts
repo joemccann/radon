@@ -1,8 +1,3 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-
-const REPLICA_WATCHDOG_SERVICE = "replica-watchdog";
-
 /** Turso row written by the disabled radon-research.service. */
 export const RETIRED_RESEARCH_SERVICE = "dropbox-research";
 export const RETIRED_RESEARCH_UNIT = "radon-research.service";
@@ -13,31 +8,21 @@ export const RETIRED_RESEARCH_UNIT = "radon-research.service";
 export const LIVE_RESEARCH_SERVICES = ["marketdesk-research", "marketdesk-pdf"] as const;
 
 /**
- * The watchdog only exists to protect the embedded replica. A retired replica
- * can leave a latest-state row and transition history in Turso indefinitely;
- * those records stop being applicable when the replica file is absent.
+ * Writers that no longer exist. Their latest-state rows and transition
+ * history stay in Turso but are not evidence of a live control, so they
+ * must not surface through the unknown-writer scheduled fallback.
+ * - exit-orders: handler deleted; Radon places no automated exits.
+ * - dropbox-research: radon-research.service is disabled.
+ * - replica-watchdog: handler deleted with the retired embedded replica.
  */
-export function replicaDatabaseExists(): boolean {
-  const replicaPath = resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    "..",
-    "data",
-    "replica.db",
-  );
-  return existsSync(replicaPath);
-}
+const RETIRED_SERVICES: ReadonlySet<string> = new Set([
+  "exit-orders",
+  RETIRED_RESEARCH_SERVICE,
+  "replica-watchdog",
+]);
 
-export function isServiceHealthApplicable(
-  service: string,
-  replicaPresent: boolean,
-): boolean {
-  // The exit-orders handler was deleted: Radon places no automated exits.
-  // Historical rows are not evidence of a live control. Keep the row in
-  // storage, but do not revive it through the unknown-writer scheduled
-  // fallback.
-  if (service === "exit-orders") return false;
-  if (service === RETIRED_RESEARCH_SERVICE) return false;
-  return service !== REPLICA_WATCHDOG_SERVICE || replicaPresent;
+export function isServiceHealthApplicable(service: string): boolean {
+  return !RETIRED_SERVICES.has(service);
 }
 
 type ResearchHealthRow = {
@@ -70,23 +55,17 @@ export function reviewStageHealth(rows: readonly ResearchHealthRow[]) {
   };
 }
 
-export function filterApplicableServiceHealthRows<T>(
-  rows: readonly T[],
-  replicaPresent: boolean = replicaDatabaseExists(),
-): T[] {
+export function filterApplicableServiceHealthRows<T>(rows: readonly T[]): T[] {
   return rows.filter((row) => {
     if (typeof row !== "object" || row === null || !("service" in row)) return true;
-    return isServiceHealthApplicable(String(row.service ?? ""), replicaPresent);
+    return isServiceHealthApplicable(String(row.service ?? ""));
   });
 }
 
 export function filterApplicableServiceHealthBaseline<T>(
   baseline: Readonly<Record<string, T>>,
-  replicaPresent: boolean = replicaDatabaseExists(),
 ): Record<string, T> {
   return Object.fromEntries(
-    Object.entries(baseline).filter(([service]) =>
-      isServiceHealthApplicable(service, replicaPresent),
-    ),
+    Object.entries(baseline).filter(([service]) => isServiceHealthApplicable(service)),
   ) as Record<string, T>;
 }

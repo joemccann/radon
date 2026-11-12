@@ -63,7 +63,6 @@ The dedicated-host transaction must preserve these invariants:
 - `EnvironmentFile=/etc/radon/env`, mode `0640` `root:radon`.
   `/home/radon/radon-cloud/.env` is retired. Never copy env values into the
   checkout.
-- `RADON_DB_NO_REPLICA=1` to use the direct cloud database path.
 - `ExecStart` uses `/home/radon/forecasting-venv/bin/python` and the canonical
   `scripts/nightly_forecast.py` invocation.
 - The timer remains nightly at 07:00 UTC, persistent, and jittered.

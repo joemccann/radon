@@ -157,7 +157,6 @@ def _write_db_cache(
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_straddle_rows(payload["series"], recorded_at=scan_time)
         writer.upsert_scan_snapshot("straddle", scan_time, payload)

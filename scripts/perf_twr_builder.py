@@ -1667,7 +1667,6 @@ def persist_payload(payload: Mapping[str, Any]) -> None:
     if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
         return
     try:
-        _os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
         try:
             from db.writer import upsert_performance_snapshot  # type: ignore
         except ImportError:

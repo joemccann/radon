@@ -95,8 +95,7 @@ Bearer + honest UA. Pure functions:
 - `--backfill [START]` — one-shot: iterate trading days from START (default
   2023-09-06) to today, throttled ~0.3s/request, resumable (skips dates
   already in Turso).
-- Persistence per cycle (order): `ensure_no_replica_for_writers()` →
-  `upsert_skew_rows(series_delta, recorded_at=scan_time)` when changed →
+- Persistence per cycle (order): `upsert_skew_rows(series_delta, recorded_at=scan_time)` when changed →
   `upsert_scan_snapshot("skew", scan_time, payload)` →
   `record_service_health("skew", "ok", finished_at=scan_time)` → atomic JSON
   fallback `data/skew.json`. CLI `--json` → payload to stdout; progress to stderr.
@@ -203,7 +202,7 @@ Panel:
 `cloud/services/radon-skew.{service,timer}`: oneshot venv-python direct,
 `EnvironmentFile=/etc/radon/env` (UW_TOKEN must resolve there;
 confirm it exists on the VPS env; it does for GEX/leap timers),
-`RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer runs every 5 minutes in the
+`TimeoutStartSec=300`; timer runs every 5 minutes in the
 broad 13:00-21:59 UTC weekday DST window (the fetcher gates on the shared ET
 market calendar) plus `OnCalendar=*-*-* 21:45:00 UTC` for finalization and
 off-hours health. `RandomizedDelaySec=5`, `AccuracySec=1s`,

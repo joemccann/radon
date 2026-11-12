@@ -1,6 +1,6 @@
 """Shared fixtures for the monitor_daemon test suite.
 
-Why this file exists: `fill_monitor`, `journal_sync`, `replica_watchdog`,
+Why this file exists: `fill_monitor`, `journal_sync`
 and `cash_flow_sync` all import `db.writer` writers and
 call them inline. The handlers wrap writes in try/except (so a write
 failure never crashes the cycle) which means tests that DON'T patch the
@@ -61,7 +61,6 @@ def _block_writes_in_monitor_daemon_tests(monkeypatch: pytest.MonkeyPatch):
         "monitor_daemon.handlers.fill_monitor",
         "monitor_daemon.handlers.journal_sync",
         "monitor_daemon.handlers.cash_flow_sync",
-        "monitor_daemon.handlers.replica_watchdog",
         "monitor_daemon.handlers.journal_reconcile",
         "monitor_daemon.handlers.evening_execution_sweep",
     ):

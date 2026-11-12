@@ -22,7 +22,6 @@ Environment=RADON_MODEL_GATEWAY_SOCKET=/run/radon-model-gateway/gateway.sock
 Environment=RADON_GROK_LKG_PATH=/var/lib/radon-responder/runtime/grok_lkg.json
 Environment=RADON_GROK_RUNTIME_LOCK=/var/lib/radon-responder/runtime/grok-runtime.lock
 Environment=XDG_CACHE_HOME=/var/lib/radon-responder/cache
-Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_GROK_REPO=/var/lib/radon-responder/repo
 ExecStart=/usr/bin/python3.13 -E -S /usr/local/lib/radon/grok-responder/scripts/grok_page_responder.py
 TimeoutStartSec=3900

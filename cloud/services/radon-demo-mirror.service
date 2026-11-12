@@ -8,7 +8,6 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-Environment=RADON_DB_NO_REPLICA=1
 # Demo Turso is not covered by radon-api's migrate ExecStartPre. Without this,
 # adding a table to the mirror (equibles_13f_snapshots / filing_forensics,
 # 2026-08-26) pages P1 no-such-table while prod is current.

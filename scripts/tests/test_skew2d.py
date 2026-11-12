@@ -241,9 +241,6 @@ class TestRunHeartbeat:
         healths: list[Any] = []
 
         class FakeWriter:
-            def ensure_no_replica_for_writers(self):
-                return None
-
             def upsert_skew2d_rows(self, rows, recorded_at=None):
                 upserts.append((rows, recorded_at))
 
@@ -301,9 +298,6 @@ class TestRunHeartbeat:
         healths: list[Any] = []
 
         class FakeWriter:
-            def ensure_no_replica_for_writers(self):
-                return None
-
             def upsert_skew2d_rows(self, rows, recorded_at=None):
                 upserts.append((rows, recorded_at))
 

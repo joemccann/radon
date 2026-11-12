@@ -635,9 +635,6 @@ class TestPortfolioArchive:
         assert "archive_portfolio_snapshots.py" in svc["execstart"]
         # Fails closed without RADON_ARCHIVE_S3_* — no allow-delete-without-upload.
         assert "--allow-delete-without-upload" not in svc["execstart"]
-        env = svc.get("environment", "")
-        # configparser may only keep the last Environment= line
-        assert "RADON_DB_NO_REPLICA=1" in env or "RADON_DB_NO_REPLICA" in env
 
     def test_timer_alone_before_retention(self, unit):
         timer = unit("radon-portfolio-archive.timer")["Timer"]
@@ -718,7 +715,6 @@ class TestMarketDeskResearch:
         lines = (services_dir / "radon-marketdesk.service").read_text().splitlines()
         assert "Environment=PYTHONPATH=/home/radon/radon/scripts" in lines
         assert "Environment=RADON_RESEARCH_DIR=/var/lib/radon/research" in lines
-        assert "Environment=RADON_DB_NO_REPLICA=1" in lines
 
     def test_start_limit_counts_healthy_five_minute_starts(self, unit):
         u = unit("radon-marketdesk.service")["Unit"]
@@ -770,8 +766,6 @@ class TestOiChanges:
         assert svc["environmentfile"] == ENV_FILE_PATH
         assert svc["workingdirectory"] == "/home/radon/radon"
         assert "run_oi_changes_refresh.sh" in svc["execstart"]
-        raw = (services_dir / "radon-oi-changes.service").read_text()
-        assert "Environment=RADON_DB_NO_REPLICA=1" in raw
 
     def test_timer_three_rth_slots(self, unit, services_dir):
         timer = unit("radon-oi-changes.timer")["Timer"]
@@ -1029,8 +1023,7 @@ class TestMediaBackup:
         assert "media_backup.py" in svc["execstart"]
         assert svc["user"] == "radon"
         assert "/etc/radon/env" in svc["environmentfile"]
-        env = svc.get("environment", "")
-        assert "RADON_MEDIA_DIR" in env or "RADON_DB_NO_REPLICA" in env
+        assert "RADON_MEDIA_DIR" in svc.get("environment", "")
 
     def test_timer_after_db_backup(self, unit):
         timer = unit("radon-media-backup.timer")["Timer"]
@@ -1942,7 +1935,6 @@ class TestTradingViewAlertsDrain:
         assert svc["user"] == "radon"
         assert svc["workingdirectory"] == "/home/radon/radon"
         assert svc["environmentfile"] == ENV_FILE_PATH
-        assert "RADON_DB_NO_REPLICA=1" in svc["environment"]
         assert svc["execcondition"] == f"/usr/bin/test -f {self.SCRIPT}"
         assert svc["execstart"] == f"/home/radon/radon/.venv/bin/python {self.SCRIPT}"
         assert svc["standardoutput"] == "journal"
@@ -1970,7 +1962,6 @@ def test_vix_model_spread_timer_install_and_source_contract():
     assert 'Persistent=true' in timer
     assert 'User=radon' in service
     assert 'scripts/fetch_vix_model_spread.py' in service
-    assert 'Environment=RADON_DB_NO_REPLICA=1' in service
     manifest = (cloud / 'config/installed-units.sha256').read_text()
     setup = (cloud / 'scripts/setup-vps.sh').read_text()
     for suffix in ('service', 'timer'):
@@ -1990,7 +1981,7 @@ def test_asia_export_lead_install_schedule_and_watchdog_contract():
     assert 'OnCalendar=*-*-* 09:40:00 UTC' in timer
     assert 'RandomizedDelaySec=0' in timer and 'Persistent=true' in timer
     assert 'TimeoutStartSec=300' in service
-    assert 'User=radon' in service and 'Environment=RADON_DB_NO_REPLICA=1' in service
+    assert 'User=radon' in service
     assert 'scripts/fetch_asia_export_lead.py' in service
     for suffix in ('service', 'timer'):
         name = f'radon-asia-export-lead.{suffix}'
@@ -2013,7 +2004,7 @@ def test_high_low_line_install_schedule_and_watchdog_contract():
     assert 'OnCalendar=*-*-* 00:30:00 UTC' in timer
     assert 'RandomizedDelaySec=0' in timer and 'Persistent=true' in timer
     assert 'TimeoutStartSec=300' in service
-    assert 'User=radon' in service and 'Environment=RADON_DB_NO_REPLICA=1' in service
+    assert 'User=radon' in service
     assert 'scripts/fetch_high_low_line.py' in service
     assert 'ib-gateway' not in service
     for suffix in ('service', 'timer'):

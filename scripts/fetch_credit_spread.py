@@ -523,7 +523,6 @@ def _record_error_health(message: str, error_class: str) -> None:
     Best-effort: a broken writer must not mask the original failure.
     """
     try:
-        writer.ensure_no_replica_for_writers()
         writer.record_service_health(
             SERVICE,
             "error",
@@ -556,7 +555,6 @@ def persist_result(
         return
 
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if rows_changed_rows:
         writer.upsert_credit_spread_rows(rows_changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

@@ -487,7 +487,6 @@ def persist_result(
     scan_time = payload["scan_time"]
     error = _carry_forward_error(failed or {})
     state = "error" if error else "ok"
-    writer.ensure_no_replica_for_writers()
     if not rows:
         _log("no provider rows resolved; leaving the existing catalog untouched")
         writer.record_service_health(SERVICE, state, finished_at=scan_time, error=error)

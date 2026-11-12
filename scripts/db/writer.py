@@ -2,7 +2,7 @@
 
 Symmetric to scripts/db/writer.js. Each function takes a ready-to-write
 payload (dict, list, etc.) and returns once the row has reached the
-embedded replica (sync to cloud is async, single-digit-second).
+Turso (direct to cloud).
 
 Schedulers should use these helpers from inside their existing
 file-write code paths so the migration is dual-write — the JSON file
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -64,16 +63,6 @@ PORTFOLIO_SNAPSHOT_UPSERT_SQL = """
 INSERT OR REPLACE INTO portfolio_snapshots (taken_at, payload)
 VALUES (?, ?)
 """
-
-
-def ensure_no_replica_for_writers() -> None:
-    """Belt-and-suspenders replica kill switch for writer entry points.
-
-    db.client can no longer open an embedded replica, so this is
-    redundant. It stays until the guards are removed in a follow-up
-    change. No-op if already set.
-    """
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
 
 def _now_iso() -> str:

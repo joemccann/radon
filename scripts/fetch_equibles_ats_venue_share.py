@@ -602,12 +602,11 @@ def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
     """
     try:
         from db.hrana_http import HRANA_TIMEOUT_S, hrana_execute
-        from db.writer import SCAN_SNAPSHOT_KEEP, ensure_no_replica_for_writers
+        from db.writer import SCAN_SNAPSHOT_KEEP
     except ImportError:
         return
     deadline = time.monotonic() + PERSIST_BUDGET_S
     try:
-        ensure_no_replica_for_writers()
         remaining = max(deadline - time.monotonic(), 0.05)
         hrana_execute(
             "INSERT OR REPLACE INTO scan_snapshots (service, scan_time, payload) "

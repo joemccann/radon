@@ -436,7 +436,6 @@ def _write_db(
     # FOLDED INTO the heartbeat instead of silencing it.
     row_error: Optional[dict[str, Any]] = None
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed and rows:
             writer.upsert_ivrank_rows(rows, recorded_at=scan_time)
     except Exception as exc:  # noqa: BLE001

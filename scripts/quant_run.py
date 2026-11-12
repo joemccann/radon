@@ -191,9 +191,8 @@ def run_targets(
 # persistence: Turso first, disk fallback                                      #
 # --------------------------------------------------------------------------- #
 def _writer_funcs() -> tuple[Callable[..., Any], Callable[..., Any]]:
-    from db.writer import ensure_no_replica_for_writers, upsert_quant_run, upsert_quant_targets
+    from db.writer import upsert_quant_run, upsert_quant_targets
 
-    ensure_no_replica_for_writers()
     return upsert_quant_run, upsert_quant_targets
 
 

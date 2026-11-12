@@ -149,7 +149,6 @@ class UwEmbargo:
         message = str(exc).splitlines()[0].strip()[:300]
         try:
             writer = _load_writer()
-            writer.ensure_no_replica_for_writers()
             writer.record_service_health(
                 self._service,
                 "error",

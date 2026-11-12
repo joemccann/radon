@@ -307,9 +307,6 @@ class _Recorder:
         self.snapshots = []
         self.health = []
 
-    def ensure_no_replica_for_writers(self):
-        return None
-
     def upsert_panic_index_rows(self, rows, recorded_at=None):
         if self.rows_raise:
             raise RuntimeError("hrana 502")

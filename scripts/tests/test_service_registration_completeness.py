@@ -19,7 +19,7 @@ file with a sensible window — do not weaken the collector.
 
 Out of scope (residual, hand-written rows): JS writers (ib_realtime_server
 relay, writer.js consumers), scripts/ib_watchdog.py, scripts/watchdog
-(watchdog-alerts), replica_watchdog's bespoke event-driven rows, and the
+(watchdog-alerts), and the
 radon-cloud VPS writers (deploy, config-drift, db-backup) — all already
 registered by hand in the TS file.
 """

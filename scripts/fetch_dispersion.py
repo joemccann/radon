@@ -733,8 +733,6 @@ def run(
     IB or Yahoo requests."""
     now = now or datetime.now(timezone.utc)
     scan_time = _iso(now)
-    if writer is not None:
-        writer.ensure_no_replica_for_writers()
     try:
         stored = _load_stored_rows()
         last_complete = last_completed_session_date(now)

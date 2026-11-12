@@ -38,13 +38,6 @@ ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/se
 # /api/ib/*` carries the real client IP and does NOT inherit the loopback
 # bypass. The bypass itself also rejects any forwarded request — see
 # scripts/api/auth.py:is_trusted_local_request.
-#
-# FastAPI is write-heavy (orders, fills, snapshots) — every embedded
-# replica it would open competes with radon-nextjs for the same
-# replica.db WAL on this host. The one-writer rule (CLAUDE.md +
-# feedback_libsql_replica_one_writer.md) reserves the replica for
-# nextjs; FastAPI streams writes straight to Turso.
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75
 Restart=always
 RestartSec=5

@@ -569,9 +569,8 @@ def _now_iso() -> str:
 def _persist_snapshot(symbol: str, payload: dict[str, Any]) -> None:
     """Turso snapshot (best-effort, cri precedent) + atomic disk write."""
     try:
-        from db.writer import ensure_no_replica_for_writers, upsert_rv_ratio_snapshot
+        from db.writer import upsert_rv_ratio_snapshot
 
-        ensure_no_replica_for_writers()
         upsert_rv_ratio_snapshot(symbol, payload["scan_time"], payload)
         print(f"  Turso snapshot upserted for {symbol}", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001

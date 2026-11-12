@@ -45,7 +45,6 @@ def _load_real_writer():
 
 @pytest.fixture
 def writer(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("RADON_DB_NO_REPLICA", "1")
     return _load_real_writer()
 
 

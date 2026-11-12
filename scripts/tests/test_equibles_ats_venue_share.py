@@ -890,7 +890,6 @@ class TestSnapshotOmitsSeries:
             calls.append((sql, tuple(args)))
 
         monkeypatch.setattr("db.hrana_http.hrana_execute", fake_hrana)
-        monkeypatch.setattr("db.writer.ensure_no_replica_for_writers", lambda: None)
         return calls
 
     @staticmethod
@@ -959,7 +958,6 @@ class TestSnapshotOmitsSeries:
                 _time.sleep(0.1)
 
         monkeypatch.setattr("db.hrana_http.hrana_execute", slow_hrana)
-        monkeypatch.setattr("db.writer.ensure_no_replica_for_writers", lambda: None)
         payload = self._payload(tickers=40, weeks=60)  # 2400 rows, 12 chunks
 
         mod._write_db_cache(payload, payload["scan_time"])

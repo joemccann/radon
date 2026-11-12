@@ -532,7 +532,6 @@ def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         upsert_cot_rows(cot_rows_for_db(payload), scan_time)
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
         writer.record_service_health(SERVICE, "ok", finished_at=scan_time)

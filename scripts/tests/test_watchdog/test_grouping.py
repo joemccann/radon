@@ -6,7 +6,7 @@ individual stale/error alerts on IB-dependent services into ONE
 grouped Pushover message. The individual ``service_health`` rows still
 write through normally — only the external push channel is gated.
 
-Services with ``requires_ib=False`` (newsfeed, replica-watchdog,
+Services with ``requires_ib=False`` (newsfeed,
 cash-flow-sync, etc.) continue to alert per-service even when IB is
 the suspected upstream root cause; their failure is independent.
 

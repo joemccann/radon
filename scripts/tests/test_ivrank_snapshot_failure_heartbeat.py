@@ -16,9 +16,6 @@ class _Writer:
         self.snapshot_fails = snapshot_fails
         self.health: list[tuple] = []
 
-    def ensure_no_replica_for_writers(self):
-        pass
-
     def upsert_ivrank_rows(self, rows, *, recorded_at):
         pass
 

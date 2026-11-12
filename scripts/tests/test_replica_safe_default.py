@@ -56,3 +56,59 @@ class TestReplicaCannotBeOpened:
             f"RADON_DB_USE_REPLICA referenced in production source: "
             f"{offenders}. The opt-in was removed; nothing may read it."
         )
+
+
+GUARD_NAME = "ensure_no_replica_for_writers"
+KILL_SWITCH = "RADON_DB_NO_REPLICA"
+KILL_SWITCH_READER_DIRS = PRODUCTION_SOURCE_DIRS + ("cloud/scripts",)
+GUARD_SCAN_DIRS = ("scripts", "cloud", "web/lib", "web/app", "web/components", "web/tests")
+SKIPPED_PARTS = {"node_modules", ".next", "__pycache__"}
+THIS_FILE = Path(__file__).resolve()
+
+
+def _source_files(bases, *, include_tests: bool):
+    for base in bases:
+        for path in (REPO_ROOT / base).rglob("*"):
+            if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
+                continue
+            parts = set(path.parts)
+            if SKIPPED_PARTS & parts:
+                continue
+            if not include_tests and EXCLUDED_PARTS & parts:
+                continue
+            if path.resolve() == THIS_FILE:
+                continue
+            yield path
+
+
+def _offenders(bases, marker: str, *, include_tests: bool) -> list[str]:
+    return sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in _source_files(bases, include_tests=include_tests)
+        if marker in path.read_text(encoding="utf-8", errors="ignore")
+    )
+
+
+class TestReplicaGuardsRemoved:
+    """D5 step 2: with no replica path left, the guards are dead weight."""
+
+    def test_nothing_calls_the_writer_guard(self) -> None:
+        offenders = _offenders(GUARD_SCAN_DIRS, GUARD_NAME, include_tests=True)
+        assert not offenders, f"{GUARD_NAME} still referenced: {offenders}"
+
+    def test_no_production_source_reads_the_kill_switch(self) -> None:
+        offenders = _offenders(KILL_SWITCH_READER_DIRS, KILL_SWITCH, include_tests=False)
+        assert not offenders, f"{KILL_SWITCH} still read by: {offenders}"
+
+    def test_monitor_daemon_does_not_register_the_replica_watchdog(self) -> None:
+        assert "ReplicaWatchdog" not in _read("scripts/monitor_daemon/run.py")
+        assert "replica_watchdog" not in _read("scripts/monitor_daemon/handlers/__init__.py")
+        handler = REPO_ROOT / "scripts/monitor_daemon/handlers/replica_watchdog.py"
+        assert not handler.exists()
+
+    def test_watchdog_catalog_retires_the_replica_watchdog(self) -> None:
+        from watchdog import services
+
+        assert "replica-watchdog" not in services.SCHEDULED_SERVICES
+        assert all("replica-watchdog" not in names for names in services.BUCKETS.values())
+        assert services.is_service_monitored("replica-watchdog") is False

@@ -734,19 +734,12 @@ def _record_health(state: str) -> None:
     try:
         from db import writer
 
-        writer.ensure_no_replica_for_writers()
         writer.record_service_health(SERVICE, state, finished_at=_now_iso(datetime.now(timezone.utc)))
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[{SERVICE}] health heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
 def _write_db_cache(payload: dict[str, Any]) -> None:
-    try:
-        from db import writer
-
-        writer.ensure_no_replica_for_writers()
-    except Exception:  # noqa: BLE001 — stripped env; disk cache still applies
-        pass
     # Separate try blocks on purpose. equibles_13f_snapshots is the ONLY table
     # /api/equibles-smart-money-13f reads; the holder rows are depth nothing
     # queries yet. Sharing one try meant a single failed holder chunk (a liquid

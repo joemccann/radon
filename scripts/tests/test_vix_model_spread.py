@@ -93,7 +93,6 @@ def test_run_writes_snapshot_health_and_atomic_fallback(orchestration):
     payload=mod.run(SourceClient(_texts()),previous={},now=_now())
     assert payload['source_dates']==dict.fromkeys(('VIX','VIXEQ','COR1M'),'2026-10-16')
     assert payload['source']=='cboe'
-    writer.ensure_no_replica_for_writers.assert_called_once()
     writer.upsert_vix_model_spread_rows.assert_called_once_with(payload['series'],recorded_at=payload['scan_time'])
     writer.upsert_scan_snapshot.assert_called_once_with('vix-model-spread',payload['scan_time'],payload)
     assert mod._read_previous()['current']==payload['current']
@@ -241,7 +240,8 @@ def test_persist_refuses_empty_or_inconsistent_before_io(orchestration,bad):
     mod,writer=orchestration
     with pytest.raises(ValueError,match='Refusing'):
         mod.persist_result(bad)
-    writer.ensure_no_replica_for_writers.assert_not_called()
+    writer.upsert_vix_model_spread_rows.assert_not_called()
+    writer.upsert_scan_snapshot.assert_not_called()
     assert not mod.VIX_MODEL_SPREAD_JSON.exists()
 
 def test_previous_snapshot_is_turso_first_and_304_uses_hash(orchestration,monkeypatch):

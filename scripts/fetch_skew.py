@@ -232,7 +232,6 @@ def _write_db_cache(
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             # Intraday points are display-only. Persisting one would make the
             # post-close run believe today's final session already exists.

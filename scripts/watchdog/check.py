@@ -207,7 +207,7 @@ def check_service(*, service: str, kind: str, now: datetime, market_state: str) 
             status="disabled",
             severity=None,
             fired=False,
-            message="retired" if service == "dropbox-research" else "replica file absent",
+            message="retired" if service in services_mod.RETIRED_SERVICES else "not applicable",
             consecutive_failures=0,
             now=now,
         )

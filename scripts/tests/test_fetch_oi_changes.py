@@ -101,7 +101,6 @@ def _stub_health_and_embargo(monkeypatch, tmp_path):
         healths.append((service, state, kwargs))
 
     monkeypatch.setattr(writer, "record_service_health", fake_health, raising=False)
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
     monkeypatch.setattr(m, "mirror_scan_snapshot", lambda *a, **k: mirrors.append((a, k)))
     if hasattr(m, "_embargo_path"):
         monkeypatch.setattr(m, "_embargo_path", lambda: tmp_path / "oi_changes_uw_embargo.json")

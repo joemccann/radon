@@ -479,13 +479,9 @@ class TestIvrankStorage:
 
 class _FakeWriter:
     def __init__(self):
-        self.replica_guards = 0
         self.ivrank_rows: list[tuple[list[dict[str, Any]], Optional[str]]] = []
         self.snapshots: list[tuple[str, str, dict[str, Any]]] = []
         self.health: list[tuple[str, str, Optional[dict[str, Any]]]] = []
-
-    def ensure_no_replica_for_writers(self):
-        self.replica_guards += 1
 
     def upsert_ivrank_rows(self, rows, recorded_at=None):
         self.ivrank_rows.append((list(rows), recorded_at))
@@ -565,7 +561,6 @@ class TestRunHappyPath:
         assert payload["current"]["regime"] is None
         assert payload["scan_time"].endswith("Z")
 
-        assert fake.replica_guards >= 1
         assert [snap[0] for snap in fake.snapshots] == ["ivrank"]
         assert fake.health == [("ivrank", "ok", None)]
         assert len(fake.ivrank_rows) == 1

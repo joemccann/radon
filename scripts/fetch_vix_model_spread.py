@@ -129,7 +129,6 @@ def build_output(series, scan_time, source_last_modified) -> dict[str, Any]:
 
 def _record_error(scan_time, exc):
     try:
-        writer.ensure_no_replica_for_writers()
         writer.record_service_health(SERVICE, 'error', finished_at=scan_time,
                                      error={'class': 'vix_model_spread_failed', 'message': str(exc)})
     except Exception as health_exc:
@@ -208,7 +207,6 @@ def persist_result(payload, rows_changed=True):
         raise ValueError('Refusing empty or inconsistent VIX model snapshot')
     json.dumps(payload, allow_nan=False)
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_vix_model_spread_rows(payload['series'], recorded_at=payload['scan_time'])
         _persist_snapshot(payload)

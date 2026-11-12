@@ -191,7 +191,6 @@ def writes(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(mod, "CALM_STREAK_JSON", tmp_path / "calm_streak.json")
-    monkeypatch.setattr(mod.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(mod.writer, "upsert_calm_streak_rows",
                         lambda rows, recorded_at: calls.append(("rows", len(rows))))
     monkeypatch.setattr(mod.writer, "upsert_scan_snapshot",
@@ -208,7 +207,7 @@ class TestPersistResult:
         rows = compute_streaks(LATE)
         payload = build_output(rows, scan_time=SCAN_TIME, source_last_modified=None)
         persist_result(payload, rows)
-        assert writes == [("guard",), ("rows", len(rows)),
+        assert writes == [("rows", len(rows)),
                           ("snapshot", "calm-streak", SCAN_TIME), ("health", "calm-streak", "ok")]
         assert json.loads(mod.CALM_STREAK_JSON.read_text())["data_date"] == "2026-09-14"
 
@@ -262,7 +261,7 @@ class TestRun:
         payload = mod.run(now=datetime.now(timezone.utc))
         assert seen["ims"] == "Mon, 14 Sep 2026 13:00:00 GMT"
         assert payload["scan_time"] != cached["scan_time"]
-        assert [c[0] for c in writes] == ["guard", "snapshot", "health"]
+        assert [c[0] for c in writes] == ["snapshot", "health"]
 
 
 class TestHeartbeatTimeout:

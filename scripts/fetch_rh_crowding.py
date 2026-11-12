@@ -179,7 +179,6 @@ def fetch_crowding() -> tuple[list[dict], dict[str, list[dict]]]:
 def persist(rows: list[dict[str, Any]], scan_time: str) -> None:
     from db import writer
 
-    writer.ensure_no_replica_for_writers()
     writer.upsert_rh_crowding_rows(rows, recorded_at=scan_time)
     payload = {"scan_time": scan_time, "count": len(rows), "rows": rows}
     RH_CROWDING_JSON.parent.mkdir(parents=True, exist_ok=True)
