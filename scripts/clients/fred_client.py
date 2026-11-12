@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,22 @@ CACHE_PATH = _PROJECT_ROOT / "data" / "risk_free_rate.json"
 
 SERIES_ID = "DGS3MO"
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
+_FRED_API_KEY_QUERY = re.compile(r"(?i)(api_key=)[^&\s\"']+")
+
+
+def redact_fred_failure(exc: BaseException) -> str:
+    """Exception text safe for stderr. The FRED key is a query parameter."""
+    text = _FRED_API_KEY_QUERY.sub(r"\1[redacted]", str(exc))
+    for name in ("FRED_API_KEY", "FRED_KEY"):
+        secret = os.environ.get(name) or ""
+        if secret:
+            text = text.replace(secret, "[redacted]")
+    return text
+
+
+def _require_fred_ok(status: int) -> None:
+    if status >= 400:
+        raise RuntimeError(f"FRED HTTP {status}")
 
 
 def _load_cache() -> dict[str, float]:
@@ -74,16 +91,20 @@ def _fetch_fred_observations(series_id: str, api_key: str) -> dict[str, float]:
             params={"series_id": series_id, "api_key": api_key, "file_type": "json"},
             timeout=30,
         )
-        resp.raise_for_status()
+        _require_fred_ok(resp.status_code)
         payload = resp.json()
     except ImportError:
+        import urllib.error
         from urllib.parse import urlencode
         from urllib.request import Request, urlopen
 
         params = urlencode({"series_id": series_id, "api_key": api_key, "file_type": "json"})
         req = Request(f"{FRED_URL}?{params}", headers={"User-Agent": "radon/fred_client"})
-        with urlopen(req, timeout=30) as r:  # noqa: S310
-            payload = json.loads(r.read().decode("utf-8"))
+        try:
+            with urlopen(req, timeout=30) as r:  # noqa: S310
+                payload = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"FRED HTTP {exc.code}") from None
 
     out: dict[str, float] = {}
     for obs in payload.get("observations", []):
@@ -104,7 +125,8 @@ def fetch_dgs3mo_series(api_key: str | None = None, *, save: bool = True) -> dic
 
     If *api_key* is None, reads ``FRED_API_KEY`` from env.
     On success and *save*, merges into ``data/risk_free_rate.json``.
-    Raises RuntimeError if no key, or propagates HTTP errors.
+    Raises RuntimeError if no key or the HTTP status is an error.
+    The error text does not include the request URL.
     """
     key = api_key or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_KEY")
     if not key:
@@ -144,7 +166,7 @@ def get_risk_free_rate(
             return live[latest], None
     except Exception as exc:  # noqa: BLE001
         # Log to stderr but don't fail — fall through to cache
-        print(f"[fred] FRED fetch failed: {exc}", file=sys.stderr)
+        print(f"[fred] FRED fetch failed: {redact_fred_failure(exc)}", file=sys.stderr)
 
     cached = _load_cache()
     if cached:

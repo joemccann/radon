@@ -691,11 +691,13 @@ until a human ran reset-failed + start. Before launching grok on a
   oneshots: the daily and multi-daily scans such as vol-cone, skew, bpi,
   leap, garch, cor, credit-spread, the equibles fetches; intraday timers are
   deliberately absent because their next slot is minutes away). The
-  responder has no general right to start `radon-*` units — polkit grants
-  the radon user exactly this list, verbs `reset-failed` and `start` only
-  (`cloud/config/polkit/50-radon-services.rules`; the two lists are pinned
-  to each other by `test_allowlist_matches_the_polkit_grant`, and every
-  member must be a `Type=oneshot` with a `.timer` partner per
+  responder has no general right to start `radon-*` units. Polkit grants
+  `radon` and `radon-responder` `reset-failed` and `start` on that list except
+  `radon-llm-index.service`, which is not installed
+  (`cloud/config/polkit/50-radon-services.rules`). A start or restart whose
+  polkit message names a transient unit, or a start or restart with no
+  message, is denied. `test_allowlist_matches_the_polkit_grant` pins the
+  grant, and every member must be a `Type=oneshot` with a `.timer` partner per
   `test_allowlist_covers_the_daily_scans_and_only_timer_owned_oneshots`).
   `radon-demo-mirror.service` is excluded from both the responder and polkit
   grants because its `ExecStartPre` applies database migrations (REL-108 /

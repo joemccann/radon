@@ -14,6 +14,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlencode
 
 # Default in-memory TTL in seconds
 TTL_SECONDS = 60
@@ -47,12 +48,18 @@ def set_cached(key: str, data: Any) -> None:
 
 
 def make_key(endpoint: str, params: Optional[Dict] = None) -> str:
-    """Create a cache key from endpoint and params."""
-    if params:
-        sorted_params = sorted(params.items())
-        param_str = "&".join(f"{k}={v}" for k, v in sorted_params)
-        return f"{endpoint}?{param_str}"
-    return endpoint
+    """Create a cache key from endpoint and params.
+
+    Values are percent-encoded. A value containing ``&`` or ``=`` must not
+    alias a different parameter set.
+    """
+    if not params:
+        return endpoint
+    pairs = [
+        (str(key), str(value))
+        for key, value in sorted(params.items(), key=lambda item: str(item[0]))
+    ]
+    return f"{endpoint}?{urlencode(pairs)}"
 
 
 def clear_cache() -> None:

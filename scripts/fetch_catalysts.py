@@ -40,6 +40,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from clients.fred_client import redact_fred_failure
+
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -377,7 +379,8 @@ def _fetch_fred_latest_observation(series_id: str) -> Any:
         },
         timeout=30,
     )
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise RuntimeError(f"FRED HTTP {resp.status_code}")
     latest_date = ""
     latest: Any = None
     for obs in resp.json().get("observations") or []:
@@ -425,7 +428,10 @@ def apply_fred_actuals(
                 # an outage was indistinguishable from "not released yet" and
                 # the `actual` column stayed blank forever. The sibling
                 # `_safe_call` logs for exactly this reason.
-                print(f"[catalysts] FRED {series_id} failed: {exc}", file=sys.stderr)
+                print(
+                    f"[catalysts] FRED {series_id} failed: {redact_fred_failure(exc)}",
+                    file=sys.stderr,
+                )
                 cache[series_id] = None
         obs_date, value = _observation_pair(cache[series_id])
         if value is None:
