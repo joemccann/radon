@@ -118,10 +118,16 @@ export const ASIA_EXPORT_LEAD_REFRESH: RefreshSchedule = [daily(9, 40)];
 export const MARGIN_DEBT_REFRESH: RefreshSchedule = [daily(13, 10)];
 
 /** cloud/services/radon-vix-model-spread.timer */
-export const VIX_MODEL_SPREAD_REFRESH: RefreshSchedule = [daily(2, 50)];
+export const VIX_MODEL_SPREAD_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  { tz: "America/New_York", hours: [16], minutes: [1] },
+];
 
 /** cloud/services/radon-vix-pc.timer */
-export const VIX_PC_REFRESH: RefreshSchedule = [daily(2, 0)];
+export const VIX_PC_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  daily(2, 0),
+];
 
 /** cloud/services/radon-straddle.timer */
 export const STRADDLE_REFRESH: RefreshSchedule = [daily(2, 15)];

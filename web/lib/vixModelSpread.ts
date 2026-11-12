@@ -37,6 +37,43 @@ export interface VixModelSpreadData {
   series: VixModelSpreadEntry[];
   /** Retained raw source series support conditional GETs; operator-only. */
   source_series?: Partial<Record<"VIX" | "VIXEQ" | "COR1M", Array<{ date: string; value: number }>>>;
+  /** Set when `current` is the in-progress session, not an official Cboe close. */
+  provisional?: VixModelSpreadProvisional | null;
+}
+
+export interface VixModelSpreadProvisional {
+  source: "ib" | "cboe_delayed";
+  quote_time: string | null;
+  scan_time: string;
+}
+
+/** The writer's `vix-model-spread:live` side snapshot. */
+export interface VixModelSpreadLive {
+  scan_time: string;
+  row: VixModelSpreadEntry | null;
+  source: VixModelSpreadProvisional["source"] | null;
+  quote_time: string | null;
+}
+
+/**
+ * Append the provisional current-session row when it is newer than the last
+ * official close. The official snapshot is never rewritten for a live tick.
+ */
+export function withLiveRow<T extends VixModelSpreadData>(payload: T, live: VixModelSpreadLive | null): T {
+  const row = live?.row;
+  if (!live || !row || !live.source || !payload.data_date || row.date <= payload.data_date) return payload;
+  const series = [...payload.series, row];
+  const expected = payload.expected_session;
+  return {
+    ...payload,
+    series,
+    count: series.length,
+    current: row,
+    data_date: row.date,
+    as_of: row.date,
+    status: expected && row.date >= expected ? "ok" : payload.status,
+    provisional: { source: live.source, quote_time: live.quote_time, scan_time: live.scan_time },
+  };
 }
 
 function finite(value: number | null | undefined): number | null {

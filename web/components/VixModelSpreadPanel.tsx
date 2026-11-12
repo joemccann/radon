@@ -15,11 +15,20 @@ import SpectralLoader from "./SpectralLoader";
 import VixModelSpreadChart from "./VixModelSpreadChart";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import { VIX_MODEL_SPREAD_REFRESH } from "@/lib/refreshSchedule";
-import { formatVolPoints, formatSpreadZ, spreadBandState, spreadWindowStats, type SpreadWindow } from "@/lib/vixModelSpread";
+import { formatVolPoints, formatSpreadZ, spreadBandState, spreadWindowStats, type SpreadWindow, type VixModelSpreadProvisional } from "@/lib/vixModelSpread";
 import { useVixModelSpread } from "@/lib/useVixModelSpread";
 import { useViewport } from "@/lib/useViewport";
 
 const EXPLANATION = "Model VIX = √(COR1M / 100) × VIXEQ. The spread is VIX minus model VIX in volatility points. A positive historical basis is normal. Bands use the selected trailing session window and population standard deviation, including the current observation. Above or below a band describes the spread, not a forecast of VIX declines.";
+
+const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** Names the live source and its quote time; quote_time is already ET wall clock. */
+function provisionalNote(provisional: VixModelSpreadProvisional): string {
+  const source = provisional.source === "ib" ? "IB index bars" : "Cboe 15-minute delayed quotes";
+  const time = provisional.quote_time ? provisional.quote_time.slice(11, 16) : ET_TIME.format(new Date(provisional.scan_time));
+  return `Current session is provisional: ${source} as of ${time} ET, until the official close posts.`;
+}
 
 export default function VixModelSpreadPanel() {
   const { data, loading, syncing, error, syncNow } = useVixModelSpread();
@@ -65,6 +74,7 @@ export default function VixModelSpreadPanel() {
       </div>
       <VixModelSpreadChart history={series.slice(range[0], range[1] + 1)} window={window} />
       {series.length >= 2 ? <BrushMinimap values={series.map((row) => Number.isFinite(row.spread) ? row.spread : null)} range={range} onRangeChange={setCustom} onCustom={() => setPreset("custom")} testIdPrefix="vix-model-spread-brush" ariaLabel="VIX model history range brush" /> : null}
+      {data.provisional ? <div className="section-footnote" data-testid="vix-model-spread-provisional">{provisionalNote(data.provisional)}</div> : null}
       <div className="section-footnote" data-testid="vix-model-spread-source-footnote">Cboe VIX, VIXEQ and COR1M closes, aligned by session. VIXEQ history before its November 4, 2024 launch is backtested. Statistical windows use the full aligned history, independently of the visible range.</div>
     </div>
   </>;
