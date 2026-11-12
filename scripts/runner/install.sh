@@ -32,7 +32,7 @@ LIB_FILES="nightly_pr_guard.py nightly_publish.py nightly_issue_prune.py nightly
 GATEWAY_FILES="model_gateway/__init__.py model_gateway/client.py model_gateway/contracts.py model_gateway/credentials.py
   model_gateway/engine.py model_gateway/lifecycle.py model_gateway/native.py model_gateway/chat.py model_gateway/provider_gate.py
   model_gateway/server.py model_gateway/specialized.py model_gateway/_forecast_backend.py model_gateway/_catalog_backend.py clients/__init__.py clients/prepaid_denylist.py clients/prepaid_denylist.json
-  clients/provider_cooldown.py subscription_tokens.py subscription_vault.py utils/__init__.py utils/atomic_io.py utils/ipv4_first.py"
+  clients/provider_cooldown.py subscription_tokens.py subscription_vault.py secret_store.py utils/__init__.py utils/atomic_io.py utils/ipv4_first.py"
 GW_USER=_radonmodelgw
 GW_GROUP=_radonmodel
 GW_ROOT=/Library/Radon/model-gateway-local
