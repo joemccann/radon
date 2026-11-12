@@ -1965,7 +1965,10 @@ def test_vix_model_spread_timer_install_and_source_contract():
     cloud = Path(__file__).parents[1]
     timer = (cloud / 'services/radon-vix-model-spread.timer').read_text()
     service = (cloud / 'services/radon-vix-model-spread.service').read_text()
-    assert 'OnCalendar=*-*-* 02:50:00 UTC' in timer
+    assert 'OnCalendar=*-*-* 16:01:00 America/New_York' in timer
+    assert ('OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 '
+            'America/New_York') in timer
+    assert '02:50' not in timer
     assert 'RandomizedDelaySec=0' in timer
     assert 'Persistent=true' in timer
     assert 'User=radon' in service

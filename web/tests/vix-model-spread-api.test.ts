@@ -126,3 +126,33 @@ describe("personal-use access and HTTP contract", () => {
     expect(response.headers.get("X-Cache-Tags")).toBe("vix-model-spread");
   });
 });
+
+describe("VIX model provisional current-session row", () => {
+  const liveRow = { ...entry, date: "2026-10-19", vix: 18, vixeq: 40, cor1m: 12, model_vix: 13.856406460551018, spread: 4.143593539448982 };
+  function live(overrides: Record<string, unknown> = {}) {
+    return { scan_time: hoursAgo(0), row: liveRow, source: "cboe_delayed", quote_time: "2026-10-19T14:45:00", ...overrides };
+  }
+  it("appends a newer live row from the side snapshot as provisional current", async () => {
+    await insert(payload({ scan_time: hoursAgo(3) })); await insert(live(), "vix-model-spread:live");
+    const served = await body();
+    expect(served.current).toEqual(liveRow);
+    expect(served.series).toEqual([entry, liveRow]);
+    expect(served.count).toBe(2);
+    expect(served.data_date).toBe("2026-10-19");
+    expect(served.provisional).toEqual({ source: "cboe_delayed", quote_time: "2026-10-19T14:45:00", scan_time: expect.any(String) });
+  });
+  it("lifts a source-lag status when the live row covers the expected session", async () => {
+    await insert(payload({ status: "stale_source", expected_session: "2026-10-19" }));
+    await insert(live(), "vix-model-spread:live");
+    expect((await body()).status).toBe("ok");
+  });
+  it("ignores a live row not newer than the close, an empty row, or a malformed row", async () => {
+    const data = payload(); await insert(data);
+    await insert(live({ row: entry, scan_time: hoursAgo(0.3) }), "vix-model-spread:live");
+    expect(await body()).toEqual(data);
+    await insert(live({ row: null, source: null, scan_time: hoursAgo(0.2) }), "vix-model-spread:live");
+    expect(await body()).toEqual(data);
+    await insert(live({ row: { ...liveRow, spread: "x" }, scan_time: hoursAgo(0.1) }), "vix-model-spread:live");
+    expect(await body()).toEqual(data);
+  });
+});

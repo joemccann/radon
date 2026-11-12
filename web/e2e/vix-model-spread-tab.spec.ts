@@ -25,7 +25,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
       await expect(page.getByTestId("vix-model-spread-hero")).toHaveText("2.00 pts");
       await expect(page.getByTestId("vix-model-spread-state")).toHaveText("ABOVE BAND");
       await expect(page.getByTestId("vix-model-spread-strip-asof")).toHaveText("2026-09-04");
-      await expect(page.getByTestId("vix-model-spread-freshness-rail-countdown")).toHaveText("1h 30m");
+      await expect(page.getByTestId("vix-model-spread-freshness-rail-countdown")).toHaveText("18h 41m");
       await expect(page.getByTestId("vix-model-spread-bar")).toHaveCount(252);
       await page.getByRole("button", { name: "252 sessions" }).click();
       await expect(page.getByTestId("vix-model-spread-state")).toHaveText("WITHIN BAND");
@@ -50,6 +50,22 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
         await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + 30);
         await expect(page.getByTestId("vix-model-spread-tooltip")).toContainText("Mean (20 sessions)");
         await expect(page.getByTestId("vix-model-spread-tooltip")).toContainText("Model VIX");
+      }
+    });
+    test("labels a provisional current session with its source and quote time", async ({ page }) => {
+      const base = payload();
+      const live = { ...base.current!, date: "2026-09-08", vix: 18, spread: 4.14 };
+      await setup(page, { ...base, current: live, series: [...base.series, live], count: base.count + 1, data_date: live.date, as_of: live.date,
+        provisional: { source: "cboe_delayed", quote_time: "2026-09-08T14:45:00", scan_time: "2026-09-08T19:00:00Z" } });
+      await page.goto("/regime/vix-model-spread");
+      await expect(page.getByTestId("vix-model-spread-hero")).toHaveText("4.14 pts");
+      await expect(page.getByTestId("vix-model-spread-strip-asof")).toHaveText("2026-09-08");
+      const note = page.getByTestId("vix-model-spread-provisional");
+      await expect(note).toHaveText("Current session is provisional: Cboe 15-minute delayed quotes as of 14:45 ET, until the official close posts.");
+      for (const theme of ["dark", "light"]) {
+        await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+        await note.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: test.info().outputPath(`vix-model-provisional-${viewport.name}-${theme}.png`), fullPage: false });
       }
     });
     test("shows the aligned-source empty state", async ({ page }) => {
