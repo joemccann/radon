@@ -130,8 +130,10 @@ ladder runs here in the VPS order. Embeddings, OCR and forecasting stay on the V
 `_radonbot` reaches it only through the group socket
 `/Library/Radon/model-gateway-local/run/gateway.sock` and never reads a grant.
 It runs 6 concurrent calls per provider, so the two security loops do not
-queue behind each other or behind production traffic. An expired Codex grant
-is renewed on demand, non-interactively, for that provider only; renewal state
+queue behind each other or behind production traffic. An expired Codex or Grok
+grant is renewed on demand, non-interactively, for that provider only (Grok's
+reader drops an expired token, so the ladder requests renewal when it finds one
+rather than waiting for a 401 that never comes); renewal state
 lives in `RADON_SUBSCRIPTION_STATE_DIR`. There is no renewal timer: the
 interactive all-provider pass would page for providers this Mac never set up. Provisioning steps: [runner.md](runner.md#5-model-gateway-operator).
 
