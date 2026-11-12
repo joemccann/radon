@@ -110,6 +110,8 @@ def test_orders_refresh_returns_turso_snapshot_not_orders_json(trusted_client, m
                     "2026-06-23T14:55:00Z",
                 )
             ]
+        if "FROM service_health" in sql:
+            return []
         raise AssertionError(f"unexpected SQL: {sql}")
 
     def fail_disk_read(*args, **kwargs):
@@ -139,7 +141,7 @@ def test_orders_refresh_allows_empty_turso_snapshot(trusted_client, monkeypatch)
         return SimpleNamespace(ok=True, error=None)
 
     def fake_hrana_execute(sql, args=(), timeout=None):
-        if "FROM open_orders" in sql or "FROM executed_orders" in sql:
+        if "FROM open_orders" in sql or "FROM executed_orders" in sql or "FROM service_health" in sql:
             return []
         raise AssertionError(f"unexpected SQL: {sql}")
 

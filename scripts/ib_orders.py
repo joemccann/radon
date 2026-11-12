@@ -247,11 +247,14 @@ def build_orders_data(open_orders: list, executed_orders: list, snapshot_at: Opt
     """Build the orders snapshot payload.
 
     ``snapshot_at`` is when IB was read (capture it BEFORE the fetch); it
-    orders this snapshot against the other open_orders writer.
+    orders this snapshot against the other open_orders writer. ``last_sync``
+    is that same absolute instant. A naive local clock cannot be compared
+    with ``open_orders.updated_at`` or the orders-sync heartbeat.
     """
+    synced_at = snapshot_at or snapshot_time()
     return {
-        "last_sync": datetime.now().isoformat(),
-        "snapshot_at": snapshot_at or snapshot_time(),
+        "last_sync": synced_at,
+        "snapshot_at": synced_at,
         "open_orders": open_orders,
         "executed_orders": executed_orders,
         "open_count": len(open_orders),
