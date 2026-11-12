@@ -114,7 +114,9 @@ checker refusing capacity returns78 and cannot become a fallback build.
 The nightly runners do not use the VPS gateway. `scripts/runner/install.sh`
 runs this same service on the Mac as `com.radon.model-gateway-local`, under the
 disabled-login account `_radonmodelgw`, from a root-owned copy of
-`GATEWAY_FILES` and a hash-pinned `httpx` venv (`scripts/runner/gateway-requirements.txt`).
+`GATEWAY_FILES` and a hash-pinned `httpx` + `cryptography` venv (`scripts/runner/gateway-requirements.txt`;
+`cryptography` is the renewal vault's: `subscription_tokens` refuses to renew without it,
+and the store defaults to the gateway account's own `~/.radon/secrets.db`).
 It signs requests with the Mac's own subscription grants, kept in
 `/Library/Radon/model-gateway-local/home` (mode 700, that account only):
 Claude from a `claude setup-token` file, Codex from `CODEX_HOME/auth.json`,
