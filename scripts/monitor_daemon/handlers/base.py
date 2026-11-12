@@ -137,7 +137,7 @@ class BaseHandler(ABC):
     # guarantees a heartbeat on EVERY cycle (DUR-14): ``ok`` after a
     # successful execute, ``error`` when execute raises / soft-fails /
     # returns a truthy ``result["error"]``. ``None`` opts out for handlers
-    # with bespoke row semantics (replica_watchdog's event-driven writer).
+    # with bespoke row semantics.
     # The registration-completeness CI test collects these names and
     # asserts each has an explicit web/lib/serviceHealthWindows.ts entry.
     service_name: Optional[str] = None

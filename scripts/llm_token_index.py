@@ -334,10 +334,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from db.writer import (
         record_llm_token_index,
         get_llm_token_index_base_raw,
-        ensure_no_replica_for_writers,
     )
-
-    ensure_no_replica_for_writers()
 
     # service_cycle (DUR-14) heartbeats ok on clean exit; on failure it
     # writes error (+ retry embargo) BEFORE re-raising into the except

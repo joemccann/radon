@@ -295,7 +295,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     (feedback_service_health_heartbeat).
     """
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if rows:
         writer.upsert_ma_ratio_rows(rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

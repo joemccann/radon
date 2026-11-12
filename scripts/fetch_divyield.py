@@ -481,7 +481,6 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     banner notices a silent writer (cf. feedback_service_health_heartbeat).
     """
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if rows:
         writer.upsert_divyield_rows(rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
@@ -644,7 +643,6 @@ def run_backfill() -> int:
         _log("backfill: refusing to persist zero rows")
         return 1
     scan_time = _iso_utc_now()
-    writer.ensure_no_replica_for_writers()
     writer.upsert_divyield_rows(rows, recorded_at=scan_time)
     _log(f"backfill: upserted {len(rows)} approximate monthly rows "
          f"({rows[0]['date']} .. {rows[-1]['date']})")

@@ -45,7 +45,6 @@ def _record_health(state: str) -> None:
     try:
         from db import writer
 
-        writer.ensure_no_replica_for_writers()
         finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         writer.record_service_health(SERVICE, state, finished_at=finished_at)
     except Exception as exc:  # noqa: BLE001 — the cache write already decided the outcome

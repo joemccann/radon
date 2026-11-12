@@ -401,7 +401,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 
 def _record_error_health(message: str, error_class: str) -> None:
     try:
-        writer.ensure_no_replica_for_writers()
         writer.record_service_health(
             SERVICE,
             "error",
@@ -426,7 +425,6 @@ def persist_result(
         )
         return
     scan_time = payload["scan_time"]
-    writer.ensure_no_replica_for_writers()
     if changed_rows:
         writer.upsert_credit_vix_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)

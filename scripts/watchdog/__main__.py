@@ -204,7 +204,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # fire but never writes ``ok`` between fires — without this, a single
     # alert latches the row forever and the banner keeps showing
     # watchdog-alerts even after the underlying issue heals. Same
-    # heartbeat-on-success pattern as replica-watchdog (see
+    # heartbeat-on-success pattern as other event-driven writers (see
     # feedback_service_health_heartbeat.md).
     if not dispatch_summary.health_recorded and not digest_error:
         notify.heartbeat_ok(bucket=args.bucket, now=now)

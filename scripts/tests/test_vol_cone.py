@@ -383,7 +383,6 @@ class TestRunSurvivesInterruption:
 
         self.checkpointed: list[dict] = []
         self.health: list[tuple[str, str]] = []
-        monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(
             writer,
             "upsert_vol_cone_rows",

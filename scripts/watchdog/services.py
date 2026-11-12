@@ -31,7 +31,9 @@ from typing import TypedDict
 _MIN = 60
 _HOUR = 60 * _MIN
 _DAY = 24 * _HOUR
-REPLICA_PATH = Path(__file__).resolve().parents[2] / "data" / "replica.db"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+# Turso rows whose writer is gone. Kept in storage, never evaluated.
+RETIRED_SERVICES = frozenset({"dropbox-research", "replica-watchdog"})
 
 
 class FreshnessWindow(TypedDict):
@@ -395,13 +397,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # dials or 5 min of silence; 24/7 feed, so one 15-min window (three missed
     # heartbeats) in every state. Mirrors web/lib/serviceHealthWindows.ts.
     "mktnews-hub":      {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
-    # Event-driven writer when a replica file exists. Match the 24h window
-    # from web/lib/serviceHealthWindows.ts; applicability is checked at
-    # evaluation time so a retired replica's historical row cannot alert.
-    "replica-watchdog": {"open": 24 * _HOUR, "closed": 24 * _HOUR, "requires_ib": False},
     # ``watchdog-alerts`` is the meta-row this very service writes when
-    # alerting on OTHER services. Same event-driven shape as
-    # replica-watchdog — 24h window. NOT included in any bucket below
+    # alerting on OTHER services. Event-driven, so a 24h window. NOT included in any bucket below
     # to avoid recursive alerting (watchdog alerting on its own alerts row).
     "watchdog-alerts":  {"open": 24 * _HOUR, "closed": 24 * _HOUR, "requires_ib": False},
     # config-drift — daily VPS configuration-drift audit (radon-cloud
@@ -587,7 +584,6 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "continuous": [
         "newsfeed-scraper",
-        "replica-watchdog",
         # R-158: this carried a 5-minute freshness window and appeared in NO
         # bucket, so only the auto-derived `error` bucket saw it and
         # `_check_error` fires solely on state == "error". A stopped or
@@ -830,17 +826,14 @@ def freshness_window_for(service: str, market_state: str) -> int:
 
 def is_service_monitored(service: str) -> bool:
     """Whether the service is applicable to this host's active architecture."""
-    if service == "dropbox-research":
-        # radon-research.service is disabled. Its Turso row is not a live check.
+    if service in RETIRED_SERVICES:
         return False
     if service == "uw-stream":
         # Optional collector is applicable after first activation; a stopped
         # activated collector retains its snapshot and must still alarm.
-        return (REPLICA_PATH.parent / "uw_stream" / "snapshot.json").is_file()
+        return (DATA_DIR / "uw_stream" / "snapshot.json").is_file()
     if service == "uw-research":
-        return (REPLICA_PATH.parent / "uw_research").is_dir()
-    if service == "replica-watchdog":
-        return REPLICA_PATH.is_file()
+        return (DATA_DIR / "uw_research").is_dir()
     return True
 
 

@@ -31,7 +31,6 @@ def _wire(monkeypatch, tmp_path, upsert_error):
     calls = []
     monkeypatch.setattr(mod, "CREDIT_VIX_JSON", tmp_path / "credit_vix.json")
     monkeypatch.setattr(mod, "load_cached_series", lambda **_kw: [dict(CACHED)])
-    monkeypatch.setattr(mod.writer, "ensure_no_replica_for_writers", lambda: None)
 
     def upsert(rows, recorded_at=None):
         calls.append(("rows", len(rows), recorded_at))

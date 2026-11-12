@@ -1354,11 +1354,9 @@ install_journald_limits() {
 
 # DUR-07 (2026-06-12): fleet-wide env invariants via a systemd prefix drop-in.
 # "radon-.service.d" matches every unit named radon-*.service (systemd v250+).
-# Carries RADON_DB_NO_REPLICA=1 as belt-and-suspenders for the retired libsql
-# embedded replica (code default is direct-to-cloud since DUR-07; opt-in only
-# via RADON_DB_USE_REPLICA=1). Applies at daemon-reload; no unit restart.
+# Applies at daemon-reload; no unit restart.
 install_fleet_dropin() {
-  log_info "Installing radon-.service.d fleet drop-in (RADON_DB_NO_REPLICA=1)..."
+  log_info "Installing radon-.service.d fleet drop-in..."
   stage_from_checkout "${CLOUD_DIR}/services/radon-.service.d/common.conf" /etc/systemd/system/radon-.service.d/common.conf 0644
   systemctl daemon-reload
   log_success "Fleet drop-in installed (verify: systemctl show radon-api.service -p Environment)"

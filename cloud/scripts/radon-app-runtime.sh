@@ -845,7 +845,7 @@ render_env_file() {
     # may fall back to --no-sandbox); hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
-      grep -E '^(#|$|(NODE_ENV|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN)=)' \
+      grep -E '^(#|$|(NODE_ENV|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       # grep's 1 means a valid empty allowlist; 2 means a failed filter.
@@ -853,7 +853,7 @@ render_env_file() {
       mv "${temporary}.filtered" "$temporary" || exit 71
     fi
     if [[ "$unit" == "radon-uw-stream.service" || "$unit" == "radon-uw-research.service" ]]; then
-      grep -E '^(#|$|(UW_TOKEN|RADON_UW_[A-Z0-9_]+|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA)=)' \
+      grep -E '^(#|$|(UW_TOKEN|RADON_UW_[A-Z0-9_]+|TURSO_DB_URL|TURSO_AUTH_TOKEN)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
@@ -864,7 +864,7 @@ render_env_file() {
     # login, and the WRITE-scoped Dropbox app only: never the read-only
     # research reader (DROPBOX_APP_KEY...), B2, IB or Clerk secrets.
     if [[ "$unit" == "radon-marketdesk.service" ]]; then
-      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_NVIDIA_RPM|RADON_NVIDIA_TRIP_AFTER_429S|RADON_NVIDIA_TRIP_SECS|RADON_NVIDIA_AUTH_BLOCK_SECS|RADON_RESEARCH_MODEL|RADON_RESEARCH_PARSE_[A-Z0-9_]+|CLAIRIC_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
+      grep -E '^(#|$|(CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN_FILE|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GROK_MODEL|XAI_MODEL|ANTIGRAVITY_CLI|ANTIGRAVITY_MODEL|RADON_LADDER_[A-Z0-9_]+|RADON_NVIDIA_LADDER_MAX_WAIT_S|RADON_NVIDIA_RPM|RADON_NVIDIA_TRIP_AFTER_429S|RADON_NVIDIA_TRIP_SECS|RADON_NVIDIA_AUTH_BLOCK_SECS|RADON_RESEARCH_MODEL|RADON_RESEARCH_PARSE_[A-Z0-9_]+|CLAIRIC_[A-Z0-9_]+|NVIDIA_API_KEY|NVIDIA_TEXT_MODEL|NVIDIA_VISION_MODEL|NVIDIA_MODEL|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_[A-Z0-9_]+|DROPBOX_WRITE_[A-Z0-9_]+)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
@@ -873,7 +873,7 @@ render_env_file() {
     # The independent PDF archive needs only Turso and its provider login.
     # No model grants, Dropbox credentials, broker or secret-store master key.
     if [[ "$unit" == "radon-marketdesk-pdf.service" ]]; then
-      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS)=)' \
+      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
@@ -1286,7 +1286,6 @@ cmd_run() {
     --security-opt no-new-privileges \
     --cgroupns host \
     --env-file "$rendered_env" \
-    --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
 

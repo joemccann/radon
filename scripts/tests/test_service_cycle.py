@@ -53,7 +53,6 @@ def health_calls(monkeypatch):
         calls.append((service, state, kwargs))
 
     monkeypatch.setattr(writer, "record_service_health", fake_health, raising=False)
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
     return calls
 
 
@@ -102,18 +101,6 @@ class TestSuccessPath:
 
         [(_, _, kwargs)] = health_calls
         assert kwargs["finished_at"] is None
-
-    def test_calls_ensure_no_replica(self, monkeypatch, health_calls):
-        writer = _resolved_writer()
-        called = []
-        monkeypatch.setattr(
-            writer, "ensure_no_replica_for_writers", lambda: called.append(True), raising=False
-        )
-        from db.service_cycle import service_cycle
-
-        with service_cycle("portfolio-sync", market_hours_class="intraday"):
-            pass
-        assert called == [True]
 
 
 class TestErrorPath:

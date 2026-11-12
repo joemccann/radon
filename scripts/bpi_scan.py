@@ -774,12 +774,10 @@ def _heartbeat_cycle(no_db: bool) -> Iterator[Any]:
 
 def _persist_index(index_symbol: str, payload: dict[str, Any]) -> None:
     from db.writer import (
-        ensure_no_replica_for_writers,
         upsert_bpi_history_rows,
         upsert_bpi_snapshot,
     )
 
-    ensure_no_replica_for_writers()
     upsert_bpi_history_rows(index_symbol, payload["_bpi_rows"])
     snapshot = {k: v for k, v in payload.items() if k != "_bpi_rows"}
     upsert_bpi_snapshot(index_symbol, payload["taken_at"], snapshot)

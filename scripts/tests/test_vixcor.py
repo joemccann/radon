@@ -1009,14 +1009,10 @@ class _StubClient:
 
 class _FakeWriter:
     def __init__(self):
-        self.replica_guards = 0
         self.price_history: list[tuple[str, list[dict[str, Any]]]] = []
         self.vixcor_rows: list[tuple[list[dict[str, Any]], Optional[str]]] = []
         self.snapshots: list[tuple[str, str, dict[str, Any]]] = []
         self.health: list[tuple[str, str, Optional[dict[str, Any]]]] = []
-
-    def ensure_no_replica_for_writers(self):
-        self.replica_guards += 1
 
     def upsert_price_history_rows(self, symbol, rows):
         self.price_history.append((symbol, list(rows)))
@@ -1071,7 +1067,6 @@ class TestRunHappyPath:
         assert payload["current"]["corr20"] == pytest.approx(PIN_CALIBRATION_CORR, abs=1e-6)
         assert payload["scan_time"].endswith("Z")
 
-        assert fake.replica_guards >= 1
         assert [row[0] for row in fake.snapshots] == ["vixcor"]
         assert fake.health == [("vixcor", "ok", None)]
         assert len(fake.vixcor_rows) == 1

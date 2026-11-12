@@ -197,7 +197,6 @@ def test_gather_degrades_on_expired_allowlist_entry(monkeypatch):
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", inject_unit_drift)
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
-    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(
         da, "_read_repo_blob",
         lambda rel: "unit-mismatch:radon-api.service expires=2026-08-01 pending reinstall\n",
@@ -216,7 +215,6 @@ def _gather_with_unit_drift(monkeypatch, tmp_path, working_tree_allowlist, blob)
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", inject_unit_drift)
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
-    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "drift-allowlist.conf").write_text(working_tree_allowlist)
     monkeypatch.setattr(da, "REPO", tmp_path)
@@ -384,7 +382,6 @@ def test_gather_does_not_mix_general_git_dirtiness_into_config(monkeypatch):
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
-    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(da, "_read", lambda path: "")
     monkeypatch.setattr(da, "_read_repo_blob", lambda relative: "")
     assert da.gather() == ([], {}, [])
@@ -467,7 +464,6 @@ class TestRoleSkippedGatewayPlane:
         monkeypatch.setattr(da, "_check_compose", check_compose)
         monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
         monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
-        monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
         monkeypatch.setattr(da, "_read_repo", lambda relative: "")
         monkeypatch.setattr(da, "_read_repo_blob", lambda relative: "")
         result = da.gather()

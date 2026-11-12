@@ -703,13 +703,9 @@ class TestFetcherConstants:
 class _FakeWriter:
     def __init__(self, *, rows_raise: bool = False):
         self.rows_raise = rows_raise
-        self.replica_checks = 0
         self.rows: list[tuple[list[dict], str | None]] = []
         self.snapshots: list[tuple[str, str]] = []
         self.health: list[tuple[str, str, dict | None]] = []
-
-    def ensure_no_replica_for_writers(self):
-        self.replica_checks += 1
 
     def upsert_dispersion_rows(self, rows, recorded_at=None):
         if self.rows_raise:
@@ -777,7 +773,6 @@ class TestRun:
         assert self.fake.rows == []
         assert self.fake.snapshots == [("dispersion", NOW_ISO)]
         assert self.fake.health == [("dispersion", "ok", None)]
-        assert self.fake.replica_checks >= 1
         assert payload["scan_time"] == NOW_ISO
         assert payload["status"] == "ok"
         assert payload["data_date"] == LAST_SESSION

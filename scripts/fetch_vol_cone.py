@@ -458,7 +458,6 @@ def _mirror_snapshot(
     except ImportError:
         return None
     try:
-        writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_vol_cone_rows(new_rows or [], recorded_at=scan_time)
         writer.upsert_scan_snapshot("vol-cone", scan_time, payload)
@@ -537,7 +536,6 @@ def _checkpoint_rows(rows: list[dict[str, Any]], scan_time: str) -> None:
     try:
         from db import writer
 
-        writer.ensure_no_replica_for_writers()
         writer.upsert_vol_cone_rows(rows, recorded_at=scan_time)
     except Exception as exc:  # noqa: BLE001 — the terminal write retries
         print(f"[vol-cone] checkpoint non-fatal: {exc}", file=sys.stderr)

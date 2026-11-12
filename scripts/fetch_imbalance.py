@@ -218,7 +218,6 @@ async def collect(client=None, *, now=None):
 def persist_result(payload):
     if payload["missing"]:
         raise RuntimeError("no aligned completed-session observations; retaining prior snapshot")
-    writer.ensure_no_replica_for_writers()
     complete_rows = [row for row in payload["series"] if row.get("ask") is not None and row.get("bid") is not None]
     writer.upsert_imbalance_rows(complete_rows, recorded_at=payload["scan_time"])
     writer.upsert_scan_snapshot(SERVICE, payload["scan_time"], payload)

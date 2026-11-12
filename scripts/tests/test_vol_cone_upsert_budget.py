@@ -71,7 +71,6 @@ def test_incremental_run_upserts_only_new_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "VOL_CONE_JSON", tmp_path / "vol_cone.json")
     monkeypatch.setattr(mod, "_read_history_rows", lambda: rows)
     monkeypatch.setattr(mod, "_backfill_ticker", lambda *a, **k: [dict(new_row)])
-    monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
     monkeypatch.setattr(writer, "upsert_vol_cone_rows", _capture)
     monkeypatch.setattr(writer, "upsert_scan_snapshot", lambda *a, **k: None)
     monkeypatch.setattr(writer, "record_service_health", lambda *a, **k: None)

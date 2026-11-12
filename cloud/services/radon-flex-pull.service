@@ -11,7 +11,6 @@ UMask=0077
 WorkingDirectory=/home/radon/radon
 # Not /etc/radon/env: that file carries TWS_PASSWORD. Turso + sFTP live here.
 EnvironmentFile=-/var/lib/radon/flex-secrets/env
-Environment=RADON_DB_NO_REPLICA=1
 # systemd provisions the inbox symlink-safely as the unit's own user; no
 # full-root ExecStartPre=+ escape from the sandbox.
 StateDirectory=radon/flex-inbox

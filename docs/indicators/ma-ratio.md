@@ -91,8 +91,7 @@ member's own session axis), `aggregate_ma_ratio(member_flags, sessions)`
 - `install_sigterm_unwind()` (shared with bpi): SIGTERM calls `os._exit(143)`
   so a stuck chart-fallback worker cannot hold the oneshot past TimeoutStopSec.
   systemd records exit-code 143, not Result=timeout.
-- Writes, in order, every cycle: `ensure_no_replica_for_writers()` →
-  `upsert_ma_ratio_rows(rows, recorded_at=scan_time)` (full computed window,
+- Writes, in order, every cycle: `upsert_ma_ratio_rows(rows, recorded_at=scan_time)` (full computed window,
   idempotent per date) → `upsert_scan_snapshot("ma-ratio", scan_time, payload)` →
   `record_service_health("ma-ratio", "ok", finished_at=scan_time)` → atomic JSON
   fallback `data/ma_ratio.json`. Turso is the source of truth. Weekend/holiday runs
@@ -200,8 +199,7 @@ migration executed into in-memory sqlite.
 ## Timer — `cloud/services/radon-ma-ratio.{service,timer}`
 
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
-  `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`,
-  `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/ma_ratio_scan.py`
+  `EnvironmentFile=/etc/radon/env`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/ma_ratio_scan.py`
   (venv python directly, never the wrapper), `TimeoutStartSec=2100`
   (`SWEEP_BUDGET_S=1500` + one in-flight fetch + persist slack; sized for an
   SPX-only sweep against the divyield 503-symbol precedent, NOT bpi's 3-index

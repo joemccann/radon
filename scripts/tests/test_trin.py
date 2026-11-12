@@ -225,7 +225,6 @@ def persist_calls(monkeypatch, tmp_path):
 
     calls: list[tuple] = []
     monkeypatch.setattr(ft, "TRIN_JSON", tmp_path / "trin.json")
-    monkeypatch.setattr(ft.writer, "ensure_no_replica_for_writers", lambda: calls.append(("guard",)))
     monkeypatch.setattr(ft.writer, "upsert_trin_samples", lambda rows, recorded_at: calls.append(("samples", len(rows))))
     monkeypatch.setattr(ft.writer, "upsert_trin_daily_rows", lambda rows, recorded_at: calls.append(("daily", len(rows))))
     monkeypatch.setattr(ft.writer, "upsert_scan_snapshot", lambda service, scan_time, payload: calls.append(("snapshot", service)))
@@ -245,7 +244,7 @@ class TestPersistResult:
     def test_writes_in_order(self, persist_calls, daily):
         sample = {"ts": _stamp(5), "session_date": "2026-08-21", "trin": 0.68, "source": "ib"}
         persist_result(build_output([sample], daily), [sample], [("2026-08-21", 0.68)])
-        assert persist_calls == [("guard",), ("samples", 1), ("daily", 1), ("snapshot", "trin"), ("health", "trin", "ok")]
+        assert persist_calls == [("samples", 1), ("daily", 1), ("snapshot", "trin"), ("health", "trin", "ok")]
 
     def test_off_hours_heartbeats_but_does_not_bump_the_snapshot(self, persist_calls, daily):
         """REL-053 / R-125 (writer half): this asserted a snapshot upsert on

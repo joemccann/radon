@@ -75,7 +75,6 @@ class TestTrinHonestDegradation:
         trin = self._reload(monkeypatch, tmp_path)
         recorded: list[tuple] = []
 
-        monkeypatch.setattr(trin.writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(trin.writer, "upsert_trin_samples", lambda *a, **k: None)
         monkeypatch.setattr(trin.writer, "upsert_trin_daily_rows", lambda *a, **k: None)
         monkeypatch.setattr(trin.writer, "upsert_scan_snapshot", lambda *a, **k: None)
@@ -103,7 +102,6 @@ class TestTrinHonestDegradation:
     def test_a_healthy_sample_still_records_ok(self, monkeypatch, tmp_path):
         trin = self._reload(monkeypatch, tmp_path)
         recorded: list[tuple] = []
-        monkeypatch.setattr(trin.writer, "ensure_no_replica_for_writers", lambda: None)
         monkeypatch.setattr(trin.writer, "upsert_trin_samples", lambda *a, **k: None)
         monkeypatch.setattr(trin.writer, "upsert_trin_daily_rows", lambda *a, **k: None)
         monkeypatch.setattr(trin.writer, "upsert_scan_snapshot", lambda *a, **k: None)

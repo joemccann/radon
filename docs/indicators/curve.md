@@ -66,8 +66,7 @@ Small pure functions (composed-method), stdlib `csv` parsing, `requests` fetch:
   `{scan_time, source: "treasury", count, current: {date, y3m, y2, y10, spread}, series: [...]}`
   (`current` = last series row; `scan_time` tz-aware UTC ISO).
 - `persist_result(payload, rows_changed_rows)` — refuses empty `series` (no cache write,
-  no DB write); else: `writer.ensure_no_replica_for_writers()`;
-  `writer.upsert_yield_curve_rows(new_rows, recorded_at=scan_time)` only when changed;
+  no DB write); else: `writer.upsert_yield_curve_rows(new_rows, recorded_at=scan_time)` only when changed;
   `writer.upsert_scan_snapshot("yield-curve", scan_time, payload)` EVERY cycle;
   `writer.record_service_health("yield-curve", "ok", finished_at=scan_time)` EVERY cycle;
   atomic JSON write to `data/yield_curve.json`.
@@ -170,7 +169,6 @@ Helpers `web/lib/yieldCurve.ts` (pure, unit-tested):
   "requires_ib": False}` + append to the daily-bucket check list.
 - `cloud/services/radon-yield-curve.service`: Type=oneshot, User=radon,
   WorkingDirectory=/home/radon/radon, EnvironmentFile=/etc/radon/env,
-  Environment=RADON_DB_NO_REPLICA=1,
   ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_yield_curve.py,
   TimeoutStartSec=300, journal out/err, StartLimitIntervalSec=300, StartLimitBurst=5.
 - `cloud/services/radon-yield-curve.timer`: `OnCalendar=*-*-* 22:30:00 UTC` (comment: after

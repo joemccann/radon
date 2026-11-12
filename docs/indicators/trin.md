@@ -86,7 +86,7 @@ Public functions the tests import:
 - `classify_state(ma10) -> state`
 - `build_output(samples, daily, scan_time=None, source=...) -> payload`
 - `parse_stockcharts_daily` — reuse breadth's by import
-- `persist_result(payload, new_samples, new_daily_rows)` — refuses when both hourly and daily are empty; order: `ensure_no_replica_for_writers`, `upsert_trin_samples` (if any), `upsert_trin_daily_rows` (if any), `upsert_scan_snapshot("trin", ...)`, `record_service_health("trin", "ok", ...)`, atomic JSON
+- `persist_result(payload, new_samples, new_daily_rows)` — refuses when both hourly and daily are empty; order: `upsert_trin_samples` (if any), `upsert_trin_daily_rows` (if any), `upsert_scan_snapshot("trin", ...)`, `record_service_health("trin", "ok", ...)`, atomic JSON
 - `main(argv)` — `--json`
 
 Payload:

@@ -15,10 +15,7 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
-# Put RADON_DB_NO_REPLICA last: configparser (unit tests) keeps only the
-# final Environment= line when keys duplicate; fleet drop-in also sets it.
 Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python3
-Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_oi_changes_refresh.sh
 StandardOutput=journal
 StandardError=journal

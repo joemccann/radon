@@ -265,7 +265,6 @@ def test_app_role_still_audits_the_app_host_surfaces_it_owns(monkeypatch) -> Non
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
-    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(da, "_read_repo", lambda relative: "")
     _drifts, _allowed, known = da.gather()
 

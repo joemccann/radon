@@ -510,7 +510,6 @@ def _write_db_cache(rows: list[dict[str, Any]], scan_time: str) -> None:
     except ImportError:
         return
     try:
-        writer.ensure_no_replica_for_writers()
         db = get_db()
         db.execute(_CATALYSTS_TABLE_DDL)
         db.execute(

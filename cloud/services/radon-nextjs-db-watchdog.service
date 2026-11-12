@@ -25,8 +25,6 @@ WorkingDirectory=/home/radon/radon
 # recursive privileged ownership changes across any radon-writable path.
 Environment=RADON_NEXTJS_DB_WATCHDOG_STATE_PATH=/var/lib/radon-nextjs-db-watchdog/state.json
 EnvironmentFile=/etc/radon/env
-# Direct-to-cloud only; never resurrect the retired embedded replica.
-Environment=RADON_DB_NO_REPLICA=1
 # -I (isolated): drops the script's own directory from sys.path, so a module
 # dropped beside the probe cannot shadow a stdlib import.
 ExecStart=/home/radon/radon/.venv/bin/python -I /home/radon/radon/cloud/scripts/nextjs_db_watchdog.py
