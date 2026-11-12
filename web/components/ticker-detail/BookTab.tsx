@@ -24,6 +24,7 @@ import { OrderBook } from "@/components/ticker-detail/OrderBook";
 import { MicrostructureStrip } from "@/components/ticker-detail/MicrostructureStrip";
 import { buildSyntheticComboDepth } from "@/lib/book/syntheticComboDepth";
 import { buildL1BboDepth } from "@/lib/book/l1BboDepth";
+import { liveStockBook } from "@/lib/book/depthDerivations";
 
 type BookTabProps = {
   ticker: string;
@@ -523,11 +524,11 @@ export default function BookTab({
   const depth = useMemo(() => {
     if (!isComboBook) {
       const live = depths?.[resolvedBookKey] ?? null;
-      if (live?.entitled) return live;
-      const seedKind = live?.kind ?? bookKind ?? "stock";
-      if (seedKind === "future" || seedKind === "combo") return live;
       const bidSize = priceData?.bidSize ?? null;
       const askSize = priceData?.askSize ?? null;
+      if (live?.entitled) return liveStockBook(live, { bid, ask, bidSize, askSize });
+      const seedKind = live?.kind ?? bookKind ?? "stock";
+      if (seedKind === "future" || seedKind === "combo") return live;
       if (bid != null && ask != null && bidSize != null && askSize != null) {
         return buildL1BboDepth({
           symbol: resolvedBookKey,
