@@ -4119,6 +4119,6 @@ Review:
 - [x] EM1 depends_on: [] Reconfirm audit findings on current main and inspect scoped web instructions.
 - [x] EM2 depends_on: [EM1] Remove recurring watchlist entrance and streaming prose pulse while preserving reduced-motion behavior.
 - [x] EM3 depends_on: [EM2] Run focused UI verification and review the diff.
-- [ ] EM4 depends_on: [EM3] Create a template-compliant PR, watch exact-head CI to green, and send the required notification.
+- [x] EM4 depends_on: [EM3] Create a template-compliant PR, watch exact-head CI to green, and send the required notification.
 
 Review: Removed the watchlist 480 ms entry and 80 ms delay; kept reduced-motion handling for row hover. Removed the 1.5 s text pulse; the separate chat cursor still indicates streaming and stops for reduced motion. Full web Vitest: 11,153 passed, 10 skipped. Watchlist and chat Playwright: 7 passed. `git diff --check` clean.
