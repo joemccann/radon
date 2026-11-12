@@ -987,19 +987,12 @@ Contract: [`knowledge-embeddings.md`](knowledge-embeddings.md).
 
 ### SLM tagger monitor (`radon-slm-tagger-monitor.timer`)
 
-Daily `07:10 UTC` (`RandomizedDelaySec=300`), oneshot
-`scripts/newsfeed/slm/monitor.py`, `TimeoutStartSec=120`. No-op exit 0 when
-`RADON_SLM_TAGGER_MODE` is `off` or `shadow`. In `prefer` / `primary` it
-reads `slm_tagger_shadow` (7d / 28d), prints one JSON object, writes
-`service_health[slm-tagger-monitor]` (26h scheduled window) and exits 3 on
-an I.3 breach. The llama-server sidecar (`radon-slm-tagger.service`,
-127.0.0.1:8331) has no `service_health` row; the unit watchdog covers
-`failed` / `start-limit-hit`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md).
-Rung stays `off` until Joe enables it. The sidecar unit is installed even
-before its optional binary and model are provisioned. Its executable/model
-conditions skip activation until both exist; `/usr/bin/env` executes the
-absolute llama-server path so `systemd-analyze verify` can validate the unit
-on hosts without llama-server. Installing the unit does not enable or start it.
+Unwired. The newsfeed SLM tagger rung failed every gate, so the gateway
+refuses `slm-tagger` and `RADON_SLM_TAGGER_MODE` is ignored. Tagging uses
+the model ladder. The monitor oneshot and sidecar unit files remain until
+a follow-up deletion; `enable_services` still skips them. Do not enable
+either unit or treat a monitor page as a live tagging incident. Spec:
+[`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md).
 
 For `config-drift`, inspect `journalctl -u radon-drift-audit` for the actual
 findings. An `error` heartbeat can report detected configuration differences
