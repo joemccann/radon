@@ -24,19 +24,18 @@ PRIVATE_DIR = Path("/etc/radon/grok-responder")
 PRODUCTION_ENV = Path("/etc/radon/env")
 LEGACY_ENV = Path("/home/radon/radon-page-responder.env")
 LEGACY_REPO = Path("/home/radon/radon-page-responder")
-CONTROLLER = Path("/usr/local/lib/radon/grok-responder-upgrade")
 CODE_ROOT = Path("/usr/local/lib/radon/grok-responder")
 CODE_INSTALLER = "cloud/scripts/install-grok-responder-code.sh"
 INSTALLED_HELPER = Path("/usr/local/lib/radon/grok_responder_account.py")
 SYSTEMD = Path("/etc/systemd/system")
 READY = ACCOUNT_HOME / "ready"
 INVENTORY = PRIVATE_DIR / "installed-units.sha256"
-OPTIONAL_UNITS = (
-    "radon-grok-responder.service", "radon-grok-responder.timer",
-    "radon-grok-responder-upgrade.service", "radon-grok-responder-upgrade.timer",
-)
+OPTIONAL_UNITS = ("radon-grok-responder.service", "radon-grok-responder.timer")
 NEW_TIMERS = ("radon-grok-responder.timer",)
-RETIRED_TIMER = "radon-grok-responder-upgrade.timer"
+# Owner decision 2026-11-11: the upgrade pair left the responder domain.
+# A host refreshed before that still carries it until the next publish.
+RETIRED_UNITS = ("radon-grok-responder-upgrade.timer", "radon-grok-responder-upgrade.service")
+RESPONDER_WORKLOAD = "radon-grok-responder.service"
 MODEL_GROUP = "radon-model-connect"
 MODEL_ROOT = Path("/opt/radon-model-clients/current")
 MODEL_SOCKET = "/run/radon-model-gateway/gateway.sock"
@@ -264,14 +263,23 @@ def publish_optional_units(stage: Path):
     root_directory(INSTALLED_HELPER.parent, 0o755)
     atomic_root_file(INSTALLED_HELPER, Path(__file__).read_bytes(), 0o644)
     run(["/usr/bin/systemctl", "daemon-reload"])
-    run(["/usr/bin/systemctl", "disable", "--now", RETIRED_TIMER])
+    retire_upgrade_units()
+
+
+def retire_upgrade_units():
+    installed = [name for name in RETIRED_UNITS if (SYSTEMD / name).exists() or (SYSTEMD / name).is_symlink()]
+    if not installed:
+        return
+    run(["/usr/bin/systemctl", "disable", "--now", *installed])
+    for name in installed:
+        (SYSTEMD / name).unlink()
+    run(["/usr/bin/systemctl", "daemon-reload"])
 
 
 def _responder_idle():
-    for workload in ("radon-grok-responder.service", "radon-grok-responder-upgrade.service"):
-        # Pass `run` at call time. The default argument is bound at import.
-        if _unit_active(workload, runner=run):
-            raise MaintenanceError("responder workload is active; retry after it finishes")
+    # Pass `run` at call time. The default argument is bound at import.
+    if _unit_active(RESPONDER_WORKLOAD, runner=run):
+        raise MaintenanceError("responder workload is active; retry after it finishes")
 
 
 def refresh(stage: Path):
@@ -356,7 +364,6 @@ def prepare(stage: Path):
     existing = read_root_file(PRIVATE_DIR / "env") if (PRIVATE_DIR / "env").exists() else as_account(
         ["/bin/cat", LEGACY_ENV], account="radon", check=False).stdout
     atomic_root_file(PRIVATE_DIR / "env", derive_environment(production, existing).encode())
-    run(["/bin/bash", stage / "cloud/scripts/install-grok-upgrade-controller.sh", stage / "scripts", CONTROLLER])
     install_responder_code(stage)
     admit_model_client(account)
     ensure_native_cli()
@@ -398,8 +405,7 @@ def handover(*, forward: bool, runner=run, marker=READY):
     """Switch timer ownership without killing an in-flight responder run."""
     source_timers = (OLD_TIMER,) if forward else NEW_TIMERS
     target_timers = NEW_TIMERS if forward else (OLD_TIMER,)
-    workloads = ("radon-grok-page-responder.service",) if forward else (
-        "radon-grok-responder.service", "radon-grok-responder-upgrade.service")
+    workloads = ("radon-grok-page-responder.service",) if forward else (RESPONDER_WORKLOAD,)
     for workload in workloads:
         if _unit_active(workload, runner):
             raise MaintenanceError("responder workload is active; retry after it finishes")

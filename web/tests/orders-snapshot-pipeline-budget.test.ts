@@ -68,6 +68,7 @@ const execRow = {
 function resultForSql(sql: string) {
   if (/FROM\s+open_orders/i.test(sql)) return { rows: [openRow] };
   if (/FROM\s+executed_orders/i.test(sql)) return { rows: [execRow] };
+  if (/FROM\s+service_health/i.test(sql)) return { rows: [] };
   throw new Error(`unexpected sql: ${sql}`);
 }
 
@@ -96,9 +97,10 @@ describe("PERF-016 orders snapshot pipeline budget", () => {
     );
     expect(snapshotExecutes).toHaveLength(0);
     expect(mocks.batch).toHaveBeenCalledTimes(1);
-    expect(mocks.batch.mock.calls[0][0]).toHaveLength(2);
+    expect(mocks.batch.mock.calls[0][0]).toHaveLength(3);
     expect(String(mocks.batch.mock.calls[0][0][0].sql)).toMatch(/FROM\s+open_orders/i);
     expect(String(mocks.batch.mock.calls[0][0][1].sql)).toMatch(/FROM\s+executed_orders/i);
+    expect(String(mocks.batch.mock.calls[0][0][2].sql)).toMatch(/FROM\s+service_health/i);
     expect(mocks.batch.mock.calls[0][1]).toBe("read");
   });
 });

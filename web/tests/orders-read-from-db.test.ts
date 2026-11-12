@@ -7,21 +7,31 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 type MockRow = Record<string, unknown>;
 
-function resultForSql(sql: string, openRows: MockRow[], execRows: MockRow[]) {
+function resultForSql(
+  sql: string,
+  openRows: MockRow[],
+  execRows: MockRow[],
+  healthRows: MockRow[] = [],
+) {
   if (/FROM\s+open_orders/i.test(sql)) return { rows: openRows };
   if (/FROM\s+executed_orders/i.test(sql)) return { rows: execRows };
+  if (/FROM\s+service_health/i.test(sql)) return { rows: healthRows };
   throw new Error(`unexpected sql: ${sql}`);
 }
 
-function mockGetDb(openRows: MockRow[], execRows: MockRow[]): { syncCalls: number } {
+function mockGetDb(
+  openRows: MockRow[],
+  execRows: MockRow[],
+  healthRows: MockRow[] = [],
+): { syncCalls: number } {
   const counters = { syncCalls: 0 };
   vi.doMock("@/lib/db", () => ({
     getDb: () => ({
       execute: vi.fn().mockImplementation(({ sql }: { sql: string }) =>
-        Promise.resolve(resultForSql(sql, openRows, execRows)),
+        Promise.resolve(resultForSql(sql, openRows, execRows, healthRows)),
       ),
       batch: vi.fn().mockImplementation((stmts: Array<{ sql: string }>) =>
-        Promise.resolve(stmts.map((stmt) => resultForSql(stmt.sql, openRows, execRows))),
+        Promise.resolve(stmts.map((stmt) => resultForSql(stmt.sql, openRows, execRows, healthRows))),
       ),
     }),
     syncDb: vi.fn().mockImplementation(async () => {
@@ -84,7 +94,8 @@ describe("readOrdersFromDb", () => {
     await expect(readOrdersFromDb()).resolves.toBeNull();
     expect(execute).not.toHaveBeenCalled();
     expect(batch).toHaveBeenCalledTimes(1);
-    expect(batch.mock.calls[0][0]).toHaveLength(2);
+    expect(batch.mock.calls[0][0]).toHaveLength(3);
+    expect(String(batch.mock.calls[0][0][2].sql)).toMatch(/FROM\s+service_health/i);
     expect(batch.mock.calls[0][1]).toBe("read");
   });
 
@@ -116,6 +127,17 @@ describe("readOrdersFromDb", () => {
     } finally {
       delete process.env.RADON_DB_CACHE_FORCE;
     }
+  });
+
+  it("returns the ok clock when the book and today's fills are both empty", async () => {
+    mockGetDb([], [], [{ state: "ok", finished_at: "2026-11-12T15:26:10Z" }]);
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result).toMatchObject({
+      last_sync: "2026-11-12T15:26:10Z",
+      open_count: 0,
+      executed_count: 0,
+    });
   });
 
   it("returns null when both tables are empty", async () => {
@@ -215,6 +237,52 @@ describe("readOrdersFromDb", () => {
     mockGetDb(
       [],
       [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.last_sync).toBe(todayFillIso);
+  });
+
+  it("uses the orders-sync ok clock when the working book is empty", async () => {
+    const syncedAt = "2026-11-12T15:26:10Z";
+    mockGetDb(
+      [],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
+      [{ state: "ok", finished_at: syncedAt }],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.last_sync).toBe(syncedAt);
+    expect(result!.executed_orders[0].execId).toBe("e1");
+  });
+
+  it("ignores a non-ok orders-sync finished_at", async () => {
+    mockGetDb(
+      [],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
+      [{ state: "warn", finished_at: "2026-11-12T15:26:10Z" }],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.last_sync).toBe(todayFillIso);
+  });
+
+  it("keeps a newer open-order updated_at over an older ok heartbeat", async () => {
+    mockGetDb(
+      [{ payload: JSON.stringify(openPayload(1)), updated_at: "2026-11-12T15:30:00Z" }],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
+      [{ state: "ok", finished_at: "2026-11-12T15:26:10Z" }],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.last_sync).toBe("2026-11-12T15:30:00Z");
+  });
+
+  it("ignores a naive orders-sync finished_at", async () => {
+    mockGetDb(
+      [],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
+      [{ state: "ok", finished_at: "2026-11-12T15:26:10" }],
     );
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
     const result = await readOrdersFromDb();

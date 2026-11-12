@@ -878,7 +878,9 @@ paths. Gateway readiness and pickup checks precede transactional timer
 handover. Neither default nor optional setup invokes a vendor installer,
 native login, or independent grant probe. The existing keeper timer requests
 gateway-owned refresh. Legacy updater bodies remain rollback artifacts,
-guarded off once the managed manifest exists. Migration details remain in
+guarded off once the managed manifest exists. The responder domain no longer
+installs the upgrade controller or the `radon-grok-responder-upgrade` pair;
+its refresh retires a leftover pair. Migration details remain in
 [`docs/grok-page-responder.md`](../docs/grok-page-responder.md).
 
 DS-2026-10-29-01: the legacy radon-UID `radon-grok-page-responder.{service,timer}`
