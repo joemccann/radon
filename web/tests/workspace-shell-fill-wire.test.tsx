@@ -49,6 +49,7 @@ vi.mock("@/lib/useAutoSyncOnStale", () => ({ useAutoSyncOnStale: () => {} }));
 vi.mock("@/lib/useSnapshotStaleness", () => ({
   SNAPSHOT_STALE_THRESHOLD_MS: 60_000,
   PORTFOLIO_SNAPSHOT_STALE_THRESHOLD_MS: 150_000,
+  ORDERS_SNAPSHOT_STALE_THRESHOLD_MS: 480_000,
   useSnapshotStaleness: () => ({ isStale: false, state: "fresh", staleAgeMinutes: 0, tick: 0 }),
 }));
 vi.mock("@/lib/OrderActionsContext", () => ({

@@ -8,6 +8,7 @@ import {
 import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
+import { absoluteTimestamp, resolveOrdersLastSync } from "@/lib/orders/ordersSyncClock";
 import { isPriorSessionDayOrder } from "@/lib/orders/workingOrders";
 import { readCachedOrdersSnapshot } from "@/lib/orders/ordersReadCache";
 
@@ -63,10 +64,8 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   const cutoff = new Date(
     Date.now() - EXECUTED_SQL_LOOKBACK_HOURS * 60 * 60 * 1000,
   ).toISOString();
-  // One /v2/pipeline for both SELECTs (PERF-016). FastAPI already does this
-  // in `_read_orders_snapshot_from_db` (PERF-002); the Next.js poll path
-  // still issued two HTTP round-trips.
-  const [openResult, execResult] = await dbBatch(
+  // One /v2/pipeline for the book plus the orders-sync clock (PERF-016).
+  const [openResult, execResult, healthResult] = await dbBatch(
     [
       {
         sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
@@ -77,6 +76,12 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
               WHERE fill_time >= ?
               ORDER BY fill_time DESC`,
         args: [cutoff],
+      },
+      {
+        sql: `SELECT state, last_attempt_finished_at AS finished_at
+              FROM service_health
+              WHERE service = ?`,
+        args: ["orders-sync"],
       },
     ],
     { timeoutMs: DB_READ_TIMEOUT_MS, label: "orders snapshot", mode: "read" },
@@ -106,11 +111,23 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   // Product contract: "Today's Executed" = America/New_York calendar day only.
   // SQL lookback is only a bound; never surface yesterday's 10:31 under "Today".
   const executed = filterExecutedToEtToday(executedRaw);
-
-  if (open.length === 0 && executed.length === 0) return null;
+  const healthRow = healthResult?.rows?.[0] as { state?: unknown; finished_at?: unknown } | undefined;
+  const healthState = typeof healthRow?.state === "string" ? healthRow.state : null;
+  const healthFinishedAt = typeof healthRow?.finished_at === "string" ? healthRow.finished_at : null;
+  const lastSync = resolveOrdersLastSync({
+    healthState,
+    healthFinishedAt,
+    latestOpenUpdatedAt: latestOpenSync,
+    latestFillTime: latestExecSync,
+  });
+  // A flat book with no rows is "no sample" unless orders-sync itself
+  // confirmed the empty snapshot. A filtered-out prior-day fill is not
+  // that confirmation.
+  const confirmedSync = healthState === "ok" && absoluteTimestamp(healthFinishedAt) != null;
+  if (open.length === 0 && executed.length === 0 && !confirmedSync) return null;
 
   return {
-    last_sync: latestOpenSync || latestExecSync || "",
+    last_sync: lastSync,
     open_orders: open,
     executed_orders: executed,
     open_count: open.length,
