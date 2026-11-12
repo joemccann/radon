@@ -31,6 +31,7 @@ import {
   type PanicIndexPoint,
 } from "@/lib/panicIndex";
 import { usePanicIndex } from "@/lib/usePanicIndex";
+import { provisionalNote } from "@/lib/provisionalRow";
 import { useViewport } from "@/lib/useViewport";
 
 /**
@@ -348,6 +349,11 @@ export default function PanicIndexPanel() {
             ariaLabel="Panic proxy history range brush"
           />
         )}
+        {data.provisional ? (
+          <div className="section-footnote" data-testid="panic-index-provisional">
+            {provisionalNote(data.provisional)}
+          </div>
+        ) : null}
         <div className="section-footnote">
           {SOURCE_FOOTNOTE}
         </div>
