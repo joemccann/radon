@@ -26,15 +26,16 @@ This loop owns one engine: Vercel DeepSec, an AI source-code reviewer with
 privileged shell capability. It is NOT a penetration test and NOT a substitute
 for the security-nightly loop, which owns gitleaks, the deterministic
 controls, Claude Security and the bounded local active tests. The two loops
-share every rail below and never share a clone, a lock, a scratch, a branch,
-a label or a finding queue. Until 2026-09-18 DeepSec was a sibling worker
+share every rail below and never share a clone, a per-loop lock, a scratch,
+a branch, a label or a finding queue. They do share `subscription-claude.lock`,
+so one does not start while the other is still running. Until 2026-09-18 DeepSec was a sibling worker
 that only exported findings for the security loop to harvest; it now runs
 the full protocol itself, so a verified DeepSec finding reaches the operator
 as a green PR in the same cycle.
 
 The header's `Phase:` is the mode: `audit`, `remediate` or `deliver`. The
 runner (`scripts/runner/run_loop.sh`, LaunchDaemon
-`com.radon.runner.security-deepsec`) fires daily at 00:50 local and runs
+`com.radon.runner.security-deepsec`) fires at 00:50 local on Monday, Wednesday and Friday and runs
 `audit`, then `remediate`, then `deliver`, one session each, in this loop's
 own clone. The loop never merges.
 
@@ -791,7 +792,7 @@ counts-only line follows, e.g. `unreviewed: 12 commits since 2026-10-24,
 reason incomplete`: a count, the checkpoint's date and a reason token, never
 a SHA or file.
 Operators read two dead-men: `security-nightly` for the security loop and
-`security-deepsec` for this one. A missing daily comment on either means
+`security-deepsec` for this one. A missing comment on a scheduled day on either means
 that runner did not fire. Neither comment may name a route, file, attack,
 secret, account, or PR number.
 
