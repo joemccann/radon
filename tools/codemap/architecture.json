@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-12T10:00:09Z",
-  "node_count": 4329,
-  "edge_count": 8865,
+  "generated_at": "2026-11-13T10:00:08Z",
+  "node_count": 4340,
+  "edge_count": 8874,
   "areas": {
-    "web": 2413,
+    "web": 2415,
     "site": 134,
-    "scripts": 1573,
-    "cloud": 166,
+    "scripts": 1580,
+    "cloud": 168,
     "lib": 25,
     "tests": 15,
     "tools": 3
@@ -40,7 +40,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 458
+      "count": 459
     },
     {
       "id": "web/public",
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1167
+      "count": 1168
     },
     {
       "id": "site/app",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 853
+      "count": 859
     },
     {
       "id": "scripts/trade_blotter",
@@ -250,7 +250,7 @@
     {
       "id": "scripts/utils",
       "area": "scripts",
-      "count": 43
+      "count": 44
     },
     {
       "id": "scripts/uw_stream",
@@ -285,7 +285,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 141
+      "count": 143
     },
     {
       "id": "lib/tools",
@@ -406,6 +406,13 @@
       "test": false
     },
     {
+      "id": "scripts/api/server.py",
+      "area": "scripts",
+      "in": 52,
+      "out": 20,
+      "test": false
+    },
+    {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
       "in": 67,
@@ -417,13 +424,6 @@
       "area": "web",
       "in": 65,
       "out": 6,
-      "test": false
-    },
-    {
-      "id": "scripts/api/server.py",
-      "area": "scripts",
-      "in": 52,
-      "out": 19,
       "test": false
     },
     {
