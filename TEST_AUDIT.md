@@ -12400,3 +12400,13 @@ Audited through: 1a000276959c9f1d9b5f6888f520639318fd8502 on 2026-11-13 — 2 ne
 |---|---|---|
 | T-588 | DONE | 60s mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t588-red.log`). Restored 8-minute select. Green: 2 passed (`/tmp/t588-green.log`); delta Vitest 29 passed ×3. Product source unchanged. |
 | T-589 | DONE | First-rule YES: 1 failed (`/tmp/t589-red.log`). Second-rule YES: 1 failed (`/tmp/t589-red2.log`). Restored `NO`. Green: 3 passed (`/tmp/t589-green.log`); delta cloud 13 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-13
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (r1 file 11 passed; r2 file 1 failed then isolated 2 passed; r3 isolated 2 passed). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as each other (0 added / 0 removed). Versus the 2026-11-12 Darwin 58-list the node IDs are identical. Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 11 passed; 19,716 passed / 10 skipped / 40 subtests (216.25s) | 11,627 passed / 21 skipped / 1,208 files (112.65s) | 58 failed / 4,275 passed / 23 skipped (1080.83s) | — |
+| 2 | credentials xdist flake then serial retry 2 passed; 19,716 passed / 10 skipped / 40 subtests (228.92s) | 11,627 passed / 21 skipped / 1,208 files (145.07s) | 58 failed / 4,275 passed / 23 skipped (1091.07s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,716 passed / 10 skipped / 40 subtests (171.49s) | 11,627 passed / 21 skipped / 1,208 files (116.77s) | 58 failed / 4,275 passed / 23 skipped (1098.07s) | 0 added / 0 removed |
