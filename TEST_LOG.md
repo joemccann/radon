@@ -1415,3 +1415,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-587 | DONE | Yahoo-first mutation in `quant.data.backfill_closes` failed 3 (`calls` lost rh/uw). Restored `("rh", "uw", "yahoo")`. `scripts/tests/test_quant_data.py` 13 passed ×3. Quant cluster 92 passed. Product source unchanged. Closing rounds: root pytest r1/r3 credentials xdist flake then serial 11 passed; 21,174/21,175/21,174 passed / 12 skipped / 63 subtests. Vitest 11,932 passed / 21 skipped / 1,236 files each round. Cloud 59 failed / 4,033 passed / 23 skipped each round, 0 added / 0 removed against standing `132f9ab02`. |
+
+## 2026-11-13
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-588 | DONE | 60s mutation at `WorkspaceShell.tsx:543`: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/orders` on a 5.5-minute-old book). Restored 8-minute select. Green 2 passed ×3; delta Vitest 29 passed ×3. Product source unchanged. |
+| T-589 | DONE | Grep-only polkit test 3 passed after `NO`→`YES`. Node-executed rules: first-rule YES 1 failed; second-rule YES 1 failed. Restored `NO`. Green 3 passed ×3; delta cloud 13 passed ×3. Product source unchanged. |
