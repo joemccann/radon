@@ -135,7 +135,7 @@ If a script fails:
 | Discovery (preset) | `python3.13 scripts/discover.py ndx100` |
 | Discovery (tickers) | `python3.13 scripts/discover.py AAPL MSFT NVDA` |
 | Watchlist scan | `python3.13 scripts/scanner.py` |
-| **⭐ Stress Test (model)** | `python3.13 scripts/scenario_analysis.py` (update params first, outputs `/tmp/scenario_analysis.json`) |
+| **⭐ Stress Test (model)** | `python3.13 scripts/scenario_analysis.py` (update params first, outputs `data/scenario_analysis.json`) |
 | **⭐ Stress Test (report)** | `python3.13 scripts/scenario_report.py` (reads JSON, generates HTML, opens browser) |
 
 ### Portfolio Commands
@@ -231,14 +231,14 @@ reports/stress-test-{date}.html
 # Pricing engine (update parameters per scenario, then run)
 python3.13 scripts/scenario_analysis.py
 
-# Reference report generator (reads /tmp/scenario_analysis.json)
+# Reference report generator (reads data/scenario_analysis.json)
 python3.13 scripts/scenario_report.py
 ```
 
 **Model pipeline:**
 1. Parse user scenario into: SPX move, VIX level, sector shocks (oil, crypto, etc.)
 2. Update `scenario_analysis.py` parameters: `SCENARIO_SPX_MOVE`, `SCENARIO_VIX`, `SCENARIO_OIL_MOVE`, etc.
-3. Run `scenario_analysis.py` → outputs `/tmp/scenario_analysis.json`
+3. Run `scenario_analysis.py` → outputs `data/scenario_analysis.json`
 4. Write per-position narratives (oil, SPX beta, VIX stress, options structure)
 5. Generate HTML from template with all 10 sections + expandable ▶ detail rows
 6. Open in browser
