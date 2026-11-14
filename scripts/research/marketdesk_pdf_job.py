@@ -1,4 +1,4 @@
-"""One separately throttled MarketDesk PDF archive attempt per managed cycle.
+"""One MarketDesk PDF admission window per managed cycle.
 
 Articles use provider metadata/charts and never wait here. The Turso queue owns
 admission/backoff across workers. Private, fsynced asset receipts and the shared
@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import random
 import re
 import shutil
 import signal
@@ -29,17 +30,21 @@ from types import SimpleNamespace
 from lib.checkpoint import CheckpointedJob
 from research.marketdesk_auth import PREVIEW_QUOTA, MarketDeskAuthError, MarketDeskError
 from research.marketdesk_pdf_policy import SelectionUnavailable
+from research.marketdesk_pdf_rate import FLOOR_SECONDS, JITTER_MAX_BPS
 from utils.atomic_io import atomic_save, verified_load
 
 SERVICE = "marketdesk-pdf"
 MAX_PDF_BYTES = 100 * 1024 * 1024
-MIN_INTERVAL_SECONDS = 1800
+MIN_INTERVAL_SECONDS = FLOOR_SECONDS
 BACKOFF_SECONDS = 900
 PROVIDER_BACKOFF_SECONDS = 21600
 # Allowance and a transient provider 5xx are already durable error rows.
 # Exit 1 makes every timer fire a new oneshot Result=exit-code and a P1 page.
-# not_pdf, http_transport, unauthenticated, and other deferrals still fail.
+# not_pdf, http_404, unauthenticated, and other item deferrals still fail the oneshot.
+# http_429 and http_transport keep the error row and exit 0 while the embargo holds.
 ALLOWANCE_DEFERRALS = frozenset({PREVIEW_QUOTA, "download_quota"})
+# A persisted embargo is already the error row. Exit 1 would page on every fire.
+QUIET_DEFERRALS = ALLOWANCE_DEFERRALS | {"http_429", "http_transport"}
 PROVIDER_5XX = re.compile(r"http_5\d\d\Z")
 ID = re.compile(r"[A-Za-z0-9]{8,16}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
@@ -84,10 +89,13 @@ def default_deps():
 
 
 def _interval(env):
-    try:
-        return max(MIN_INTERVAL_SECONDS, min(int(env.get("MARKETDESK_PDF_MIN_INTERVAL_SECONDS", MIN_INTERVAL_SECONDS)), 86400))
-    except (ValueError, TypeError):
-        return MIN_INTERVAL_SECONDS
+    """The persisted controller owns the pace. A stale env value is not a floor."""
+    del env
+    return MIN_INTERVAL_SECONDS
+
+
+def _jitter_bps():
+    return random.SystemRandom().randrange(0, JITTER_MAX_BPS + 1)
 
 
 def _code(error):
@@ -107,8 +115,10 @@ def _deferral_code(exc):
 
 def _quiet_oneshot(exc):
     """True when the error row is the page and the oneshot must exit 0."""
+    if str(exc).startswith("PDF archive backlog:"):
+        return True
     code = _deferral_code(exc)
-    return code in ALLOWANCE_DEFERRALS or PROVIDER_5XX.fullmatch(code) is not None
+    return code in QUIET_DEFERRALS or PROVIDER_5XX.fullmatch(code) is not None
 
 
 def _is_db_transport(exc):
@@ -154,6 +164,56 @@ def _receipt(path, deps):
         return None
 
 
+def _account_code(code):
+    return code in {PREVIEW_QUOTA, "download_quota", "http_429", "unauthenticated"}
+
+
+def _retry_after(exc):
+    value = getattr(exc, "retry_after", None)
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _claim(deps, env):
+    if hasattr(deps.store, "claim_batch"):
+        return list(deps.store.claim_batch(now=deps.now(), jitter_bps=_jitter_bps()))
+    work = deps.store.claim_next(now=deps.now(), interval_seconds=_interval(env))
+    return [work] if work is not None else []
+
+
+def _fetch(deps, env, work, receipts):
+    """Download or reuse a verified receipt. Returns (saved, provider_success)."""
+    receipt_path = receipts / (work.article_id + ".json")
+    saved = _receipt(receipt_path, deps)
+    if saved is not None:
+        return saved, False
+    temporary = Path(tempfile.mkdtemp(prefix="pdf-", dir=receipts))
+    try:
+        session = deps.open_session(env)
+        data = deps.download(session, work.article_id)
+        if not isinstance(data, bytes) or not data.startswith(b"%PDF-"):
+            raise MarketDeskError("not_pdf")
+        if len(data) > MAX_PDF_BYTES:
+            raise MarketDeskError("too_large")
+        local = temporary / (work.article_id + ".pdf")
+        with local.open("wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(local, 0o600)
+        asset = deps.store_asset(local)
+        digest = hashlib.sha256(data).hexdigest()
+        if asset != ASSET_PREFIX + digest + ".pdf":
+            raise ValueError("stored PDF digest mismatch")
+        saved = {"asset": asset, "digest": digest}
+        atomic_save(str(receipt_path), saved)
+        return saved, True
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
 def run_cycle(*, env=os.environ, deps=None):
     deps = deps or default_deps()
     counts = {"seeded": 0, "attached": 0, "downloaded": 0, "throttled": 0}
@@ -161,60 +221,66 @@ def run_cycle(*, env=os.environ, deps=None):
         counts["seeded"] = deps.store.seed_missing(now=deps.now())
         counts["attached"] += deps.store.attach_downloads(now=deps.now())
         try:
-            work = deps.store.claim_next(now=deps.now(), interval_seconds=_interval(env))
+            batch = _claim(deps, env)
         except SelectionUnavailable:
             raise DownloadDeferred("PDF archive deferred: book_unavailable") from None
-        if work is None:
+        if not batch:
             counts["throttled"] = 1
             blocked = deps.store.blocked()
             if blocked:
                 raise DownloadDeferred("PDF archive deferred: " + blocked)
+            breach = getattr(deps.store, "backlog_breach", lambda **_k: None)(now=deps.now())
+            if breach:
+                raise DownloadDeferred(breach)
             return counts
         root = deps.root()
         receipts = _receipts_root(root)
-        receipt_path = receipts / (work.article_id + ".json")
         checkpoint = CheckpointedJob(root / "jobs" / "marketdesk-pdfs", "marketdesk-pdfs")
-        # The receipt is written before the WAL/DB. If SIGKILL lands between
-        # either acknowledgement, a fresh process verifies the saved bytes.
-        saved = _receipt(receipt_path, deps)
-        provider_success = saved is None
-        if saved is None:
-            temporary = Path(tempfile.mkdtemp(prefix="pdf-", dir=receipts))
+        account = None
+        fatal = None
+        quiet = None
+        verified = 0
+        for index, work in enumerate(batch):
             try:
-                try:
-                    session = deps.open_session(env)
-                    data = deps.download(session, work.article_id)
-                    if not isinstance(data, bytes) or not data.startswith(b"%PDF-"):
-                        raise MarketDeskError("not_pdf")
-                    if len(data) > MAX_PDF_BYTES:
-                        raise MarketDeskError("too_large")
-                    local = temporary / (work.article_id + ".pdf")
-                    with local.open("wb") as stream:
-                        stream.write(data)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.chmod(local, 0o600)
-                    asset = deps.store_asset(local)
-                    digest = hashlib.sha256(data).hexdigest()
-                    if asset != ASSET_PREFIX + digest + ".pdf":
-                        raise ValueError("stored PDF digest mismatch")
-                    saved = {"asset": asset, "digest": digest}
-                    atomic_save(str(receipt_path), saved)
-                except (MarketDeskError, MarketDeskAuthError, OSError, ValueError) as exc:
-                    code = _code(exc)
-                    delay = PROVIDER_BACKOFF_SECONDS if code in {PREVIEW_QUOTA, "download_quota", "http_429"} else (3600 if code == "unauthenticated" else BACKOFF_SECONDS)
-                    deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay)
-                    checkpoint.record_error(work.article_id, code)
-                    raise DownloadDeferred("PDF archive deferred: " + code) from None
-            finally:
-                shutil.rmtree(temporary, ignore_errors=True)
-        if not checkpoint.is_done(work.article_id):
-            checkpoint.record_finding(work.article_id, saved)
-        if deps.store.record_download(work, saved["asset"], saved["digest"], now=deps.now(), provider_success=provider_success):
-            counts["downloaded"] = 1
-            counts["attached"] += deps.store.attach_downloads(now=deps.now())
-        checkpoint.set_cursor({"last_article_id": work.article_id})
-        checkpoint.checkpoint()
+                # The receipt is written before the WAL/DB. If SIGKILL lands between
+                # either acknowledgement, a fresh process verifies the saved bytes.
+                saved, provider_success = _fetch(deps, env, work, receipts)
+            except (MarketDeskError, MarketDeskAuthError, OSError, ValueError) as exc:
+                code = _code(exc)
+                delay = 3600 if code == "unauthenticated" else BACKOFF_SECONDS
+                deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay, retry_after=_retry_after(exc))
+                checkpoint.record_error(work.article_id, code)
+                if _account_code(code):
+                    release = getattr(deps.store, "release", None)
+                    if release is not None:
+                        for pending in batch[index + 1:]:
+                            release(pending, now=deps.now())
+                    account = code
+                    break
+                if code in QUIET_DEFERRALS or PROVIDER_5XX.fullmatch(code):
+                    quiet = quiet or code
+                else:
+                    fatal = fatal or code
+                continue
+            if not checkpoint.is_done(work.article_id):
+                checkpoint.record_finding(work.article_id, saved)
+            if deps.store.record_download(work, saved["asset"], saved["digest"], now=deps.now(), provider_success=provider_success):
+                counts["downloaded"] += 1
+                verified += int(provider_success)
+                counts["attached"] += deps.store.attach_downloads(now=deps.now())
+            checkpoint.set_cursor({"last_article_id": work.article_id})
+            checkpoint.checkpoint()
+        if verified and account is None and hasattr(deps.store, "note_success"):
+            deps.store.note_success(now=deps.now())
+        if account is not None:
+            raise DownloadDeferred("PDF archive deferred: " + account)
+        if fatal is not None:
+            raise DownloadDeferred("PDF archive deferred: " + fatal)
+        if quiet and not verified:
+            raise DownloadDeferred("PDF archive deferred: " + quiet)
+        breach = getattr(deps.store, "backlog_breach", lambda **_k: None)(now=deps.now())
+        if breach:
+            raise DownloadDeferred(breach)
         cycle.finished_at = deps.now().isoformat()
     return counts
 

@@ -59,6 +59,13 @@ class MarketDeskAuthError(RuntimeError):
 class MarketDeskError(RuntimeError):
     """Short machine-readable reason ('unauthenticated', 'http_404', 'too_large', ...). Never a URL or body."""
 
+    def __init__(self, code="download_failed", *args, retry_after=None):
+        super().__init__(code, *args)
+        try:
+            self.retry_after = None if retry_after is None else max(0, min(86400, int(retry_after)))
+        except (TypeError, ValueError):
+            self.retry_after = None
+
     @property
     def transient(self) -> bool:
         """True when a retry can succeed without a code change; such failures spend no attempt."""
@@ -253,7 +260,13 @@ class MarketDeskSession:
                 content_type = str(response.headers.get("Content-Type", "") or "")
                 status = response.status
         except urllib.error.HTTPError as exc:
-            location = str((exc.headers or {}).get("Location", "") or "")
+            headers = exc.headers
+            location = str((headers or {}).get("Location", "") or "")
+            raw_wait = (headers or {}).get("Retry-After")
+            try:
+                self._retry_after = max(0, min(86400, int(str(raw_wait).strip())))
+            except (TypeError, ValueError, AttributeError):
+                self._retry_after = None
             exc.close()
             return exc.code, b"", "", location
         except MarketDeskError:
@@ -294,7 +307,7 @@ class MarketDeskSession:
         for attempt in (1, 2):
             status, raw, _, _ = self._send(method, url, data, headers, limit=MAX_RESPONSE, timeout=TIMEOUT)
             if status != 200:
-                raise MarketDeskError(f"http_{status}")
+                raise MarketDeskError(f"http_{status}", retry_after=getattr(self, "_retry_after", None) if status == 429 else None)
             try:
                 payload = json.loads(raw)
             except ValueError:
@@ -337,7 +350,7 @@ class MarketDeskSession:
                     raise MarketDeskError(PREVIEW_QUOTA)
                 raise MarketDeskError("unauthenticated")
             if status != 200:
-                raise MarketDeskError(f"http_{status}")
+                raise MarketDeskError(f"http_{status}", retry_after=getattr(self, "_retry_after", None) if status == 429 else None)
             return data, content_type
         raise MarketDeskError("unauthenticated")
 
