@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-13T10:00:08Z",
-  "node_count": 4340,
-  "edge_count": 8874,
+  "generated_at": "2026-11-14T10:00:08Z",
+  "node_count": 4344,
+  "edge_count": 8881,
   "areas": {
-    "web": 2415,
+    "web": 2416,
     "site": 134,
-    "scripts": 1580,
+    "scripts": 1583,
     "cloud": 168,
     "lib": 25,
     "tests": 15,
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1168
+      "count": 1169
     },
     {
       "id": "site/app",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 859
+      "count": 862
     },
     {
       "id": "scripts/trade_blotter",
@@ -366,7 +366,7 @@
     {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 65,
+      "in": 66,
       "out": 44,
       "test": false
     },
