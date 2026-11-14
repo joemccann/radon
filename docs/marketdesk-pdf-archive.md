@@ -77,8 +77,10 @@ when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
 0 turns it off) and the lease SQL enforces it. A missed fire does not stack
 into a catch-up burst.
 
-A provider quota signal (`preview_quota`, `download_quota`, `http_429`) doubles
-the persisted interval. `Retry-After` lengthens that one wait and does not
+A provider quota signal (`preview_quota`, `download_quota`, `http_429`,
+`http_401`, `http_402`, `http_403`, or an HTTP-date `Retry-After`) doubles
+the persisted interval, stops the rest of the batch, and resets the batch to 1.
+A delta-seconds `Retry-After` lengthens that one wait and does not
 become the steady pace. The ceiling is 24 hours, the old embargo cap. A single
 HTTP 500 spends the current window and backs that file off on its own clock.
 Three transport or 5xx errors in a row multiply the account interval by 1.5.
@@ -91,8 +93,10 @@ a numeric allowance, so the controller is not capped under an invented quota.
 A 600-second token lease recovers a killed worker. The admit trigger moves the
 account clock only when a lease changes hands. A lease that matches no row
 leaves the clock alone. Policy rejects are `disposition=filtered` and can
-return if the book changes. Eight non-quota failures, including rows already
-at 100 attempts, become `disposition=exhausted` and drop out of the backlog.
+return if the book changes. Eight non-quota failures after `attempts_baseline` become
+`disposition=exhausted` and drop out of the backlog. Migration 0113 sets that
+baseline to the attempt count already on the row and restores any row already
+marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
 Quota errors refund the attempt. Fresh reports (published within 36 hours)
 and the oldest backlog alternate windows, so today's file is in the next
 fresh window while the backlog still drains.
