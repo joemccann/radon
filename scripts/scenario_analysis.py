@@ -23,7 +23,12 @@ import json
 import math
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional, Tuple
+
+# Handoff to scenario_report.py. Kept in the checkout's data/ dir, never a
+# shared temp dir another local account could read or plant.
+HANDOFF_PATH = Path(__file__).resolve().parents[1] / "data" / "scenario_analysis.json"
 
 
 # Current approximate prices (Friday March 7, 2026 close estimates)
@@ -569,7 +574,8 @@ if __name__ == '__main__':
         'baseline_iv': {k: round(v*100, 1) for k, v in BASELINE_IV.items()},
     }
     
-    with open('/tmp/scenario_analysis.json', 'w') as f:
+    HANDOFF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(HANDOFF_PATH, 'w') as f:
         json.dump(output, f, indent=2)
     
-    print(f"\nJSON output written to /tmp/scenario_analysis.json")
+    print(f"\nJSON output written to {HANDOFF_PATH}")

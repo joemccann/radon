@@ -397,13 +397,23 @@ def _operations_text() -> str:
     return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
 
 
+_WEEKDAY_NAME = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
 def _schedule(loop: str) -> str:
     values = {}
+    weekdays = ""
     for line in (_LOOP_ENVS / f"{loop}.env").read_text(encoding="utf-8").splitlines():
-        if line.startswith(("SCHEDULE_HOUR=", "SCHEDULE_MINUTE=")):
+        if line.startswith("SCHEDULE_WEEKDAYS="):
+            weekdays = line.split("=", 1)[1].strip()
+        elif line.startswith(("SCHEDULE_HOUR=", "SCHEDULE_MINUTE=")):
             key, value = line.split("=", 1)
             values[key] = int(value)
-    return f"{values['SCHEDULE_HOUR']:02d}:{values['SCHEDULE_MINUTE']:02d}"
+    clock = f"{values['SCHEDULE_HOUR']:02d}:{values['SCHEDULE_MINUTE']:02d}"
+    if not weekdays:
+        return clock
+    names = "/".join(_WEEKDAY_NAME[int(part)] for part in weekdays.split(","))
+    return f"{clock} {names}"
 
 
 class TestNightlyLoopIndex:

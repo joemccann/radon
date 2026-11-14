@@ -56,7 +56,7 @@ case "$LOOP" in
   *) echo "status=FAILED (security_post.sh does not know loop $LOOP)"; exit 0 ;;
 esac
 PR_BRANCH_PREFIX="$LOOP/"
-DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire."
+DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing comment on a scheduled day means the runner did not fire."
 
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 refuse_symlink() { [[ ! -L "$1" ]]; }
