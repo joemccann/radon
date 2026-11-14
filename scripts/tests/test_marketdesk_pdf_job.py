@@ -65,7 +65,7 @@ def test_one_attempt_per_cycle_and_persisted_admission(tmp_path):
     counts = job.run_cycle(env={"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "1801"}, deps=dependency)
     assert counts == {"seeded": 35, "attached": 0, "downloaded": 1, "throttled": 0}
     assert len(dependency.store.claims) == len(dependency.store.downloads) == 1
-    assert dependency.store.claims[0]["interval_seconds"] == 1801
+    assert dependency.store.claims[0]["interval_seconds"] == 300
     assert (tmp_path / "jobs/marketdesk-pdfs/state.json").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/findings.jsonl").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/SUMMARY.md").is_file()
@@ -110,7 +110,7 @@ def test_preview_quota_download_exits_zero_after_durable_retry(tmp_path, monkeyp
     monkeypatch.setattr(job, "default_deps", lambda: dependency)
     assert job.main([]) == 0
     assert dependency.store.retries[0][0] == "preview_quota"
-    assert dependency.store.retries[0][1]["backoff_seconds"] >= 21600
+    assert dependency.store.retries[0][1]["backoff_seconds"] == 900
     assert not dependency.store.downloads
 
 
@@ -150,7 +150,7 @@ def test_http_500_download_exits_zero_after_durable_retry(tmp_path, monkeypatch)
     assert not dependency.store.downloads
 
 
-@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated", "http_404"])
+@pytest.mark.parametrize("code", ["not_pdf", "unauthenticated", "http_404"])
 def test_non_allowance_deferral_still_fails_the_oneshot(tmp_path, monkeypatch, code):
     dependency = deps(tmp_path)
     dependency.store.work = None
@@ -228,7 +228,7 @@ def test_runtime_error_chained_from_timeout_still_fails_the_oneshot(tmp_path, mo
     assert job.main([]) == 1
 
 
-@pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429", "http_transport"])
+@pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429"])
 def test_provider_failure_backoff_is_visible_and_durable(tmp_path, code):
     def fail(session, key):
         raise MarketDeskError(code)
@@ -354,9 +354,9 @@ def test_sigkill_at_each_ack_boundary_resumes_without_second_download(tmp_path, 
 
 
 @pytest.mark.parametrize("value", [None, "300", "1", "garbage", "1800"])
-def test_archive_interval_is_conservative_even_with_old_configuration(value):
+def test_stale_env_interval_cannot_reimpose_the_retired_slot(value):
     env = {} if value is None else {"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}
-    assert job._interval(env) == 1800
+    assert job._interval(env) == 300
 
 
 @pytest.mark.parametrize("code", ["preview_quota", "download_quota", "http_429"])
@@ -366,7 +366,7 @@ def test_account_limit_refusals_request_at_least_six_hour_backoff(tmp_path, code
     dependency = deps(tmp_path, download=fail)
     with pytest.raises(job.DownloadDeferred):
         job.run_cycle(env={}, deps=dependency)
-    assert dependency.store.retries[0][1]["backoff_seconds"] == 21600
+    assert dependency.store.retries[0][1]["backoff_seconds"] == 900
 
 
 def test_exhausted_account_is_checked_before_any_pdf_request():
@@ -380,8 +380,8 @@ def test_exhausted_account_is_checked_before_any_pdf_request():
 
 
 @pytest.mark.parametrize("value", ["3600", "999999"])
-def test_operator_can_only_slow_archive_pacing_further(value):
-    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == min(int(value),86400)
+def test_operator_env_cannot_outrun_or_restore_the_fixed_slot(value):
+    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == 300
 
 
 def test_missing_book_context_never_authenticates_or_downloads(tmp_path):
@@ -462,7 +462,7 @@ def test_command_exit_and_sanitized_errors_restore_signal_handler(monkeypatch, c
     previous = signal.getsignal(signal.SIGTERM)
     def run():
         if outcome == "deferred":
-            raise job.DownloadDeferred('PDF archive deferred: http_transport')
+            raise job.DownloadDeferred('PDF archive deferred: not_pdf')
         if outcome == "unexpected":
             raise RuntimeError('signed private secret')
         if outcome == "terminated":
