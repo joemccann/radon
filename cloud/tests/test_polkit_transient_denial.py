@@ -1,68 +1,108 @@
 """Polkit start grants must not authorize StartTransientUnit or an uninstalled unit."""
 from __future__ import annotations
 
-import re
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
-RULES = (
-    Path(__file__).resolve().parents[2]
-    / "cloud"
-    / "config"
-    / "polkit"
-    / "50-radon-services.rules"
-)
-SERVICES = Path(__file__).resolve().parents[2] / "cloud" / "services"
+import pytest
+
+CLOUD = Path(__file__).resolve().parents[1]
+RULES = CLOUD / "config" / "polkit" / "50-radon-services.rules"
+SERVICES = CLOUD / "services"
+MANAGE = "org.freedesktop.systemd1.manage-units"
+TRANSIENT = "Authentication is required to start transient '$(unit)'."
+FILE_START = "Authentication is required to start '$(unit)'."
+
+_HARNESS = r"""
+const fs = require("fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const rules = [];
+const polkit = {
+  Result: { YES: "yes", NO: "no", NOTHING: undefined },
+  addRule(fn) { rules.push(fn); },
+};
+eval(fs.readFileSync(input.path, "utf8"));
+function decide(spec) {
+  const action = {
+    id: spec.id,
+    lookup(key) { return Object.prototype.hasOwnProperty.call(spec.lookup, key) ? spec.lookup[key] : undefined; },
+  };
+  const subject = { user: spec.user };
+  for (const rule of rules) {
+    const result = rule(action, subject);
+    if (result !== undefined) return result;
+  }
+  return null;
+}
+process.stdout.write(JSON.stringify(input.cases.map(decide)));
+"""
 
 
-def _text() -> str:
-    return RULES.read_text(encoding="utf-8")
+def decide(cases: list[dict]) -> list:
+    node = shutil.which("node")
+    if not node:
+        pytest.fail("node is required to execute the polkit rules")
+    payload = json.dumps({"path": str(RULES), "cases": cases})
+    proc = subprocess.run(
+        [node, "-e", _HARNESS],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        pytest.fail(f"polkit harness failed: {proc.stderr or proc.stdout}")
+    return json.loads(proc.stdout)
 
 
-def _granted(text: str) -> set[str]:
-    return set(re.findall(r'"([^"]+\.service)": true', text))
+def _action(user: str, unit: str | None, verb: str, message: str | None) -> dict:
+    lookup = {"unit": unit, "verb": verb, "polkit.message": message}
+    return {"id": MANAGE, "user": user, "lookup": lookup}
 
 
 def test_uninstalled_llm_index_is_not_granted() -> None:
-    text = _text()
-    granted = _granted(text)
-    assert "radon-llm-index.service" not in granted
+    granted = decide(
+        [
+            _action("radon-responder", "radon-llm-index.service", "start", FILE_START),
+            _action("radon", "radon-llm-index.service", "start", FILE_START),
+        ]
+    )
+    assert granted == [None, None]
     assert (SERVICES / "radon-llm-index.service").is_file()
-    for unit in granted:
-        assert (SERVICES / unit).is_file(), unit
 
 
-def test_transient_start_is_denied_before_either_yes() -> None:
-    text = _text()
-    helper, _, _rest = text.partition("polkit.addRule")
-    assert "function radonTransientStart" in helper
-    assert 'indexOf("transient")' in helper
-    assert 'message === ""' in helper
-    assert text.count("radonTransientStart(action)") >= 2
-    for chunk in text.split("polkit.addRule")[1:]:
-        assert chunk.index("radonTransientStart(action)") < chunk.index(
-            "return polkit.Result.YES"
-        )
-
-
-def _transient(verb: str | None, message: str | None) -> bool:
-    """Mirror of radonTransientStart. The source test above pins the JS."""
-    if verb not in {"start", "restart"}:
-        return False
-    text = message or ""
-    return text == "" or "transient" in text
-
-
-def test_decision_model_denies_transient_and_allows_file_start() -> None:
-    granted = _granted(_text())
-    assert _transient("start", "Authentication is required to start transient '$(unit)'.")
-    assert _transient("start", "")
-    assert not _transient(
-        "start", "Authentication is required to start '$(unit)'."
+def test_transient_start_is_denied_for_both_subjects() -> None:
+    results = decide(
+        [
+            _action("radon", "radon-vol-cone.service", "start", TRANSIENT),
+            _action("radon-responder", "radon-vol-cone.service", "start", TRANSIENT),
+            _action("radon", "radon-vol-cone.service", "start", ""),
+            _action("radon-responder", "radon-vol-cone.service", "start", ""),
+            _action(
+                "radon",
+                "radon-ib-gateway-preheld-restart.service",
+                "start",
+                TRANSIENT,
+            ),
+        ]
     )
-    assert not _transient(
-        "reset-failed", "Authentication is required to reset-failed '$(unit)'."
+    assert results == ["no", "no", "no", "no", "no"]
+
+
+def test_file_backed_start_is_still_granted() -> None:
+    results = decide(
+        [
+            _action("radon-responder", "radon-vol-cone.service", "start", FILE_START),
+            _action("radon", "radon-vol-cone.service", "start", FILE_START),
+            _action(
+                "radon",
+                "radon-ib-gateway-preheld-restart.service",
+                "start",
+                FILE_START,
+            ),
+            _action("radon-responder", "radon-vol-cone.service", "reset-failed", FILE_START),
+        ]
     )
-    sample = next(iter(granted))
-    assert sample
-    assert not _transient("start", "Authentication is required to start '$(unit)'.")
-    assert "radon-llm-index.service" not in granted
+    assert results == ["yes", "yes", "yes", "yes"]
