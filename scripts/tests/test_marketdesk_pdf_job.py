@@ -65,7 +65,7 @@ def test_one_attempt_per_cycle_and_persisted_admission(tmp_path):
     counts = job.run_cycle(env={"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "1801"}, deps=dependency)
     assert counts == {"seeded": 35, "attached": 0, "downloaded": 1, "throttled": 0}
     assert len(dependency.store.claims) == len(dependency.store.downloads) == 1
-    assert dependency.store.claims[0]["interval_seconds"] == 300
+    assert dependency.store.claims[0]["interval_seconds"] == 1801
     assert (tmp_path / "jobs/marketdesk-pdfs/state.json").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/findings.jsonl").is_file()
     assert (tmp_path / "jobs/marketdesk-pdfs/SUMMARY.md").is_file()
@@ -353,10 +353,10 @@ def test_sigkill_at_each_ack_boundary_resumes_without_second_download(tmp_path, 
     assert json.loads(wal[0])["asset"].endswith(".pdf")
 
 
-@pytest.mark.parametrize("value", [None, "300", "1", "garbage", "1800"])
-def test_stale_env_interval_cannot_reimpose_the_retired_slot(value):
+@pytest.mark.parametrize("value,expected", [(None, 300), ("300", 300), ("1", 300), ("garbage", 300), ("1800", 1800), ("900", 900)])
+def test_min_interval_env_is_a_floor(value, expected):
     env = {} if value is None else {"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}
-    assert job._interval(env) == 300
+    assert job._interval(env) == expected
 
 
 @pytest.mark.parametrize("code", ["preview_quota", "download_quota", "http_429"])
@@ -379,9 +379,9 @@ def test_exhausted_account_is_checked_before_any_pdf_request():
         job.download_pdf(Session(), "ABCdef12345")
 
 
-@pytest.mark.parametrize("value", ["3600", "999999"])
-def test_operator_env_cannot_outrun_or_restore_the_fixed_slot(value):
-    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == 300
+@pytest.mark.parametrize("value,expected", [("3600", 3600), ("999999", 86400)])
+def test_min_interval_env_cannot_exceed_the_ceiling(value, expected):
+    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == expected
 
 
 def test_missing_book_context_never_authenticates_or_downloads(tmp_path):

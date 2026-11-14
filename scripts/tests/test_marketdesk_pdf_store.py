@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1] / "db/migrations"
 def db(monkeypatch):
     monkeypatch.setattr(store.policy, "load_context", lambda: store.policy.Context(frozenset(), {}))
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql", "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql"):
+    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql", "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql"):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
@@ -49,8 +49,8 @@ def test_enqueue_and_global_budget_survive_new_worker(db):
     store.enqueue(ref("XYZabc12345"), now=NOW)
     first = store.claim_next(now=NOW, interval_seconds=300)
     assert first.article_id == ref().article_id
-    assert store.claim_next(now=NOW + timedelta(seconds=299), interval_seconds=300) is None
-    assert store.claim_next(now=NOW + timedelta(seconds=300), interval_seconds=300) is not None
+    assert store.claim_next(now=NOW + timedelta(seconds=899), interval_seconds=300) is None
+    assert store.claim_next(now=NOW + timedelta(seconds=900), interval_seconds=300) is not None
     assert db.execute("SELECT count(*) FROM marketdesk_pdf_queue").fetchone()[0] == 2
 
 
@@ -61,8 +61,8 @@ def test_durable_admission_enforces_minimum_even_for_direct_callers(db, requeste
     store.enqueue(ref(), now=NOW)
     store.enqueue(ref("XYZabc12345"), now=NOW)
     assert store.claim_next(now=NOW, interval_seconds=requested_interval) is not None
-    assert store.claim_next(now=NOW + timedelta(seconds=299), interval_seconds=requested_interval) is None
-    assert store.claim_next(now=NOW + timedelta(seconds=300), interval_seconds=requested_interval) is not None
+    assert store.claim_next(now=NOW + timedelta(seconds=899), interval_seconds=requested_interval) is None
+    assert store.claim_next(now=NOW + timedelta(seconds=900), interval_seconds=requested_interval) is not None
 
 
 def test_abandoned_lease_replays_and_stale_owner_cannot_commit(db):
@@ -92,15 +92,38 @@ def test_receipt_success_does_not_clear_a_quota_embargo(db):
     assert after == (held[1], held[2])
 
 
-def test_auth_failure_does_not_multiply_the_interval_or_refund(db):
+def test_suspension_doubles_the_interval_resets_the_batch_and_stops(db):
+    published(db, "XYZabc12345")
     published(db)
     store.enqueue(ref(), now=NOW)
+    store.enqueue(ref("XYZabc12345"), now=NOW)
     work = store.claim_next(now=NOW)
-    store.retry(work, "unauthenticated", now=NOW)
-    interval, attempts, last = db.execute(
-        "SELECT t.interval_seconds, q.attempts, t.last_error FROM marketdesk_pdf_throttle t, marketdesk_pdf_queue q").fetchone()
-    assert interval == 300 and attempts == 1 and last == "unauthenticated"
-    assert store.claim_next(now=NOW + timedelta(seconds=3599)) is None
+    store.retry(work, "http_401", now=NOW)
+    interval, batch, attempts = db.execute(
+        "SELECT t.interval_seconds, t.batch_size, q.attempts FROM marketdesk_pdf_throttle t, marketdesk_pdf_queue q "
+        "WHERE q.article_id=?", (work.article_id,)).fetchone()
+    assert interval == 1800 and batch == 1 and attempts == 0
+    assert store.claim_next(now=NOW + timedelta(seconds=1799)) is None
+
+
+def test_attempts_from_before_the_cap_migration_are_not_exhausted(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    db.execute("UPDATE marketdesk_pdf_queue SET attempts=100, attempts_baseline=100, disposition='exhausted', "
+               "disposition_reason='attempts_exhausted'")
+    db.execute("UPDATE marketdesk_pdf_queue SET disposition='active', disposition_reason=NULL")
+    assert store.claim_next(now=NOW) is not None
+    assert db.execute("SELECT status,disposition FROM marketdesk_pdf_queue").fetchone() == ("downloading", "active")
+
+
+def test_rolling_cap_is_inside_the_lease(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    for i in range(400):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"A{i:07d}", NOW.isoformat()))
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=400) == []
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0)[0].article_id == ref().article_id
 
 
 def test_provider_backoff_is_global_and_does_not_retire_backlog(db):
@@ -312,8 +335,8 @@ def test_account_spacing_cannot_be_lowered_by_old_environment_or_direct_callers(
     published(db, "XYZabc12345")
     store.seed_missing(now=NOW)
     assert store.claim_next(now=NOW, interval_seconds=1) is not None
-    assert store.claim_next(now=NOW + timedelta(seconds=299), interval_seconds=1) is None
-    assert store.claim_next(now=NOW + timedelta(seconds=300), interval_seconds=1) is not None
+    assert store.claim_next(now=NOW + timedelta(seconds=899), interval_seconds=1) is None
+    assert store.claim_next(now=NOW + timedelta(seconds=900), interval_seconds=1) is not None
 
 
 @pytest.mark.parametrize("code", ["preview_quota", "download_quota", "http_429"])
@@ -322,7 +345,7 @@ def test_quota_escalation_is_account_wide_capped_and_atomic(db, code):
     published(db, "XYZabc12345")
     store.seed_missing(now=NOW)
     current = NOW
-    interval = 300
+    interval = 900
     for _step in range(4):
         work = store.claim_next(now=current)
         assert work is not None
@@ -473,9 +496,9 @@ def test_priority_cohort_precedes_older_unrelated_queue_and_survives_restart(db,
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     work = store.claim_next(now=NOW)
     assert work.article_id == priority
-    assert store.claim_next(now=NOW + timedelta(seconds=299)) is None
+    assert store.claim_next(now=NOW + timedelta(seconds=899)) is None
     assert store.record_download(work, store.ASSET_BASE + 'a'*64 + '.pdf', 'a'*64, now=NOW)
-    assert store.claim_next(now=NOW + timedelta(seconds=300)).article_id == ordinary
+    assert store.claim_next(now=NOW + timedelta(seconds=900)).article_id == ordinary
 
 
 def test_priority_waits_for_its_retry_deadline_without_spending_other_pdf(db):
@@ -550,8 +573,8 @@ def test_priority_still_obeys_account_backoff_and_token_lease(db):
     store.prioritize([priority])
     first = store.claim_next(now=NOW)
     store.retry(first, 'preview_quota', now=NOW)
-    assert store.claim_next(now=NOW + timedelta(seconds=599)) is None
-    new = store.claim_next(now=NOW + timedelta(seconds=600))
+    assert store.claim_next(now=NOW + timedelta(seconds=1799)) is None
+    new = store.claim_next(now=NOW + timedelta(seconds=1800))
     assert new.article_id == priority and new.token != first.token
     assert not store.record_download(first, store.ASSET_BASE+'b'*64+'.pdf', 'b'*64)
 

@@ -15,7 +15,7 @@ import uuid
 from api.db_http import hrana_execute, hrana_transaction
 from research import marketdesk_pdf_policy as policy
 from research.marketdesk_pdf_rate import (
-    FLOOR_SECONDS, jittered_delay, load_state, on_quota, on_soft, on_success,
+    FLOOR_SECONDS, daily_cap, jittered_delay, load_state, on_quota, on_soft, on_success,
 )
 
 ARTICLE_BASE = "https://marketdesk.ai/library/browse/"
@@ -32,6 +32,8 @@ FRESH_WINDOW_DAYS = 1.5
 OLDEST_SLA_SECONDS = 24 * 60 * 60
 GROWTH_FLOOR = 48
 QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
+# Account suspension. Each one doubles the interval and resets the batch to 1.
+SUSPENSION_CODES = frozenset({"http_401", "http_402", "http_403", "unauthenticated"})
 SOFT_ERRORS = frozenset({"http_transport"})
 # A report that keeps failing on its own (e.g. provider HTTP 500 for one file)
 # backs off exponentially and, after this many attempts, stops reserving
@@ -198,7 +200,7 @@ def _sync_disposition(context_hash, now):
         (context_hash,))
     hrana_execute(
         "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='attempts_exhausted',disposition_at=? "
-        "WHERE disposition='active' AND attempts>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
+        "WHERE disposition='active' AND (attempts - attempts_baseline)>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
         "OR julianday(lease_until)<=julianday(?))",
         (stamp, MAX_ITEM_ATTEMPTS, stamp))
 
@@ -216,8 +218,12 @@ def _due_sql():
         "article_id")
 
 
-def _lease(current, context_hash, *, limit, jitter_bps):
-    """Lease up to `limit` rows. The admit trigger moves the account clock only when a row changes hands."""
+def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value):
+    """Lease up to `limit` rows, and never past the rolling 24h cap.
+
+    The cap is inside this statement. A second worker sees the admission rows
+    the first worker's trigger just wrote.
+    """
     if jitter_bps is not None:
         hrana_execute("UPDATE marketdesk_pdf_throttle SET jitter_bps=? WHERE singleton=1",
                       (max(0, min(1000, int(jitter_bps))),))
@@ -228,16 +234,18 @@ def _lease(current, context_hash, *, limit, jitter_bps):
         "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
         "lease_until=?,updated_at=? WHERE article_id IN (SELECT article_id FROM marketdesk_pdf_queue "
         f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) AND {_priority_gate()} "
-        "AND disposition='active' AND attempts<? "
+        "AND disposition='active' AND (attempts - attempts_baseline)<? "
         "AND (SELECT julianday(next_attempt_at) FROM marketdesk_pdf_throttle WHERE singleton=1)<=julianday(?) "
         "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
         "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
-        f"ORDER BY {order} LIMIT ?) "
+        f"ORDER BY {order} LIMIT ("
+        "SELECT CASE WHEN ?=0 THEN ? ELSE MIN(?, MAX(0, ? - (SELECT COUNT(*) FROM marketdesk_pdf_admissions "
+        "WHERE julianday(admitted_at) > julianday(?) - 1))) END)) "
         "RETURNING article_id,article_url,title,published_at,lease_token",
         (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
          context_hash, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
          stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
-         max(1, int(limit))))
+         int(daily_cap_value), int(limit), int(limit), int(daily_cap_value), stamp))
     work = []
     for key, url, title, published, leased in rows:
         if not ID.fullmatch(key) or url != ARTICLE_BASE + key:
@@ -246,13 +254,14 @@ def _lease(current, context_hash, *, limit, jitter_bps):
     return work
 
 
-def claim_batch(*, now=None, jitter_bps=0):
+def claim_batch(*, now=None, jitter_bps=0, daily_cap_value=None):
     """One shared window. A second caller at the same instant gets nothing."""
     current = _time(now)
     context_hash = prepare_selection(now=current)
     _sync_disposition(context_hash, current)
-    _state, _jitter = _rate_row()
-    return _lease(current, context_hash, limit=_state.batch_size, jitter_bps=jitter_bps)
+    state, _jitter = _rate_row()
+    cap = daily_cap() if daily_cap_value is None else int(daily_cap_value)
+    return _lease(current, context_hash, limit=state.batch_size, jitter_bps=jitter_bps, daily_cap_value=cap)
 
 
 def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
@@ -261,7 +270,7 @@ def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     current = _time(now)
     context_hash = prepare_selection(now=current)
     _sync_disposition(context_hash, current)
-    rows = _lease(current, context_hash, limit=1, jitter_bps=0)
+    rows = _lease(current, context_hash, limit=1, jitter_bps=0, daily_cap_value=daily_cap())
     return rows[0] if rows else None
 
 
@@ -288,26 +297,15 @@ def _soft(code):
     return code in SOFT_ERRORS or code.startswith("http_5")
 
 
-def retry(work, error, *, now=None, backoff_seconds=900, retry_after=None):
+def retry(work, error, *, now=None, backoff_seconds=900, retry_after=None, suspension=False):
     """Item clock and account clock move separately. A quota signal refunds the attempt."""
     code = error if isinstance(error, str) and re.fullmatch(r"[a-z0-9_]{1,64}", error) else "download_failed"
     current = _time(now)
     state, _jitter = _rate_row()
-    quota = code in QUOTA_ERRORS
+    quota = code in QUOTA_ERRORS or code in SUSPENSION_CODES or bool(suspension)
     statements = []
-    if code == "unauthenticated":
-        # A dead session is not a file failure and not a quota multiplier.
-        # Hold the account for an hour. The attempt stays spent so a file that
-        # 401s on its own can still reach the exhausted state.
-        statements.append((
-            "UPDATE marketdesk_pdf_throttle SET next_attempt_at=MAX(next_attempt_at,?),"
-            "last_error=? WHERE singleton=1 "
-            "AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND lease_token=?)",
-            (_stamp(current + timedelta(seconds=3600)), code, work.article_id, work.token)))
     if quota:
         wait = retry_after
-        if code == "unauthenticated":
-            wait = max(int(wait or 0), 3600)
         new_state, delay = on_quota(state, retry_after=wait)
         delay = jittered_delay(delay, 0)
         statements.append((
@@ -345,9 +343,9 @@ def retry(work, error, *, now=None, backoff_seconds=900, retry_after=None):
             "UPDATE marketdesk_pdf_queue SET status='pending',"
             "next_attempt_at=strftime('%Y-%m-%dT%H:%M:%f+00:00',?, '+' || MIN(?,? * (1 << MIN(MAX(attempts-1,0),7))) || ' seconds'),"
             "last_error=?,lease_token=NULL,lease_until=NULL,updated_at=?,"
-            "disposition=CASE WHEN attempts>=? THEN 'exhausted' ELSE disposition END,"
-            "disposition_reason=CASE WHEN attempts>=? THEN 'attempts_exhausted' ELSE disposition_reason END,"
-            "disposition_at=CASE WHEN attempts>=? THEN ? ELSE disposition_at END "
+            "disposition=CASE WHEN (attempts - attempts_baseline)>=? THEN 'exhausted' ELSE disposition END,"
+            "disposition_reason=CASE WHEN (attempts - attempts_baseline)>=? THEN 'attempts_exhausted' ELSE disposition_reason END,"
+            "disposition_at=CASE WHEN (attempts - attempts_baseline)>=? THEN ? ELSE disposition_at END "
             "WHERE article_id=? AND lease_token=?",
             (_stamp(current), ITEM_BACKOFF_CAP, base, code, _stamp(current),
              MAX_ITEM_ATTEMPTS, MAX_ITEM_ATTEMPTS, MAX_ITEM_ATTEMPTS, _stamp(current),

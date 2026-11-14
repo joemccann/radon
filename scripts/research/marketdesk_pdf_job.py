@@ -30,7 +30,7 @@ from types import SimpleNamespace
 from lib.checkpoint import CheckpointedJob
 from research.marketdesk_auth import PREVIEW_QUOTA, MarketDeskAuthError, MarketDeskError
 from research.marketdesk_pdf_policy import SelectionUnavailable
-from research.marketdesk_pdf_rate import FLOOR_SECONDS, JITTER_MAX_BPS
+from research.marketdesk_pdf_rate import FLOOR_SECONDS, JITTER_MAX_BPS, interval_floor
 from utils.atomic_io import atomic_save, verified_load
 
 SERVICE = "marketdesk-pdf"
@@ -89,9 +89,8 @@ def default_deps():
 
 
 def _interval(env):
-    """The persisted controller owns the pace. A stale env value is not a floor."""
-    del env
-    return MIN_INTERVAL_SECONDS
+    """Floor for the ramp. MARKETDESK_PDF_MIN_INTERVAL_SECONDS raises it. It cannot lower it."""
+    return interval_floor(env)
 
 
 def _jitter_bps():
@@ -164,8 +163,10 @@ def _receipt(path, deps):
         return None
 
 
-def _account_code(code):
-    return code in {PREVIEW_QUOTA, "download_quota", "http_429", "unauthenticated"}
+def _account_code(code, exc=None):
+    if code in {PREVIEW_QUOTA, "download_quota", "http_429", "http_401", "http_402", "http_403", "unauthenticated"}:
+        return True
+    return bool(getattr(exc, "suspension", False))
 
 
 def _retry_after(exc):
@@ -248,9 +249,10 @@ def run_cycle(*, env=os.environ, deps=None):
             except (MarketDeskError, MarketDeskAuthError, OSError, ValueError) as exc:
                 code = _code(exc)
                 delay = 3600 if code == "unauthenticated" else BACKOFF_SECONDS
-                deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay, retry_after=_retry_after(exc))
+                deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay, retry_after=_retry_after(exc),
+                                 suspension=bool(getattr(exc, "suspension", False)))
                 checkpoint.record_error(work.article_id, code)
-                if _account_code(code):
+                if _account_code(code, exc):
                     release = getattr(deps.store, "release", None)
                     if release is not None:
                         for pending in batch[index + 1:]:

@@ -873,7 +873,7 @@ render_env_file() {
     # The independent PDF archive needs only Turso and its provider login.
     # No model grants, Dropbox credentials, broker or secret-store master key.
     if [[ "$unit" == "radon-marketdesk-pdf.service" ]]; then
-      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS)=)' \
+      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS|MARKETDESK_PDF_DAILY_CAP)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71
