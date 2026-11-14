@@ -422,7 +422,7 @@ build_prompt() {
     else
       echo "Branch: $BRANCH (create it from origin/main; it is the only branch you may push)"
     fi
-    if [[ -n "$PHASE" ]]; then echo "State: $LOOP_STATE"; fi
+    if [[ -n "$PHASE" || -n "$PRE_RUN" ]]; then echo "State: $LOOP_STATE"; fi
     echo "Time budget: $((TIMEOUT_SECS / 60)) minutes, then this session is stopped."
     echo
     cat "$WORK/$PROMPT"
@@ -853,6 +853,15 @@ main() {
   if [[ -n "$PHASES" ]]; then
     run_phases
     return
+  fi
+  if [[ -n "$PRE_RUN" ]]; then
+    run_hook "$PRE_RUN"
+    hook_rc=$?
+    [[ -z "$HOOK_OUT" ]] || printf '%s\n' "$HOOK_OUT" >> "$LOG"
+    if (( hook_rc != 0 )); then
+      hook_reason="$(hook_value "$HOOK_OUT" refused)"
+      refuse "${hook_reason:-the pre-run check failed (exit $hook_rc)}"
+    fi
   fi
   materialize_fastembed_wheel
   build_prompt

@@ -1637,3 +1637,29 @@ def test_a_missing_dead_man_label_is_logged_not_silent(rig):
     assert proc.returncode == 0, rig.log()
     assert "phase marker not posted: no DEADMAN_LABEL" in rig.log()
     assert "issue comment" not in _gh_argv(rig)
+
+
+# --- single-session loops with a pre-run hook ---------------------------------
+
+
+def test_a_single_session_loop_runs_its_pre_run_hook_and_gets_a_state_header(rig):
+    rig.configure(PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", 'echo "$LOOP $WORK $LOOP_STATE" > "$CALLS/pre.env"\nexit 0\n')
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert (rig.calls / "pre.env").read_text().split() == ["doc", str(rig.work), str(rig.loop_state)]
+    header = next((rig.state / "logs" / "doc").glob("*.prompt.md")).read_text().split("\n\n", 1)[0]
+    assert f"State: {rig.loop_state}" in header and "create it from HEAD" in header
+    assert rig.called() == ["grok"]
+
+
+def test_a_single_session_loop_whose_hook_refuses_never_starts_an_agent(rig):
+    rig.configure(PRE_RUN="hooks/pre.sh")
+    rig.hook("pre.sh", 'echo "refused=the clone is not trusted"\nexit 2\n')
+    proc = rig.run()
+
+    assert proc.returncode == 2
+    assert rig.called() == []
+    assert rig.notification()["title"] == "radon doc: REFUSED"
+    assert rig.notification()["message"] == "the clone is not trusted"
