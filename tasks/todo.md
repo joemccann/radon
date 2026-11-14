@@ -1,3 +1,14 @@
+# Runner crash report and resume (2026-11-14)
+
+- [x] T1 depends_on: [] Failing tests: missing phase report publishes a sanitized harness report; claude exit 1 retries once and scores 75 only after a checkpoint; 124 stays 124.
+- [x] T2 depends_on: [T1] Hook writes the failure report for both security loops. Runner retries one claude crash and scores checkpointed progress INCOMPLETE.
+- [x] T3 depends_on: [T1] Confirm a 110-commit audit range is listed in full. No batch cap.
+- [ ] T4 depends_on: [T2, T3] PR, exact-head CI green, one Pushover. Do not merge.
+
+## Review
+
+Harness failure report is private-repo only. Public dead-man stays the phase line. Resume is the existing run-record plus exit 75. Audit context already lists every commit.
+
 # MarketDesk model-ladder provider failures (2026-10-30)
 
 - [x] T1 depends_on: [] Root-cause Anthropic unreadable replies, Codex 429, NVIDIA 400/404, Cerebras 413 on the shared ladder.
