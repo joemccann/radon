@@ -188,4 +188,4 @@ class TestWeekendRunnerMutualExclusion:
     def test_the_lock_is_a_portable_mkdir_not_flock(self):
         text = RUNNER.read_text()
         assert "flock -" not in text, "flock(1) does not exist on the macOS runner"
-        assert 'mkdir "$LOCK"' in text
+        assert 'mkdir "$dir"' in text
