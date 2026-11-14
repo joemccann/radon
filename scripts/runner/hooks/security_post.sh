@@ -355,11 +355,118 @@ sys.stdout.write(scrub_credential_text(sys.stdin.read()))
     -e "s,(${_SECRET_KEY_ERE}${_SECRET_SEP_ERE})${_SECRET_VALUE_ERE},\\1[REDACTED],g"
 }
 
+# Home directories collapse to ~. A line that pairs a P0/P1 severity or a
+# private finding id with an attack, route, payload, or proof is a finding
+# detail, not a crash diagnostic.
+_redact_diag_lines() {
+  HOME_PATH="${HOME:-}" /usr/bin/awk '
+    function collapse_home(s, h, out, i) {
+      if (h == "" || substr(h, 1, 1) != "/") return s
+      out = ""
+      while ((i = index(s, h)) > 0) {
+        out = out substr(s, 1, i - 1) "~"
+        s = substr(s, i + length(h))
+      }
+      return out s
+    }
+    BEGIN { home = ENVIRON["HOME_PATH"] }
+    {
+      line = collapse_home($0, home)
+      gsub(/\/Users\/[^\/[:space:]]+/, "~", line)
+      gsub(/\/home\/[^\/[:space:]]+/, "~", line)
+      sev = line ~ /(^|[^A-Za-z0-9])P[01]([^A-Za-z0-9]|$)/
+      fid = line ~ /DS-[0-9][0-9][0-9][0-9]-/
+      detail = line ~ /[Aa]ttack|[Ee]xploit|[Pp]ayload|PoC|poc|proof of|CWE-|\/api\//
+      if ((sev || fid) && detail) print "[redacted detail]"
+      else print line
+    }
+  '
+}
+
+_phase_clock() {
+  [[ -n "${1:-}" && -e "$1" && ! -L "$1" ]] || return 0
+  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true
+}
+
+# Last lines of this phase's log, secret-scrubbed, or a fixed omission line.
+# A failed scrub publishes no tail.
+_sanitize_log_tail() {
+  local raw clipped cleaned
+  if [[ ! -f "${PHASE_LOG:-}" || -L "${PHASE_LOG:-}" ]]; then
+    printf '%s\n' "(no phase log)"
+    return 0
+  fi
+  raw="$(tail -n 80 "$PHASE_LOG" 2>/dev/null || true)"
+  clipped="$(printf '%s\n' "$raw" | tail -c 4000)"
+  clipped="${clipped//$'\x60\x60\x60'/[fence]}"
+  if ! cleaned="$(printf '%s\n' "$clipped" | _redact_secret_classes | _redact_diag_lines)"; then
+    printf '%s\n' "(log tail omitted: redaction failed)"
+    return 0
+  fi
+  printf '%s\n' "$cleaned"
+}
+
+# The agent writes latest-report-<phase>.md. A phase with no file newer than
+# its start still gets a harness report (exit, clock, short log tail). A
+# symlink is left untouched. A stale regular file is replaced, not republished.
+write_missing_phase_report() {
+  local src="$SCRATCH/latest-report-${PHASE}.md"
+  # A regular file newer than the phase start is the agent's report.
+  if [[ -f "$src" && ! -L "$src" && -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]]; then
+    return 0
+  fi
+  # Never replace or follow a symlink. A stale regular file is not this phase.
+  if [[ -L "$src" || -L "$SCRATCH" || ( -e "$SCRATCH" && ! -d "$SCRATCH" ) ]]; then
+    return 0
+  fi
+  if [[ -e "$src" && ! -f "$src" ]]; then
+    return 0
+  fi
+  mkdir -p -m 700 "$SCRATCH" || return 0
+  if [[ -L "$src" || ( -e "$src" && ! -f "$src" ) ]]; then
+    return 0
+  fi
+  local started ended mins start_epoch now_epoch tail tmp day
+  started="$(_phase_clock "${PHASE_START_MARK:-}")"
+  ended="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  start_epoch=""
+  if [[ -n "${PHASE_START_MARK:-}" && -e "$PHASE_START_MARK" && ! -L "$PHASE_START_MARK" ]]; then
+    start_epoch="$(stat -c %Y "$PHASE_START_MARK" 2>/dev/null || stat -f %m "$PHASE_START_MARK" 2>/dev/null || true)"
+  fi
+  now_epoch="$(date +%s)"
+  if [[ "$start_epoch" =~ ^[0-9]+$ ]]; then
+    mins="$(( (now_epoch - start_epoch) / 60 ))"
+  else
+    mins="unknown"
+  fi
+  [[ -n "$started" ]] || started="unknown"
+  tail="$(_sanitize_log_tail)"
+  day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
+  tmp="$(mktemp "$SCRATCH/.failure-report.XXXXXX")" || return 0
+  {
+    printf '# %s %s %s\n\n' "$LOOP" "$PHASE" "$day"
+    printf '## Summary\n\n'
+    printf '| Field | Value |\n|---|---|\n'
+    printf '| Status | NO AGENT REPORT |\n'
+    printf '| Phase | `%s` |\n' "$PHASE"
+    printf '| Exit | `%s` |\n' "$PHASE_RC"
+    printf '| Started | `%s` |\n' "$started"
+    printf '| Ended | `%s` |\n' "$ended"
+    printf '| Duration | %s min |\n\n' "$mins"
+    printf '%s\n\n' "The phase ended without an agent report. This harness record is the exit, the clock, and a short tail of this phase's log."
+    printf '## Log tail\n\n'
+    printf '```text\n%s\n```\n' "$tail"
+  } > "$tmp" || { rm -f -- "$tmp"; return 0; }
+  chmod 600 "$tmp" || { rm -f -- "$tmp"; return 0; }
+  mv -f -- "$tmp" "$src"
+}
+
 # Best-effort: a failure leaves REPORT_URL empty and the page says so. The
 # deploy key lives only in this hook's GIT_SSH_COMMAND; every push is a fresh
 # clone with a freshly pinned GitHub host key.
 publish_private_report() {
   REPORT_URL=""
+  write_missing_phase_report
   local src="$SCRATCH/latest-report-${PHASE}.md" day rel dir hosts ssh_cmd
   [[ -f "$src" && -f "$REPORTS_KEY" ]] || return 0
   refuse_symlink "$src" || return 0

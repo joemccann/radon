@@ -970,6 +970,71 @@ def test_a_timeout_posts_exit_124(rig):
     assert "audited-through" not in _gh_argv(rig)
 
 
+def _deepsec_phase(rig, **extra):
+    rig.configure(AGENTS="claude", PHASES="audit:60",
+                  DEADMAN_LABEL="security-deepsec",
+                  DEADMAN_TITLE="Nightly DeepSec runner", **extra)
+
+
+def _claude_launches(rig) -> int:
+    # claude -p takes the prompt inline, so argv is more than one line.
+    path = rig.calls / "argv"
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.read_text().splitlines() if line.startswith("claude "))
+
+
+def test_a_claude_exit_1_with_checkpointed_progress_retries_once_then_scores_75(rig):
+    _deepsec_phase(rig)
+    proc = rig.run(STUB_CLAUDE=(
+        'rec="$RADON_RUNNER_LOOP_STATE/scratch/run1/run-record.md"\n'
+        'mkdir -p "$(dirname "$rec")"\n'
+        "printf '%s\\n' 'run_id: run1' 'phase: audit' 'stage 1: complete' > \"$rec\"\n"
+        "exit 1\n"
+    ))
+
+    assert proc.returncode == 75, rig.log()
+    assert _claude_launches(rig) == 2
+    assert rig.notification()["message"].startswith("INCOMPLETE"), rig.notification()
+    posted = _gh_argv(rig)
+    assert "phase=audit exit=75" in posted
+    assert "exit=1" not in posted and "exit=124" not in posted
+
+
+def test_a_claude_exit_1_without_a_checkpoint_retries_once_and_stays_failed(rig):
+    _deepsec_phase(rig)
+    proc = rig.run(STUB_CLAUDE=(
+        'rec="$RADON_RUNNER_LOOP_STATE/scratch/old/run-record.md"\n'
+        'mkdir -p "$(dirname "$rec")"\n'
+        "printf '%s\\n' 'stage 1: complete' > \"$rec\"\n"
+        "python3 -c 'import os,sys; os.utime(sys.argv[1], (946684800, 946684800))' \"$rec\"\n"
+        "exit 1\n"
+    ))
+
+    assert _claude_launches(rig) == 2, rig.log()
+    assert proc.returncode == 75, "a phased night still exits 75 when a phase is not OK"
+    assert rig.notification()["message"].startswith("FAILED"), rig.notification()
+    posted = _gh_argv(rig)
+    assert "phase=audit exit=1" in posted
+    assert "exit=75" not in posted and "exit=124" not in posted
+
+
+def test_a_claude_timeout_is_not_retried_and_stays_124_with_a_checkpoint(rig):
+    _deepsec_phase(rig)
+    proc = rig.run(STUB_CLAUDE=(
+        'rec="$RADON_RUNNER_LOOP_STATE/scratch/run1/run-record.md"\n'
+        'mkdir -p "$(dirname "$rec")"\n'
+        "printf '%s\\n' 'status: INCOMPLETE' > \"$rec\"\n"
+        "exit 124\n"
+    ))
+
+    assert _claude_launches(rig) == 1, rig.log() + proc.stderr
+    assert rig.notification()["message"].startswith("TIMEOUT"), rig.notification()
+    posted = _gh_argv(rig)
+    assert "phase=audit exit=124" in posted
+    assert "exit=75" not in posted
+
+
 def test_a_missing_hook_status_posts_exit_1(rig):
     rig.configure(PHASES="audit:60", POST_RUN="hooks/post.sh",
                   DEADMAN_LABEL="testing-nightly", DEADMAN_TITLE="Nightly testing runner")
