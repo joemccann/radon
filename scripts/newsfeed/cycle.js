@@ -11,6 +11,7 @@
 // re-persist after tagging if the tagger added anything.
 
 import { PAYWALL_FULL_MESSAGE, PAYWALL_STUB_MARKER } from "./auth.js";
+import { isWritablePostId } from "../db/post_id.js";
 
 // Cycle-level paywall guard. The 6h re-auth gate in index.js means a session
 // flipped to free-tier mid-window has no runtime guard — themarketear.com
@@ -55,7 +56,14 @@ export async function runScrapeCycle(deps) {
   const cycleStart = Date.now();
 
   const scraped = await scrapePosts();
-  const rawItems = scraped?.items ?? [];
+  const scrapedItems = scraped?.items ?? [];
+  // The id comes from the upstream markup. Drop anything addressing a reserved
+  // namespace (research posts share the `posts` table) before it can be
+  // merged, persisted or upserted.
+  const rawItems = scrapedItems.filter((item) => isWritablePostId(item?.id));
+  if (rawItems.length !== scrapedItems.length) {
+    console.warn(`[newsfeed] dropped ${scrapedItems.length - rawItems.length} scraped item(s) with a reserved or missing id`);
+  }
 
   // Partition before doing anything else — paywalled stubs must never reach
   // mergePosts (which would persist them into posts.json) and must trigger

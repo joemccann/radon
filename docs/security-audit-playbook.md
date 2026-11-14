@@ -262,6 +262,14 @@ line here whenever you ship a security fix.**
   cannot; the PR helper refuses merge-shaped `gh` invocations by token scan;
   page-derived summaries are flattened before entering PR metadata.
   (`scripts/tests/test_grok_push_guard.py`)
+- **Unattended agent input trust is enforced by the runner, not prompt text** —
+  every nightly loop that reads its rolling-issue checkpoint gets it from a
+  pre-run hook that keeps only owner, member and collaborator comments
+  (`scripts/nightly_audit_context.py`); no prompt reads the public issue's
+  comments itself, because a sentence telling the model to ignore untrusted
+  authors is a probabilistic control over attacker-formatted text in the task
+  position. (`scripts/tests/test_runner_prompt_checkpoint_trust.py`,
+  `scripts/tests/test_runner_checkpoint_hook.py`)
 - **An automated publish gate scans everything the push publishes** — the IR
   gate (`scripts/ir_push_gate.py`) scans every commit's own patch (not the
   aggregate diff), with `--text --no-textconv` so branch attributes cannot
