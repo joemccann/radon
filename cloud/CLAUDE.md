@@ -141,10 +141,10 @@ and manifest-pinned. Normal green deployment installs and enables them at
 `*:02/5:17`, independently of article publication. The Python container runs
 as the application UID with a private research bind and an allowlist limited
 to Turso and MarketDesk login, without model, broker or Dropbox grants.
-Migration 0103 supplies the durable queue. Migration 0112 stores the
-adaptive admission interval on that throttle row (floor 300s, batch of 6,
-ceiling 24h). Provider quota stretches the gap; it does not open a catch-up
-burst. Deployment
+Migration 0103 supplies the durable queue. Migration 0113 resets the live
+admission row to 900 seconds and batch 1 so the controller ramps, with a
+rolling cap of 400 PDFs per 24 hours (`MARKETDESK_PDF_DAILY_CAP`, 0 off).
+Provider quota doubles the interval and resets the batch to 1. Deployment
 rollback restores the installed unit/drop-in state. See
 [archive operations](../docs/marketdesk-pdf-archive.md).
 

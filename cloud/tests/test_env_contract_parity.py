@@ -78,7 +78,8 @@ EXEMPT: dict[str, str] = {
     # a defined way, so requiring it would fail preflight on a value the job
     # does not need to run.
     "MARKETDESK_FIREBASE_REFRESH_TOKEN": "seed only; the rotated token in $RADON_RESEARCH_DIR/marketdesk/firebase.json wins, and THEMARKETEAR_* is the fallback",
-    "MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "legacy; the PDF worker ignores it. Admission pace is marketdesk_pdf_throttle.interval_seconds",
+    "MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "optional floor for the PDF admission interval; unset uses the 300s code floor, a higher value cannot be undercut",
+    "MARKETDESK_PDF_DAILY_CAP": "optional rolling 24h PDF admission cap; unset is 400, 0 disables the cap",
     "PLAYWRIGHT_CHROMIUM_SANDBOX": "escape hatch; unset launches Chromium sandbox-first and falls back only on a sandbox-start failure",
     "MARKETDESK_SUMMARY_WAIT_HOURS": "optional; unset waits 6 hours for MarketDesk's summary before failing the item",
     "MARKETDESK_ASSET_HOSTS": "optional extra chart-image hosts; unset allows the MarketDesk CDN only",
