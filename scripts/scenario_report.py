@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Scenario Stress Test — HTML Report Generator
-Reads scenario JSON (default /tmp/scenario_analysis.json) and produces a full
+Reads scenario JSON (default data/scenario_analysis.json) and produces a full
 interactive report with expandable detail rows per position. The JSON must be
 a regular file owned by the user running this script.
 """
@@ -12,7 +12,9 @@ import os
 import stat
 from datetime import datetime
 
-_JSON_PATH = os.environ.get("RADON_SCENARIO_JSON", "/tmp/scenario_analysis.json")
+from scenario_analysis import HANDOFF_PATH
+
+_JSON_PATH = os.environ.get("RADON_SCENARIO_JSON", str(HANDOFF_PATH))
 _TEMPLATE_PATH = os.environ.get(
     "RADON_SCENARIO_TEMPLATE", ".pi/skills/html-report/template.html"
 )

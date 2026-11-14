@@ -13,7 +13,7 @@ REPO = Path(__file__).resolve().parents[2]
 LOOPS = REPO / "scripts" / "runner" / "loops"
 # Keys that are the loop's own identity, budget or workspace.
 OWN = {"BRANCH_PREFIX", "PROMPT", "PHASES", "KEEP_PATHS", "SCHEDULE_MINUTE",
-       "DEADMAN_LABEL", "DEADMAN_TITLE"}
+       "SCHEDULE_WEEKDAYS", "DEADMAN_LABEL", "DEADMAN_TITLE"}
 
 
 def _settings(name: str) -> dict[str, str]:
