@@ -623,12 +623,16 @@ def test_the_phase_report_is_published_privately_redacted_and_linked_from_the_pa
 
 def test_a_report_older_than_the_phase_is_not_republished(rig):
     (rig.home / ".radon-runner-reports-key").write_text("key\n")
-    _write_report(rig, "old\n", age=3600)
+    _write_report(rig, "old agent report\n", age=3600)
+    aged = time.time() - 5
+    os.utime(rig.mark, (aged, aged))
 
     out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
 
-    assert _published(rig) is None
-    assert out["report_url"] == "" and "(no private report this phase)" in out["status"]
+    body = _published(rig)
+    assert body is not None and "old agent report" not in body, body
+    assert "NO AGENT REPORT" in body
+    assert "no private report" not in out["status"] and out["report_url"]
 
 
 def test_a_symlinked_report_is_refused(rig, tmp_path):
@@ -648,6 +652,49 @@ def test_no_deploy_key_means_no_publish(rig):
     _write_report(rig, "report\n")
     out = rig.post(output=f"{rig.marker} audit run_id=r1\n")
     assert _published(rig) is None and out["report_url"] == ""
+
+
+def test_a_missing_agent_report_publishes_a_sanitized_failure_report(rig):
+    """A phase that dies before latest-report-<phase>.md still publishes.
+
+    The publish step is the hook's own git push, pointed at a local bare
+    repo. The public dead-man stays the phase line.
+    """
+    (rig.home / ".radon-runner-reports-key").write_text("key\n")
+    rig.scratch.mkdir(parents=True, exist_ok=True)
+    old = time.time() - 30
+    os.utime(rig.mark, (old, old))
+    log = "\n".join([
+        "Error: CLI crashed",
+        f"token {CANARY_TOKEN}",
+        f"cwd {rig.home}/radon-runner/logs/audit.log",
+        "trace /Users/_radonbot/.claude/session.json",
+        "P1 attack via /api/admin/keys payload=drop",
+        "session ended",
+        "",
+    ])
+
+    out = rig.post(rc=1, output=log)
+
+    body = _published(rig)
+    assert body is not None, out
+    assert f"# {rig.loop} audit " in body
+    assert "| Phase | `audit` |" in body
+    assert "| Exit | `1` |" in body
+    assert "| Started |" in body and "| Ended |" in body and "| Duration |" in body
+    assert "Error: CLI crashed" in body and "session ended" in body
+    assert CANARY_TOKEN not in body
+    assert str(rig.home) not in body and "/Users/_radonbot" not in body
+    assert "~/.claude/session.json" in body
+    assert "payload=drop" not in body and "/api/admin/keys" not in body
+    assert "[redacted detail]" in body
+    assert out["report_url"].endswith(
+        f"reports/{rig.loop}/{time.strftime('%Y-%m-%d')}/audit.md")
+    assert "no private report" not in out["status"]
+    comment = rig.comment()
+    for leak in (CANARY_TOKEN, "CLI crashed", "payload=drop", "/api/admin/keys",
+                 str(rig.home), "/Users/_radonbot", "radon-security-reports"):
+        assert leak not in comment, leak
 
 
 def test_a_block_scalar_or_compound_named_credential_body_is_redacted(rig):
