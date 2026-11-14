@@ -189,6 +189,33 @@ class TestGenerator:
         assert "https://x/c0" in text
         assert "skipped newer markers (not ancestors of head): dc6c77a8" in text
 
+    def test_a_hundred_commit_range_is_listed_in_full(self, tmp_path):
+        d = tmp_path / "wide"
+        d.mkdir()
+
+        def run(*a):
+            return subprocess.run(
+                ["git", "-C", str(d), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", *a],
+                check=True, capture_output=True, text=True, env=GIT_ENV,
+            ).stdout.strip()
+
+        run("init", "-q")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        base = ""
+        for i in range(110):
+            (d / "notes.txt").write_text(f"{i}\n")
+            run("add", "notes.txt")
+            run("commit", "-qm", f"wide commit {i:03d}")
+            if i == 0:
+                base = run("rev-parse", "HEAD")
+        out = tmp_path / "ctx.md"
+        assert run_ctx(d, fake_gh(tmp_path, [f"audited-through: {base}"]), out).returncode == 0
+        commits = out.read_text().split("## Commits", 1)[1].split("##", 1)[0]
+        assert "wide commit 000" not in commits
+        for i in range(1, 110):
+            assert f"wide commit {i:03d}" in commits
+
     def test_an_empty_range_is_stated(self, tmp_path, git_repo):
         repo_dir, shas = git_repo
         out = tmp_path / "ctx.md"
