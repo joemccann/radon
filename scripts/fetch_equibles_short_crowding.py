@@ -535,15 +535,8 @@ def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
 
 
 def _write_squeeze_rows(payload: dict[str, Any], scan_time: str) -> None:
-    rows = _squeeze_args(payload, scan_time)
-    if not rows:
-        return
-    from db.client import get_db
-
-    db = get_db()
-    for args in rows:
-        db.execute(SQUEEZE_SCORE_UPSERT_SQL, args)
-    db.commit()
+    """One multi-row upsert per chunk — never one Hrana round-trip per ticker."""
+    _chunked_upsert(SQUEEZE_SCORE_UPSERT_SQL, _squeeze_args(payload, scan_time))
 
 
 def _record_health(state: str, scan_time: str, error: Optional[dict[str, Any]] = None) -> None:
