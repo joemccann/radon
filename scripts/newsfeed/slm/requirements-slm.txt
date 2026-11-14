@@ -249,7 +249,7 @@ nvidia-nvtx==13.0.85
     # via cuda-toolkit
 omegaconf==2.3.1
     # via llamafactory
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via fastapi
 orjson==3.13.0
     # via gradio
