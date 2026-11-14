@@ -43,7 +43,10 @@ GW_AGY_HOME="$GW_ROOT/agy-home"
 GW_AGY_KEYCHAIN="$GW_AGY_HOME/Library/Keychains/radon-agy.keychain-db"
 GW_SOCKET="$GW_ROOT/run/gateway.sock"
 GW_CONTROL="$GW_ROOT/control/control.sock"
-# Concurrent calls per provider. Two security loops share one Claude login.
+# Concurrent calls per provider. The two security loops share one Claude login.
+# They run on different weekdays and take subscription-claude.lock so they
+# are not in that login at the same time. Nested calls inside one loop still
+# use this cap.
 GW_CONCURRENCY=16
 
 # Root installs from $SRC, so every path it reads must be one only root or the
@@ -95,8 +98,49 @@ loop_setting() {
   sed -n "s/^$2=//p" "$SRC/loops/$1.env" | tail -n 1 | tr -d "\"'"
 }
 
+# One dict fires every day. SCHEDULE_WEEKDAYS (0-6, Sunday is 0) is an array
+# of dicts, one weekday each. launchd also treats 7 as Sunday, so 7 is refused
+# here to keep a Sunday fire from being listed twice.
+calendar_interval() {
+  local hour="$1" minute="$2" days="$3" day seen=" "
+  if [[ -z "$days" ]]; then
+    cat <<EOF
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>$hour</integer>
+        <key>Minute</key>
+        <integer>$minute</integer>
+    </dict>
+EOF
+    return 0
+  fi
+  printf '    <key>StartCalendarInterval</key>\n    <array>\n'
+  local IFS=,
+  for day in $days; do
+    [[ "$day" =~ ^[0-6]$ ]] || { echo "SCHEDULE_WEEKDAYS must be 0-6 comma-separated, got '$day'" >&2; return 64; }
+    [[ "$seen" != *" $day "* ]] || { echo "SCHEDULE_WEEKDAYS repeats $day" >&2; return 64; }
+    seen="$seen$day "
+    cat <<EOF
+        <dict>
+            <key>Weekday</key>
+            <integer>$day</integer>
+            <key>Hour</key>
+            <integer>$hour</integer>
+            <key>Minute</key>
+            <integer>$minute</integer>
+        </dict>
+EOF
+  done
+  printf '    </array>\n'
+}
+
 print_plist() {
-  local loop="$1"
+  local loop="$1" hour minute days interval
+  hour="$(loop_setting "$loop" SCHEDULE_HOUR)"
+  minute="$(loop_setting "$loop" SCHEDULE_MINUTE)"
+  days="$(loop_setting "$loop" SCHEDULE_WEEKDAYS)"
+  interval="$(calendar_interval "$hour" "$minute" "$days")"
   cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -126,13 +170,7 @@ print_plist() {
     </dict>
     <key>ExitTimeOut</key>
     <integer>60</integer>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>$(loop_setting "$loop" SCHEDULE_HOUR)</integer>
-        <key>Minute</key>
-        <integer>$(loop_setting "$loop" SCHEDULE_MINUTE)</integer>
-    </dict>
+$interval
     <key>StandardOutPath</key>
     <string>$BOT_HOME/radon-runner/launchd-$loop.log</string>
     <key>StandardErrorPath</key>
