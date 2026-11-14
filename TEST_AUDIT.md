@@ -12367,3 +12367,46 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | credentials xdist flake then serial 11 passed; 21,174 passed / 12 skipped / 63 subtests (140.79s) | 11,932 passed / 21 skipped / 1,236 files (94.75s) | 59 failed / 4,033 passed / 23 skipped (1129.38s) | 0 added / 0 removed |
 | 2 | 21,175 passed / 12 skipped / 63 subtests (163.86s) | 11,932 passed / 21 skipped / 1,236 files (96.48s) | 59 failed / 4,033 passed / 23 skipped (1014.15s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 11 passed; 21,174 passed / 12 skipped / 63 subtests (159.52s) | 11,932 passed / 21 skipped / 1,236 files (100.17s) | 59 failed / 4,033 passed / 23 skipped (1034.29s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-13
+
+Range `e960cd2704f636b21827b124312f19189982e7f5..1a000276959c9f1d9b5f6888f520639318fd8502`: 53 commits / 53 paths. Newest trusted checkpoint on issue #83 is `audited-through: e960cd2704f636b21827b124312f19189982e7f5` (collaborator, 2026-11-12). It carried no open verified finding. No open `testing/` pull request. Highest id T-587. Next id T-588.
+
+Codemap (`tools/codemap/codemap.json`, generated 2026-11-12T10:00:09Z) has no node for `scripts/utils/orders_sync_clock.py`, `web/lib/orders/ordersSyncClock.ts`, `cloud/config/polkit/50-radon-services.rules`, or `scripts/runner/install.sh`. `rg` confirmed importers: `scripts/tests/test_orders_sync_clock.py` and `scripts/api/server.py` for the Python clock; `web/lib/orders/readOrdersFromDb.ts` and `web/tests/orders-read-from-db.test.ts` for the TS clock; `cloud/tests/test_polkit_transient_denial.py` for the polkit rule; `scripts/tests/test_runner_local_gateway.py:75` for `GW_CONCURRENCY=16`. Inverse: `WorkspaceShell.tsx:543` now selects `ORDERS_SNAPSHOT_STALE_THRESHOLD_MS`, but `web/tests/workspace-shell-fill-wire.test.tsx:48-54` and `web/tests/demo-workspace-chrome.test.tsx:41-47` mock that hook, and `web/tests/orders-staleness-threshold.test.ts:24` passes the constant into the hook itself.
+
+`ci.yml` is unchanged in the range. `.github/workflows/tester-army.yml` pins Node 24.22.3. Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-587 remains DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta-touched files 3×: Python 239 passed; Vitest 29 passed / 6 files; cloud 13 passed.
+
+Not filed: compact JSON byte-equality tests (`test_data_refresh_json_compact_budget.py:44`, `test_iv_spread_json_compact_budget.py:47`, `test_straddle_json_compact_budget.py:46`); FRED key omission (`test_fred_client.py:45-48`, `test_fetch_catalysts.py:450-452`); UW `make_key` delimiter collision (`test_uw_cache.py:68-76`); scenario JSON owner/symlink/escape (`test_scenario_report.py:33-47`, `:151-154`); orders-sync clock at FastAPI (`test_orders_snapshot_pipeline_budget.py:53-75`) and Next (`orders-read-from-db.test.ts:132-140`). `narr.get('company')` in `scenario_report.py:509` is hardcoded `NARRATIVES`, not JSON.
+
+### T-588 — P1 — /orders 8-minute threshold is untested at WorkspaceShell, so 60s would not fail
+
+`web/components/WorkspaceShell.tsx:543` selects `ORDERS_SNAPSHOT_STALE_THRESHOLD_MS` (8 min, `useSnapshotStaleness.ts:20`) on the orders page. `web/tests/orders-staleness-threshold.test.ts:24` feeds that constant into the hook; `workspace-shell-fill-wire.test.tsx:48-54` mocks the hook. Mutation `543` → `60_000`: existing four files 26 passed (`/tmp/t588-existing-mut.log`). New wire test: 1 failed / 1 passed (`/tmp/t588-red.log`, POST `/api/orders` on a 5.5-minute-old book).
+
+Acceptance: render `WorkspaceShell` `section="orders"` with real staleness and auto-sync hooks. A last_sync one orders-sync cycle plus the 30s run old must not POST `/api/orders`. A last_sync past 8 minutes must POST `/api/orders` exactly once. Reverting the shell to `60_000` fails the cycle-old case.
+
+### T-589 — P1 — polkit transient denial was grepped, so granting StartTransientUnit stayed green
+
+`cloud/config/polkit/50-radon-services.rules:23-25` and `:54-56` return `polkit.Result.NO` when `radonTransientStart` is true. The pre-fix `cloud/tests/test_polkit_transient_denial.py:34-44` grepped helper strings and call order before `YES`; `:47-52` copied the JS into Python. Mutation `return polkit.Result.NO` → `YES` in the first rule: old file 3 passed (`/tmp/t589-polkit-mut.log`). Node-executed rules: first-rule YES 1 failed (`/tmp/t589-red.log`, radon transient `yes`); second-rule YES 1 failed (`/tmp/t589-red2.log`, responder transient `yes`).
+
+Acceptance: execute the committed rules file in node with a stub `polkit.addRule`. Transient start/empty message is `no` for `radon` and `radon-responder`, including the preheld gateway unit. File-backed start of `radon-vol-cone.service` and the preheld adapter is `yes`. `radon-llm-index.service` is not granted. Flipping either transient `NO` to `YES` fails the deny case.
+
+Audited through: 1a000276959c9f1d9b5f6888f520639318fd8502 on 2026-11-13 — 2 new findings
+
+## Remediation 2026-11-13
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-588 | DONE | 60s mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t588-red.log`). Restored 8-minute select. Green: 2 passed (`/tmp/t588-green.log`); delta Vitest 29 passed ×3. Product source unchanged. |
+| T-589 | DONE | First-rule YES: 1 failed (`/tmp/t589-red.log`). Second-rule YES: 1 failed (`/tmp/t589-red2.log`). Restored `NO`. Green: 3 passed (`/tmp/t589-green.log`); delta cloud 13 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-13
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (r1 file 11 passed; r2 file 1 failed then isolated 2 passed; r3 isolated 2 passed). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as each other (0 added / 0 removed). Versus the 2026-11-12 Darwin 58-list the node IDs are identical. Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 11 passed; 19,716 passed / 10 skipped / 40 subtests (216.25s) | 11,627 passed / 21 skipped / 1,208 files (112.65s) | 58 failed / 4,275 passed / 23 skipped (1080.83s) | — |
+| 2 | credentials xdist flake then serial retry 2 passed; 19,716 passed / 10 skipped / 40 subtests (228.92s) | 11,627 passed / 21 skipped / 1,208 files (145.07s) | 58 failed / 4,275 passed / 23 skipped (1091.07s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,716 passed / 10 skipped / 40 subtests (171.49s) | 11,627 passed / 21 skipped / 1,208 files (116.77s) | 58 failed / 4,275 passed / 23 skipped (1098.07s) | 0 added / 0 removed |
