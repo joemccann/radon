@@ -66,7 +66,9 @@ def test_cboe_live_requires_every_symbol_on_one_session(monkeypatch):
 
     quotes = {"VIX": _quote(17.6, "2026-11-11T15:44:32"), "SKEW": _quote(149.09, "2026-11-11T15:44:00")}
     get = Mock(side_effect=lambda url, **k: quotes[url.rsplit("_", 1)[1].removesuffix(".json")])
-    monkeypatch.setattr(requests, "get", get)
+    monkeypatch.setattr(
+        requests.Session, "get", lambda self, url, **k: get(url, **k)
+    )
     assert index_live.live_from_cboe(("VIX", "SKEW")) == {
         "date": "2026-11-11", "values": {"VIX": 17.6, "SKEW": 149.09},
         "source": "cboe_delayed", "quote_time": "2026-11-11T15:44:32",
@@ -77,6 +79,7 @@ def test_cboe_live_requires_every_symbol_on_one_session(monkeypatch):
     for bad in (0, -1, float("nan"), True, "x", None):
         quotes["SKEW"] = _quote(bad, "2026-11-11T15:44:00")
         assert index_live.live_from_cboe(("VIX", "SKEW")) is None
+    index_live.close_http_session()
 
 
 def test_ib_live_needs_todays_bar_for_every_symbol(monkeypatch):
@@ -88,8 +91,11 @@ def test_ib_live_needs_todays_bar_for_every_symbol(monkeypatch):
         response.json = Mock(return_value={"bars": [{"date": "2026-10-19", "close": 20.0}]})
         return response
 
-    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(
+        requests.Session, "post", lambda self, url, **kwargs: post(url, **kwargs)
+    )
     assert index_live.live_from_ib(("VIX", "VIX3M"), NOW)["values"] == {"VIX": 20.0, "VIX3M": 20.0}
+    index_live.close_http_session()
     sunday = datetime(2026, 10, 19, 3, 0, tzinfo=timezone.utc)  # 23:00 ET Sunday
     assert index_live.live_from_ib(("VIX",), sunday) is None
 

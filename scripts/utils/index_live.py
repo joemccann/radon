@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import threading
 from datetime import datetime
 from typing import Any, Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -20,6 +21,29 @@ LIVE_QUOTE_URL = "https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_{sy
 POOL_BARS_URL = "http://127.0.0.1:8321/historical/bars"
 USER_AGENT = "radon/2.0"
 _ET = ZoneInfo("America/New_York")
+_THREAD_HTTP = threading.local()
+
+
+def _http_session():
+    """One requests.Session per thread so sequential Cboe GETs and IB POSTs
+    reuse a keep-alive socket (PERF-055). Session is not thread-safe."""
+    import requests
+
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        session = requests.Session()
+        _THREAD_HTTP.session = session
+    return session
+
+
+def close_http_session() -> None:
+    session = getattr(_THREAD_HTTP, "session", None)
+    if session is None:
+        return
+    try:
+        session.close()
+    finally:
+        _THREAD_HTTP.session = None
 
 
 def et_today(now: datetime) -> str:
@@ -51,12 +75,10 @@ def _iso_date(value: Any) -> Optional[str]:
 
 def pool_daily_bars(symbol: str, duration: str) -> Any:
     """Daily index bars through the FastAPI IB pool; never opens a new IB socket."""
-    import requests
-
     headers = {"User-Agent": USER_AGENT}
     if os.environ.get("MDW_API_KEY"):
         headers["X-API-Key"] = os.environ["MDW_API_KEY"]
-    response = requests.post(
+    response = _http_session().post(
         POOL_BARS_URL,
         headers=headers,
         json={
@@ -86,13 +108,12 @@ def live_from_ib(symbols: Iterable[str], now: datetime) -> Optional[dict[str, An
 
 def live_from_cboe(symbols: Iterable[str]) -> Optional[dict[str, Any]]:
     """Cboe 15-minute delayed quotes for every symbol, all on one session, or None."""
-    import requests
-
     values: dict[str, float] = {}
     dates: set[str] = set()
     times: list[str] = []
+    session = _http_session()
     for symbol in symbols:
-        response = requests.get(
+        response = session.get(
             LIVE_QUOTE_URL.format(symbol=symbol), headers={"User-Agent": USER_AGENT}, timeout=15
         )
         response.raise_for_status()
