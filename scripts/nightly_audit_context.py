@@ -69,6 +69,12 @@ def cursor_comment_counts(body: str) -> bool:
     ImportError keeps the old behavior so a runner install that has not yet
     copied nightly_phase_status.py still reads legacy checkpoints.
     """
+    # The hooks run the installed copy with `python -I`, which leaves this
+    # file's own directory off sys.path (-I implies -P since 3.11); without
+    # this the sibling import failed and the fallback counted every marker.
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
     try:
         from nightly_phase_status import cursor_allowed
     except ImportError:

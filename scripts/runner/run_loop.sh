@@ -422,7 +422,7 @@ build_prompt() {
     else
       echo "Branch: $BRANCH (create it from origin/main; it is the only branch you may push)"
     fi
-    if [[ -n "$PHASE" ]]; then echo "State: $LOOP_STATE"; fi
+    if [[ -n "$PHASE" || -n "$PRE_RUN" ]]; then echo "State: $LOOP_STATE"; fi
     echo "Time budget: $((TIMEOUT_SECS / 60)) minutes, then this session is stopped."
     echo
     cat "$WORK/$PROMPT"
@@ -601,17 +601,54 @@ notify() {
   return 0
 }
 
+# A private run-record written during this phase that marks a stage, a
+# checkpoint, or a status. An older record from a previous night does not
+# count, and a symlink is not read.
+phase_progress_checkpointed() {
+  (
+    local scratch="$LOOP_STATE/scratch" dir rec mtime start
+    [[ -d "$scratch" && ! -L "$scratch" ]] || return 1
+    start="${PHASE_STARTED_AT:-0}"
+    [[ "$start" =~ ^[0-9]+$ ]] || start=0
+    shopt -s nullglob
+    for dir in "$scratch"/*; do
+      [[ -d "$dir" && ! -L "$dir" ]] || continue
+      rec="$dir/run-record.md"
+      [[ -f "$rec" && ! -L "$rec" ]] || continue
+      mtime="$(stat -c %Y "$rec" 2>/dev/null || stat -f %m "$rec" 2>/dev/null || echo 0)"
+      [[ "$mtime" =~ ^[0-9]+$ ]] || continue
+      if (( mtime + 2 < start )); then continue; fi
+      if head -c 65536 "$rec" | grep -Eiq '^(status:|checkpoint:|stage[[:space:]].*complete)'; then
+        return 0
+      fi
+    done
+    return 1
+  )
+}
+
 run_agents_in_order() {
-  local agent
+  local agent name retried=0
   USED_AGENT=""
   FAILURES=""
   for agent in $AGENTS; do
+    name="${agent%%:*}"
     log "starting $agent"
     if run_agent "$agent"; then USED_AGENT="$agent"; return 0; fi
+    # One retry of a claude rung that died on its own. The wall-clock cap
+    # (124) already spent the phase budget and is not a crash.
+    if [[ "$name" == claude && "$AGENT_RC" != "$TIMED_OUT" ]]; then
+      retried=1
+      log "retrying $agent once after exit $AGENT_RC"
+      if run_agent "$agent"; then USED_AGENT="$agent"; return 0; fi
+    fi
     FAILURES="$FAILURES $agent=$AGENT_RC"
     log "$agent exited $AGENT_RC"
     [[ "$AGENT_RC" == "$TIMED_OUT" ]] && return 1
   done
+  if [[ "$retried" == 1 && "$AGENT_RC" != "$TIMED_OUT" ]] && phase_progress_checkpointed; then
+    log "checkpointed progress after a claude CLI failure; scoring INCOMPLETE"
+    AGENT_RC=75
+  fi
   return 1
 }
 
@@ -725,6 +762,7 @@ finish_phase() {
     if [[ -n "$PHASE_REFUSED" ]]; then status="REFUSED: $PHASE_REFUSED"
     elif [[ "$PHASE_RC" == 0 ]]; then status="OK"
     elif [[ "$PHASE_RC" == "$TIMED_OUT" ]]; then status="TIMEOUT"
+    elif [[ "$PHASE_RC" == 75 ]]; then status="INCOMPLETE (exit 75)"
     else status="FAILED (exit $PHASE_RC)"; fi
   fi
   [[ -z "$PHASE_REFUSED" ]] || ANY_REFUSED=1
@@ -854,6 +892,15 @@ main() {
     run_phases
     return
   fi
+  if [[ -n "$PRE_RUN" ]]; then
+    run_hook "$PRE_RUN"
+    hook_rc=$?
+    [[ -z "$HOOK_OUT" ]] || printf '%s\n' "$HOOK_OUT" >> "$LOG"
+    if (( hook_rc != 0 )); then
+      hook_reason="$(hook_value "$HOOK_OUT" refused)"
+      refuse "${hook_reason:-the pre-run check failed (exit $hook_rc)}"
+    fi
+  fi
   materialize_fastembed_wheel
   build_prompt
   PHASE_STARTED_AT="$(date +%s)"
@@ -865,9 +912,11 @@ main() {
   local phase_word rc
   if [[ "$PHASE_RC" == "$TIMED_OUT" ]]; then phase_word="TIMEOUT"
   elif [[ "$PHASE_RC" == 0 ]]; then phase_word="OK"
+  elif [[ "$PHASE_RC" == 75 ]]; then phase_word="INCOMPLETE (exit 75)"
   else phase_word="FAILED (exit $PHASE_RC)"; fi
   report
   rc=$?
+  if [[ "$PHASE_RC" == 75 ]]; then rc=75; fi
   post_phase_marker audit "$phase_word"
   return "$rc"
 }

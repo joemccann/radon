@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -188,6 +189,33 @@ class TestGenerator:
         assert "https://x/c0" in text
         assert "skipped newer markers (not ancestors of head): dc6c77a8" in text
 
+    def test_a_hundred_commit_range_is_listed_in_full(self, tmp_path):
+        d = tmp_path / "wide"
+        d.mkdir()
+
+        def run(*a):
+            return subprocess.run(
+                ["git", "-C", str(d), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", *a],
+                check=True, capture_output=True, text=True, env=GIT_ENV,
+            ).stdout.strip()
+
+        run("init", "-q")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        base = ""
+        for i in range(110):
+            (d / "notes.txt").write_text(f"{i}\n")
+            run("add", "notes.txt")
+            run("commit", "-qm", f"wide commit {i:03d}")
+            if i == 0:
+                base = run("rev-parse", "HEAD")
+        out = tmp_path / "ctx.md"
+        assert run_ctx(d, fake_gh(tmp_path, [f"audited-through: {base}"]), out).returncode == 0
+        commits = out.read_text().split("## Commits", 1)[1].split("##", 1)[0]
+        assert "wide commit 000" not in commits
+        for i in range(1, 110):
+            assert f"wide commit {i:03d}" in commits
+
     def test_an_empty_range_is_stated(self, tmp_path, git_repo):
         repo_dir, shas = git_repo
         out = tmp_path / "ctx.md"
@@ -269,3 +297,36 @@ class TestWrapperWiring:
         start = text.index("\n", text.index("\n" + PROMPTS[loop]) + 1)
         audit = text[start:].split("\n## ", 1)[0]
         assert "$RADON_RUNNER_LOOP_STATE/scratch/audit-context.md" in audit, loop
+
+
+class TestInstalledInvocation:
+    def test_the_phase_status_filter_still_applies_under_isolated_mode(self, tmp_path, git_repo):
+        """The hooks run the installed copy as `python -I lib/nightly_audit_context.py`.
+        Isolated mode leaves the script's own directory off sys.path, so the
+        sibling import that rejects failed machine lines must still resolve;
+        otherwise the ImportError fallback silently counts every marker."""
+        repo_dir, shas = git_repo
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        for helper in ("nightly_audit_context.py", "nightly_phase_status.py"):
+            shutil.copy2(SCRIPTS / helper, lib / helper)
+        failed = (
+            "<!-- radon-phase loop=testing phase=audit exit=1 ts=2026-10-18T15:47:00Z -->\n"
+            f"audited-through: {shas[2]}\n"
+        )
+        ok = (
+            f"<!-- radon-phase loop=testing phase=audit exit=0 audited-through={shas[1]} "
+            "ts=2026-10-18T15:47:00Z -->\n"
+            f"audited-through: {shas[1]}\n"
+        )
+        gh = fake_gh(tmp_path, [ok, failed])
+        out = tmp_path / "ctx.md"
+        proc = subprocess.run(
+            [sys.executable, "-I", str(lib / "nightly_audit_context.py"), "--repo", "joemccann/radon",
+             "--repo-dir", str(repo_dir), "--head", "HEAD", "--gh-bin", str(gh),
+             "--label", "ci-performance-nightly", "--out", str(out), "--timeout", "10"],
+            capture_output=True, text=True, timeout=60, env=GIT_ENV, cwd=tmp_path,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert f"base: {shas[1]}" in out.read_text()
+        assert f"base: {shas[2]}" not in out.read_text()
