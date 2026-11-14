@@ -57,6 +57,8 @@ load_config() {
   POST_RUN=""
   DEADMAN_LABEL=""
   DEADMAN_TITLE=""
+  SUBSCRIPTION_LOCK=""
+  SCHEDULE_WEEKDAYS=""
   GH_REPO="${RADON_WEEKEND_GH_REPO:-joemccann/radon}"
   PHASE_RC=0
   PHASE_REFUSED=""
@@ -236,9 +238,9 @@ proc_start() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //;s/ $/
 # REL-291 / R-710: missing metadata or an unreadable process fingerprint is
 # uncertain ownership, never permission to delete the active agent's clone.
 lock_state() {
-  local holder started observed
-  holder="$(cat "$LOCK/pid" 2>/dev/null)"
-  started="$(cat "$LOCK/start" 2>/dev/null)"
+  local dir="$1" holder started observed
+  holder="$(cat "$dir/pid" 2>/dev/null)"
+  started="$(cat "$dir/start" 2>/dev/null)"
   case "$holder" in ''|*[!0-9]*|0|1) return 2 ;; esac
   kill -0 "$holder" 2>/dev/null || return 1
   [[ -n "$started" ]] || return 2
@@ -248,40 +250,73 @@ lock_state() {
   return 1
 }
 
-release_lock() {
+release_one() {
   # An EXIT from a displaced process must never remove a successor's lock.
-  [[ "$(cat "$LOCK/pid" 2>/dev/null)" == "$$" ]] || return 0
-  rm -rf "$LOCK"
+  [[ "$(cat "$1/pid" 2>/dev/null)" == "$$" ]] || return 0
+  rm -rf "$1"
 }
 
-acquire_lock() {
-  LOCK="$STATE_DIR/$LOOP.lock"
-  local state
-  if ! mkdir "$LOCK" 2>/dev/null; then
-    lock_state; state=$?
+release_lock() {
+  [[ -z "${SUB_LOCK:-}" ]] || release_one "$SUB_LOCK"
+  [[ -z "${LOCK:-}" ]] || release_one "$LOCK"
+}
+
+# 0 acquired, 10 a live owner holds it, 75 uncertain or the reclaim lost the race.
+claim_mkdir_lock() {
+  local dir="$1" busy_log="$2" busy_note="$3" state
+  if ! mkdir "$dir" 2>/dev/null; then
+    lock_state "$dir"; state=$?
     if [[ "$state" == 0 ]]; then
-      log "skipped: the recorded process is still running this loop"
-      notify "radon $LOOP: skipped" "the previous run is still running; this fire did not start"
-      exit 0
+      log "$busy_log"
+      notify "radon $LOOP: skipped" "$busy_note"
+      return 10
     fi
     if [[ "$state" != 1 ]]; then
-      notify "radon $LOOP: REFUSED" "lock ownership is uncertain; preserve the clone and inspect $LOCK before removing an orphaned lock"
-      exit 75
+      notify "radon $LOOP: REFUSED" "lock ownership is uncertain; preserve the clone and inspect $dir before removing an orphaned lock"
+      return 75
     fi
     # Serialize reclaimers INSIDE the existing directory. Recheck after the
     # claim: a contender that observed the old directory may now see a new
     # owner's directory. Incomplete new metadata remains fail-closed.
-    mkdir "$LOCK/reaping" 2>/dev/null || exit 75
-    lock_state; state=$?
+    mkdir "$dir/reaping" 2>/dev/null || return 75
+    lock_state "$dir"; state=$?
     if [[ "$state" != 1 ]]; then
-      rmdir "$LOCK/reaping" 2>/dev/null || true
+      rmdir "$dir/reaping" 2>/dev/null || true
+      return 75
+    fi
+    rm -rf "$dir"
+    mkdir "$dir" || return 75
+  fi
+  echo $$ > "$dir/pid"
+  proc_start $$ > "$dir/start"
+  return 0
+}
+
+acquire_lock() {
+  local rc
+  SUB_LOCK=""
+  if [[ -n "$SUBSCRIPTION_LOCK" && ! "$SUBSCRIPTION_LOCK" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    notify "radon $LOOP: REFUSED" "SUBSCRIPTION_LOCK must be one token"
+    exit 2
+  fi
+  LOCK="$STATE_DIR/$LOOP.lock"
+  claim_mkdir_lock "$LOCK" \
+    "skipped: the recorded process is still running this loop" \
+    "the previous run is still running; this fire did not start"
+  rc=$?
+  [[ "$rc" == 0 ]] || { [[ "$rc" == 10 ]] && exit 0; exit 75; }
+  if [[ -n "$SUBSCRIPTION_LOCK" ]]; then
+    SUB_LOCK="$STATE_DIR/subscription-$SUBSCRIPTION_LOCK.lock"
+    claim_mkdir_lock "$SUB_LOCK" \
+      "skipped: the $SUBSCRIPTION_LOCK subscription lock is held" \
+      "another loop holds the $SUBSCRIPTION_LOCK subscription lock; this fire did not start"
+    rc=$?
+    if [[ "$rc" != 0 ]]; then
+      release_one "$LOCK"
+      [[ "$rc" == 10 ]] && exit 0
       exit 75
     fi
-    rm -rf "$LOCK"
-    mkdir "$LOCK" || exit 75
   fi
-  echo $$ > "$LOCK/pid"
-  proc_start $$ > "$LOCK/start"
   trap 'release_lock' EXIT
 }
 
@@ -647,8 +682,10 @@ post_phase_marker() {
     --json number -q '.[0].number' 2>>"$LOG" || true)"
   if [[ ! "$issue" =~ ^[0-9]+$ ]]; then
     title="${DEADMAN_TITLE:-Nightly ${LOOP} runner}"
+    local missing="A missing daily comment means the runner did not fire."
+    [[ -z "${SCHEDULE_WEEKDAYS:-}" ]] || missing="A missing comment on a scheduled day means the runner did not fire."
     "$TIMEOUT_BIN" 20 "$gh" issue create -R "$GH_REPO" --title "$title" --label "$DEADMAN_LABEL" \
-      --body "Rolling dead-man for the nightly ${LOOP} loop. Machine-readable phase status only. A missing daily comment means the runner did not fire." \
+      --body "Rolling dead-man for the nightly ${LOOP} loop. Machine-readable phase status only. $missing" \
       >/dev/null 2>>"$LOG" || true
     issue="$("$TIMEOUT_BIN" 20 "$gh" issue list -R "$GH_REPO" --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>>"$LOG" || true)"

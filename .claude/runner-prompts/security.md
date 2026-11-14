@@ -30,12 +30,15 @@ source-actionable risk, and convert every valid fix into a durable regression.
 
 The header's `Phase:` is the mode: `audit`, `remediate` or `deliver`. The
 runner (`scripts/runner/run_loop.sh`, LaunchDaemon
-`com.radon.runner.security`) fires daily at 00:40 local and runs `audit`,
-then `remediate`, then `deliver`, one session each, in this loop's own clone.
-The loop never merges. DeepSec is its own loop (`com.radon.runner.security-deepsec`,
-prompt `.claude/runner-prompts/security-deepsec.md`) with the same three
-phases, its own clone, state, cap, dead-man and PR branch; this loop neither
-runs nor consumes it. Claude Security still runs inside the
+`com.radon.runner.security`) fires at 00:40 local on Sunday, Tuesday, Thursday
+and Saturday and runs `audit`, then `remediate`, then `deliver`, one session
+each, in this loop's own clone. The loop never merges. DeepSec is its own loop
+(`com.radon.runner.security-deepsec`, prompt
+`.claude/runner-prompts/security-deepsec.md`) with the same three phases, its
+own clone, state, cap, dead-man and PR branch, and it fires at 00:50 local on
+Monday, Wednesday and Friday. The two loops share `subscription-claude.lock`
+and do not run on the same day; this loop neither runs nor consumes DeepSec.
+Claude Security still runs inside the
 audit phase. A budgeted full-repository refresh runs on the first
 Sunday of each month and after a material auth, order, topology, workflow,
 dependency, or threat-model change.
@@ -1002,7 +1005,7 @@ reason incomplete`: a count, the checkpoint's date and a reason token, never
 a SHA or file.
 That line is runner health, not the three-section PR write-up. The runner
 creates the rolling issue once with a timeless description (sanitized status
-only; a missing daily comment means the runner did not fire) and does not
+only; a missing comment on a scheduled day means the runner did not fire) and does not
 edit the issue body after that. Run history stays in comments.
 
 Operators read two dead-men. `security-nightly` is this loop

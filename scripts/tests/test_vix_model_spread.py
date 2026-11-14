@@ -197,7 +197,7 @@ def test_ib_probe_skips_only_explicit_non_authenticated_and_uses_pool(monkeypatc
     import requests
     from unittest.mock import Mock
     request=Mock();request.return_value.json.return_value={'bars':[{'date':'2026-10-16','close':41.71}]}
-    monkeypatch.setattr(requests,'post',request)
+    monkeypatch.setattr(requests.Session, 'post', lambda self, url, **k: request(url, **k))
     monkeypatch.setattr(mod,'ib_auth_state',lambda:'awaiting_2fa')
     assert mod._probe_ib()['status']=='skipped'
     request.assert_not_called()
@@ -303,7 +303,7 @@ def test_ib_probe_never_marks_malformed_bars_available(monkeypatch,bars):
     monkeypatch.setattr(mod,'ib_auth_state',lambda:'authenticated')
     response=Mock()
     response.json.return_value={'bars':bars}
-    monkeypatch.setattr(requests,'post',Mock(return_value=response))
+    monkeypatch.setattr(requests.Session, 'post', lambda self, url, **k: response)
     assert mod._probe_ib()['status']!='available'
 
 def test_error_heartbeat_failure_remains_a_nonzero_run(orchestration,capsys):
@@ -407,7 +407,7 @@ def test_broker_availability_probe_sends_only_the_hermetic_mdw_header(monkeypatc
     response = Mock()
     response.json.return_value = {'bars': [{'date': '2026-10-16', 'close': 41.71}]}
     post = Mock(return_value=response)
-    monkeypatch.setattr(requests, 'post', post)
+    monkeypatch.setattr(requests.Session, 'post', lambda self, url, **k: post(url, **k))
     assert mod._probe_ib() == {'status': 'available', 'count': 1}
     assert post.call_args.kwargs['headers']['X-API-Key'] == 'vix-model-unit-test-only'
     captured = capsys.readouterr()
@@ -681,7 +681,7 @@ def test_cboe_delayed_quotes_need_all_three_on_one_session(monkeypatch):
     quotes = {'VIX': _quote(17.51, '2026-11-11T15:39:31'), 'VIXEQ': _quote(41.87, '2026-11-11T15:39:32'),
               'COR1M': _quote(9.92, '2026-11-11T15:39:31')}
     get = Mock(side_effect=lambda url, **k: quotes[url.rsplit('_', 1)[1].removesuffix('.json')])
-    monkeypatch.setattr(requests, 'get', get)
+    monkeypatch.setattr(requests.Session, 'get', lambda self, url, **k: get(url, **k))
     assert mod._live_cboe() == {'date': '2026-11-11', 'values': {'VIX': 17.51, 'VIXEQ': 41.87, 'COR1M': 9.92},
                                 'source': 'cboe_delayed', 'quote_time': '2026-11-11T15:39:32'}
     assert get.call_args_list[0].args[0] == 'https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_VIX.json'
@@ -703,7 +703,7 @@ def test_ib_live_bars_need_todays_bar_for_all_three(monkeypatch):
                                                     {'date': '2026-10-19', 'close': closes[kwargs['json']['contract']['symbol']]}]})
         return response
 
-    monkeypatch.setattr(requests, 'post', post)
+    monkeypatch.setattr(requests.Session, 'post', lambda self, url, **k: post(url, **k))
     live = mod._live_ib(_session_now())
     assert live['source'] == 'ib' and live['date'] == '2026-10-19' and live['values'] == closes
     assert mod._live_ib(_session_now(3)) is None  # 23:00 ET Sunday: no bar dated today

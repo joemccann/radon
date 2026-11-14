@@ -355,6 +355,63 @@ def test_a_live_lock_skips_the_night_and_pages_it(rig):
     assert rig.notification()["title"] == "radon doc: skipped"
 
 
+def test_a_live_subscription_lock_skips_before_the_agent(rig):
+    """The other Claude loop still running must not start this fire."""
+    rig.configure(SUBSCRIPTION_LOCK="claude")
+    peer = rig.state / "subscription-claude.lock"
+    peer.mkdir(parents=True)
+    (peer / "pid").write_text(str(os.getpid()))
+    (peer / "start").write_text(_lstart(os.getpid()) + "\n")
+
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert rig.called() == []
+    assert peer.is_dir()
+    assert not (rig.state / "doc.lock").exists()
+    assert rig.notification()["title"] == "radon doc: skipped"
+
+
+def test_a_dead_subscription_lock_is_reclaimed(rig):
+    rig.configure(SUBSCRIPTION_LOCK="claude")
+    peer = rig.state / "subscription-claude.lock"
+    peer.mkdir(parents=True)
+    (peer / "pid").write_text("999999")
+
+    proc = rig.run()
+
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert rig.called() == ["grok"]
+    assert not peer.exists()
+    assert not (rig.state / "doc.lock").exists()
+
+
+def test_an_uncertain_subscription_lock_refuses_without_cloning(rig):
+    rig.configure(SUBSCRIPTION_LOCK="claude")
+    peer = rig.state / "subscription-claude.lock"
+    peer.mkdir(parents=True)
+    rig.work.mkdir(parents=True)
+    sentinel = rig.work / "keep-me"
+    sentinel.write_text("x")
+
+    proc = rig.run()
+
+    assert proc.returncode != 0
+    assert rig.called() == []
+    assert peer.is_dir()
+    assert sentinel.read_text() == "x"
+    assert not (rig.state / "doc.lock").exists()
+
+
+def test_a_subscription_lock_name_must_be_one_token(rig):
+    rig.configure(SUBSCRIPTION_LOCK="../escape")
+
+    proc = rig.run()
+
+    assert proc.returncode != 0
+    assert rig.called() == []
+
+
 @pytest.mark.parametrize("start", ["Mon Jan  1 00:00:00 2001"])
 def test_a_lock_whose_pid_was_reused_is_reclaimed(rig, start):
     lock = rig.state / "doc.lock"
@@ -1045,17 +1102,20 @@ def test_the_gh_guard_shim_routes_pr_api_issue_and_alias_to_the_guard(tmp_path):
 # --- the security loops -----------------------------------------------------
 
 
-@pytest.mark.parametrize("loop,hour,minute,marker,audit_secs,keep", [
+@pytest.mark.parametrize("loop,hour,minute,weekdays,marker,audit_secs,keep", [
     # 8h, like DeepSec: the monthly full-repository Claude Security refresh was
     # killed at the old 2h cap (2026-11-09, ~95 min in, no terminal summary).
-    ("security", 0, 40, "SECURITY-NIGHTLY PHASE COMPLETE:", 28800, "node_modules web/node_modules"),
-    ("security-deepsec", 0, 50, "SECURITY-DEEPSEC PHASE COMPLETE:", 28800, ".deepsec data/radon"),
+    # Sunday (0) stays on security so that refresh still lands on this loop.
+    ("security", 0, 40, (0, 2, 4, 6), "SECURITY-NIGHTLY PHASE COMPLETE:", 28800, "node_modules web/node_modules"),
+    ("security-deepsec", 0, 50, (1, 3, 5), "SECURITY-DEEPSEC PHASE COMPLETE:", 28800, ".deepsec data/radon"),
 ])
-def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute, marker, audit_secs, keep):
+def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute, weekdays, marker, audit_secs, keep):
     plist = _plist(loop)
     assert plist["Label"] == f"com.radon.runner.{loop}"
     assert plist["UserName"] == "_radonbot"
-    assert plist["StartCalendarInterval"] == {"Hour": hour, "Minute": minute}
+    assert plist["StartCalendarInterval"] == [
+        {"Weekday": day, "Hour": hour, "Minute": minute} for day in weekdays
+    ]
 
     text = (REPO / "scripts" / "runner" / "loops" / f"{loop}.env").read_text()
     env = {}
@@ -1069,6 +1129,8 @@ def test_security_loops_run_on_the_runner_in_their_old_slots(loop, hour, minute,
     assert env["AGENTS_RESOLVER"] == "lib/security_claude_ladder.py"
     assert env["AGENTS"] == "claude:claude-opus-5 claude:claude-sonnet-5"
     assert env["PHASES"] == f"audit:{audit_secs} remediate:21600 deliver:10800"
+    assert env["SCHEDULE_WEEKDAYS"] == ",".join(str(day) for day in weekdays)
+    assert env["SUBSCRIPTION_LOCK"] == "claude"
     assert env["GH_GUARD"] == "1"
     assert env["PRE_RUN"] == "hooks/security_pre.sh" and env["POST_RUN"] == "hooks/security_post.sh"
     assert "RADON_LADDER_NO_AUTH_FILES=1" in env["AGENT_ENV"].split()
