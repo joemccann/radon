@@ -3,6 +3,7 @@
 // — the scraper runs outside Next.js and needs its own client instance.
 
 import { createClient } from "@libsql/client";
+import { isWritablePostId } from "./post_id.js";
 
 let cached = null;
 
@@ -181,6 +182,10 @@ export function getDb() {
 // Idempotent — same id reapplies the row. updated_at always advances so the
 // dashboard can reorder by recency if needed.
 export async function upsertPost(post) {
+  if (!isWritablePostId(post?.id)) {
+    console.warn("[writer] upsertPost refused a post with a reserved or unusable id");
+    return;
+  }
   const db = getDb();
   const now = new Date().toISOString();
   await withDbBounds("upsertPost", () => db.execute({
@@ -216,6 +221,14 @@ export async function upsertPost(post) {
 
 export async function upsertPosts(posts) {
   if (!posts || posts.length === 0) return;
+  // The sink refuses ids outside the scraper's own namespace (see post_id.js):
+  // an upstream page must not be able to address a research row.
+  const refused = posts.filter((post) => !isWritablePostId(post?.id)).length;
+  if (refused > 0) {
+    console.warn(`[writer] upsertPosts refused ${refused} post(s) with a reserved or unusable id`);
+    posts = posts.filter((post) => isWritablePostId(post?.id));
+    if (posts.length === 0) return;
+  }
   const db = getDb();
   const now = new Date().toISOString();
 

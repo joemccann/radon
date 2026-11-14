@@ -9,6 +9,9 @@
 #    This uid has no SSH key and never initiates a production connection.
 # 3. Prunes superseded comments from the rolling dead-man issue once any
 #    prior PR has merged, keeping the latest durable checkpoint.
+# 4. Writes that checkpoint to $LOOP_STATE/scratch/audit-context.md through
+#    nightly_audit_context.py, which keeps only owner, member and collaborator
+#    comments. The prompt reads this file, never the issue comments.
 #
 # Production being unreachable never refuses the phase: the agent still has
 # the local surfaces, and the probe file records why the snapshot is missing.
@@ -58,6 +61,19 @@ prune_deadman() {
 }
 
 prune_deadman
+
+write_checkpoint() {
+  umask 077
+  rm -f -- "$LOOP_STATE/scratch/audit-context.md"
+  if bounded 180 "$PY" -I "$RUNNER_DIR/lib/nightly_audit_context.py" --repo "$GH_REPO" --repo-dir "$WORK" \
+      --head HEAD --gh-bin "$GH" --label performance-nightly --out "$LOOP_STATE/scratch/audit-context.md" >&2; then
+    echo "checkpoint=written"
+  else
+    echo "checkpoint=unavailable"
+  fi
+}
+
+write_checkpoint
 
 probe_error() {
   "$PY" -I -c 'import json,sys,time; json.dump({"error": sys.argv[1], "taken_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, open(sys.argv[2], "w"))' \
