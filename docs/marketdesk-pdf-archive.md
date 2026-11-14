@@ -69,12 +69,13 @@ attempts ending in such a failure, a priority row stops reserving precedence, so
 one bad file cannot starve the backlog. It keeps its place when due.
 
 One timer fire admits one batch, then waits out the persisted account interval.
-Migration 0112 stores that interval and the batch size on `marketdesk_pdf_throttle`,
-so a restart and a second worker share one rate. The floor is 300 seconds and
-the batch is 6: 288 fires/day times 6 is 1,728 PDFs/day. Clearing 1,300 backlog
-rows while 200/day arrive is 1,700 PDFs, about 20 hours at that pace. A missed
-fire does not stack into a catch-up burst. `MARKETDESK_PDF_MIN_INTERVAL_SECONDS`
-is ignored; the row is the rate.
+Migration 0113 is the safety reset: the live row starts at 900 seconds and batch
+1, then ramps. It does not open at 300 seconds and batch 6. A clean cycle
+subtracts 30 seconds, down to 300 seconds or to `MARKETDESK_PDF_MIN_INTERVAL_SECONDS`
+when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
+`MARKETDESK_PDF_DAILY_CAP` is a rolling 24 hour admission cap (unset means 400,
+0 turns it off) and the lease SQL enforces it. A missed fire does not stack
+into a catch-up burst.
 
 A provider quota signal (`preview_quota`, `download_quota`, `http_429`) doubles
 the persisted interval. `Retry-After` lengthens that one wait and does not
