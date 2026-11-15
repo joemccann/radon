@@ -604,3 +604,33 @@ def test_same_caption_finding_cannot_disappear_after_body_rewrite():
     value, audits, _ = run(original, reply, revision, clean(), max_rewrites=1)
     assert value is None
     assert audits[-1]['qualitative'][0]['field'] == 'caption:0'
+
+
+# research-c28429c23960a90e5ae58b68d1e9f6f1 (2026-11-14): the local scan charged
+# "leverage" five times as AI vocabulary, the rewrite renamed "gross leverage
+# 312.1%" to "gross exposure 312.1%", and the fact check correctly refused it.
+GOLDMAN_PRIME_TITLE = "Goldman's prime book gross leverage hits 312.1%, at the 95th percentile"
+GOLDMAN_PRIME_CONTENT = (
+    "Goldman Sachs' Prime Services report dated 11.13.26 puts gross leverage at 312.1%, the 95th "
+    "percentile over 5-year history. Net leverage is 71.4%, at the 37th percentile over the same period.")
+GOLDMAN_PRIME_CAPTION = ("Prime Book gross and net leverage, plus fundamental long/short leverage. "
+                         "Gross exposure is elevated while net exposure is near recent lows.")
+
+
+def test_financial_leverage_metric_is_not_ai_vocabulary():
+    original = {"title": GOLDMAN_PRIME_TITLE, "content": GOLDMAN_PRIME_CONTENT,
+                "source": {"pages": [1], "figures": [{"caption": GOLDMAN_PRIME_CAPTION}]}}
+    verified = []
+    value, audits, calls = run(original, clean(), verify=lambda p: verified.append(p) or True)
+    assert audits[0]["findings"] == [] and audits[0]["score"] == 100
+    assert audits[0]["status"] == "passed" and len(calls) == 1 and verified == []
+    assert "gross leverage at 312.1%" in value["content"]
+    humanizer.validate_certificate(value)
+
+
+def test_verb_leverage_still_costs_vocabulary_when_reviewer_flags_it():
+    text = "Funds leverage the rally to add exposure."
+    value, audits, _ = run(post(text), {"findings": [finding(text, "leverage", "vocabulary")],
+                                        "qualitative": []}, max_rewrites=0)
+    assert value and audits[0]["score"] == 95
+    assert "leverage only as a verb" in humanizer.RUBRIC_INSTRUCTION
