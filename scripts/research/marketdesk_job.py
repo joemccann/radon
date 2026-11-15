@@ -674,6 +674,19 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     return counts
 
 
+# db_http wraps a socket failure as DbHttpError("<ExcType>: ...") or
+# "research transaction transport failed: <ExcType>". Statement errors and
+# missing credentials carry no such prefix and still fail the unit.
+_TRANSPORT_TYPES = r"(?:TimeoutError|socket\.timeout|ConnectionResetError|ConnectionAbortedError|RemoteDisconnected|IncompleteRead)"
+_DB_TRANSPORT_RE = re.compile(rf"^(?:{_TRANSPORT_TYPES}:|research transaction transport failed: {_TRANSPORT_TYPES}$)")
+
+
+def _is_transport_blip(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    return isinstance(exc, DbHttpError) and bool(_DB_TRANSPORT_RE.match(str(exc).strip()))
+
+
 def _terminate(signum, frame):  # noqa: ARG001 - signal handler signature
     raise CycleTerminated("terminated by SIGTERM: the cycle exceeded its time budget or was stopped")
 
@@ -692,6 +705,11 @@ def main(argv: list[str] | None = None) -> int:
         # fire a new InactiveEnterTimestamp and a P1 page.
         return 0 if exc.provider_deadline else 1
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
+        if _is_transport_blip(exc):
+            # The error row is the P2 signal and the next 5-minute fire retries. Exit 1 latched the
+            # unit failed and paged for one Hrana read timeout (2026-11-15 05:34 UTC).
+            _log(f"cycle deferred: transport {_safe_error(exc)}")
+            return 0
         _log(f"cycle failed: {_safe_error(exc)}")
         return 1
     finally:
