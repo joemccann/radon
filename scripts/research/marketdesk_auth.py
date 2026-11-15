@@ -50,6 +50,19 @@ PREVIEW_QUOTA = "preview_quota"
 TRANSIENT_CODES = frozenset({"unauthenticated", "http_transport", "http_429", PREVIEW_QUOTA})
 FILE_SERVER_RE = re.compile(r"ts\d{1,2}\.marketdesk\.ai")
 REDIRECTS = (301, 302, 303, 307, 308)
+# marketdesk.ai answers GET /files/<id>/blob with this 500 when the file record has no stored
+# bytes. It repeats on every retry (IQSa8ONnKqF: 101 attempts), so it is terminal for the item.
+FILE_MISSING = "file_missing"
+_MISSING_FILE_MESSAGE = "Cannot read properties of null (reading 'path')"
+ERROR_BODY_LIMIT = 2048
+
+
+def _is_missing_file(body: bytes) -> bool:
+    try:
+        payload = json.loads(body or b"null")
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("message") == _MISSING_FILE_MESSAGE
 
 
 class MarketDeskAuthError(RuntimeError):
@@ -274,6 +287,10 @@ class MarketDeskSession:
             raw_wait = (headers or {}).get("Retry-After")
             from research.marketdesk_pdf_rate import parse_retry_after
             self._retry_after, self._suspension = parse_retry_after(raw_wait)
+            try:
+                self._error_body = exc.read(ERROR_BODY_LIMIT) or b""
+            except Exception:  # noqa: BLE001 - the status is the signal; the body only refines a 500
+                self._error_body = b""
             exc.close()
             return exc.code, b"", "", location
         except MarketDeskError:
@@ -356,6 +373,8 @@ class MarketDeskSession:
                 if self._same_site(location, path) and not self.previews_available():
                     raise MarketDeskError(PREVIEW_QUOTA)
                 raise MarketDeskError("unauthenticated")
+            if status == 500 and _is_missing_file(getattr(self, "_error_body", b"")):
+                raise MarketDeskError(FILE_MISSING)
             if status != 200:
                 raise self._status_error(status)
             return data, content_type

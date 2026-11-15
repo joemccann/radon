@@ -28,7 +28,7 @@ import tempfile
 from types import SimpleNamespace
 
 from lib.checkpoint import CheckpointedJob
-from research.marketdesk_auth import PREVIEW_QUOTA, MarketDeskAuthError, MarketDeskError
+from research.marketdesk_auth import FILE_MISSING, PREVIEW_QUOTA, MarketDeskAuthError, MarketDeskError
 from research.marketdesk_pdf_policy import SelectionUnavailable
 from research.marketdesk_pdf_rate import FLOOR_SECONDS, JITTER_MAX_BPS, interval_floor
 from utils.atomic_io import atomic_save, verified_load
@@ -252,6 +252,10 @@ def run_cycle(*, env=os.environ, deps=None):
                 deps.store.retry(work, code, now=deps.now(), backoff_seconds=delay, retry_after=_retry_after(exc),
                                  suspension=bool(getattr(exc, "suspension", False)))
                 checkpoint.record_error(work.article_id, code)
+                if code == FILE_MISSING:
+                    # The item is retired; the account and the cycle are healthy.
+                    print(f"[marketdesk-pdf] {work.article_id} retired: {code}", file=sys.stderr)
+                    continue
                 if _account_code(code, exc):
                     release = getattr(deps.store, "release", None)
                     if release is not None:

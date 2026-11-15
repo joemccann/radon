@@ -35,6 +35,8 @@ QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
 # Account suspension. Each one doubles the interval and resets the batch to 1.
 SUSPENSION_CODES = frozenset({"http_401", "http_402", "http_403", "unauthenticated"})
 SOFT_ERRORS = frozenset({"http_transport"})
+# The provider has no bytes for this file. Retrying cannot help and is not an account signal.
+TERMINAL_ERRORS = frozenset({"file_missing"})
 # A report that keeps failing on its own (e.g. provider HTTP 500 for one file)
 # backs off exponentially and, after this many attempts, stops reserving
 # priority precedence, so one bad file cannot starve the rest of the backlog.
@@ -304,6 +306,13 @@ def retry(work, error, *, now=None, backoff_seconds=900, retry_after=None, suspe
     state, _jitter = _rate_row()
     quota = code in QUOTA_ERRORS or code in SUSPENSION_CODES or bool(suspension)
     statements = []
+    if code in TERMINAL_ERRORS:
+        hrana_execute(
+            "UPDATE marketdesk_pdf_queue SET status='pending',last_error=?,lease_token=NULL,lease_until=NULL,"
+            "updated_at=?,disposition='exhausted',disposition_reason=?,disposition_at=? "
+            "WHERE article_id=? AND lease_token=?",
+            (code, _stamp(current), code, _stamp(current), work.article_id, work.token))
+        return
     if quota:
         wait = retry_after
         new_state, delay = on_quota(state, retry_after=wait)
