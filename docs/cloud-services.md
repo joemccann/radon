@@ -679,7 +679,7 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 |---|---|---|
 | `radon-demo-mirror.timer` | VPS | Daily **21:45 UTC** plus a **23:30 UTC** retry slot, weekends included, `Persistent=true`. A weekday-only schedule aged demo snapshots past the regime routes' 48h budget every weekend, and a pass a deploy SIGTERMed was never re-run. |
 | `radon-demo-mirror.service` | VPS | Oneshot: `migrate.py --demo`, then `demo_seed.py` (re-anchors the synthetic book's expiries to the run date; refuses any non `radon-demo` URL), then `mirror_market_snapshots_to_demo.js`. Heartbeat: `demo-mirror` (26h). Contract: [`demo-environment.md`](demo-environment.md). |
-| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages. 8-day freshness window. |
+| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages; the `--deploy-locked` run records the shortfall as `headroom_short` instead, because model disk admission gates the deploy next. 8-day freshness window. |
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):
 

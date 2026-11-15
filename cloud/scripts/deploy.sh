@@ -2431,10 +2431,10 @@ prune_app_images_before_admission() {
 # Runs while FD 9 holds the deploy lock, after the image prune. The root
 # disk_cleanup guard exits at once when free space already covers a deploy
 # (HEADROOM_THRESHOLD_BYTES); below it, it vacuums journald, drops dangling
-# layers, rotated logs, pip/npm caches and old leaked worktrees, and heartbeats
-# `error` on disk-cleanup when headroom is still short (2026-10-31: refused at
-# 6.2G free, a human ran the oneshot). Best effort; never fails a deploy, so a
-# still-short disk is refused by model disk admission as before. Like the
+# layers, rotated logs, pip/npm caches and old leaked worktrees (2026-10-31:
+# refused at 6.2G free, a human ran the oneshot). A still-short disk is
+# reported in its heartbeat, not as an error: model disk admission, next, is
+# the gate (2026-11-14). Best effort; never fails a deploy. Like the
 # prune, it runs only for a real release SHA (main() refuses anything else).
 reclaim_disk_before_admission() {
   [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] || return 0

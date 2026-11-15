@@ -61,7 +61,9 @@ held deploy-lock descriptor as stdin; it skips `app-images` because the
 supervisor has just run `prune-locked <target>`. A manual start stays the full
 sweep. Every run checks the result against the threshold and reports
 `headroom` as an error when it could not restore it, so the existing watchdog
-error bucket on the `disk-cleanup` row pages.
+error bucket on the `disk-cleanup` row pages. The `--deploy-locked` run is the
+exception: mid-deploy the target image set is already on disk and model disk
+admission is the gate one step later, so its shortfall is advisory (2026-11-14).
 """
 from __future__ import annotations
 
@@ -695,8 +697,21 @@ def _free_space() -> int:
     return shutil.disk_usage("/").free
 
 
-def run_cleanup(categories=None, free_space=None, threshold=HEADROOM_THRESHOLD_BYTES) -> dict:
-    """Run every category, isolating failures, and return the heartbeat payload."""
+def run_cleanup(
+    categories=None,
+    free_space=None,
+    threshold=HEADROOM_THRESHOLD_BYTES,
+    headroom_is_error=True,
+) -> dict:
+    """Run every category, isolating failures, and return the heartbeat payload.
+
+    ``headroom_is_error=False`` is the deploy-locked run. There the running
+    and the target image sets coexist, and model disk admission runs next
+    with the release's exact requirement; a refusal already fails the
+    deploy. 2026-11-14 15:45 UTC: this run latched `failed: headroom` at
+    10.1 GiB free, then the deploy passed admission (5.1 GB required) and
+    promoted. A shortfall there is reported, not paged.
+    """
     categories = CATEGORIES if categories is None else categories
     free_space = _free_space if free_space is None else free_space
 
@@ -714,22 +729,32 @@ def run_cleanup(categories=None, free_space=None, threshold=HEADROOM_THRESHOLD_B
         reclaimed[name] = freed
         notes[name] = note
     after = free_space()
+    headroom_short = ""
     if needs_reclaim(after, threshold):
-        errors["headroom"] = (
+        message = (
             f"free {human_bytes(after)} still below the {human_bytes(threshold)} "
-            "deploy headroom after reclaim; operator action needed"
+            "deploy headroom after reclaim"
         )
+        if headroom_is_error:
+            errors["headroom"] = message + "; operator action needed"
+        else:
+            headroom_short = message + "; model disk admission decides"
+
+    summary = build_summary(reclaimed, errors, before, after)
+    if headroom_short:
+        summary = (summary + "; headroom short (deploy admission decides)")[:SUMMARY_CAP]
 
     return {
         "state": "error" if errors else "ok",
         "detail": {
-            "summary": build_summary(reclaimed, errors, before, after),
+            "summary": summary,
             "free_before_bytes": before,
             "free_after_bytes": after,
             "reclaimed_bytes": sum(reclaimed.values()),
             "categories": reclaimed,
             "notes": notes,
             "errors": errors,
+            **({"headroom_short": headroom_short} if headroom_short else {}),
         },
     }
 
@@ -896,7 +921,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not deploy_lock_held_on_stdin():
             print("[disk-cleanup] stdin is not the held deploy lock; skipping", file=sys.stderr)
             return EX_TEMPFAIL
-        return _run_and_heartbeat(started_at, DEPLOY_CATEGORIES)
+        return _run_and_heartbeat(started_at, DEPLOY_CATEGORIES, headroom_is_error=False)
 
     wait = GUARD_LOCK_WAIT_S if mode == "reclaim" else None
     with acquire_deploy_lock(timeout_s=wait) as held:
@@ -910,9 +935,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_and_heartbeat(started_at)
 
 
-def _run_and_heartbeat(started_at: str, categories=None) -> int:
+def _run_and_heartbeat(started_at: str, categories=None, headroom_is_error=True) -> int:
     try:
-        outcome = run_cleanup(categories)
+        outcome = run_cleanup(categories, headroom_is_error=headroom_is_error)
     except Exception as exc:  # noqa: BLE001 - a crash must still heartbeat
         crash = {"summary": f"disk cleanup crashed: {exc.__class__.__name__}: {exc}"[:SUMMARY_CAP]}
         print(crash["summary"], file=sys.stderr)
@@ -926,6 +951,8 @@ def _run_and_heartbeat(started_at: str, categories=None) -> int:
     print(f"disk-cleanup: {detail['summary']}")
     for name, note in sorted(detail["notes"].items()):
         print(f"  {name}: {human_bytes(detail['categories'][name])} -- {note}")
+    if detail.get("headroom_short"):
+        print(f"  headroom short: {detail['headroom_short']}")
     for name, message in sorted(detail["errors"].items()):
         print(f"  FAILED {name}: {message}", file=sys.stderr)
 
