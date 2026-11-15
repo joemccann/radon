@@ -303,7 +303,15 @@ def snapshot(token: str | None = None) -> dict:
             now = time.time()
             used = _usage(conn, state, _day(now), policy)
             cap = _effective_cap(policy, state)
+            # When standard (non-interactive) work is next admitted by the
+            # minute window, or None while it has room. A full window refuses
+            # with no embargo, so a caller waiting out a short refusal needs it.
+            minute_limit = max(1, int(policy["requests_per_minute"] * (1.0 - RESERVE_FRACTION)))
+            window = [row[0] for row in conn.execute(
+                "SELECT at FROM requests WHERE at>? ORDER BY at", (now - 60,))]
+            clears_at = window[len(window) - minute_limit] + 60 if len(window) >= minute_limit else None
             return {**policy, "available": True, "scope": "account", "coordination": "host_shared_sqlite",
+                    "minute_window_clears_at": clears_at,
                     "effective_limit": cap, "reserved_or_observed": used,
                     "provider_count": state["provider_count"], "provider_cap": state["provider_cap"],
                     "provider_unlimited_observed": bool(state["provider_unlimited"]),

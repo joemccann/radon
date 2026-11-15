@@ -322,3 +322,21 @@ def test_verified_monthly_exhaustion_cannot_probe_each_day(monkeypatch):
         gov.reserve(TOKEN, priority="interactive", timeout=0)
     gov.observe(TOKEN, 200, {"x-uw-token-req-limit": "100", "x-uw-daily-req-count": "1"})
     gov.reserve(TOKEN, priority="interactive", timeout=0)
+
+
+def test_snapshot_names_when_a_full_minute_window_admits_standard_work(monkeypatch):
+    """A full minute window is a refusal with no embargo. Callers that wait
+    out a short refusal need its end, or they compute a zero wait and give up
+    (discover, 2026-10-21..11-13: every hourly run shed on a full window).
+    """
+    monkeypatch.setenv("RADON_UW_REQUESTS_PER_MINUTE", "5")  # standard limit 4
+    frozen = 1_800_000_000.0
+    monkeypatch.setattr(gov.time, "time", lambda: frozen)
+    for _ in range(3):
+        gov.reserve(TOKEN, timeout=0)
+    assert gov.snapshot()["minute_window_clears_at"] is None
+
+    gov.reserve(TOKEN, timeout=0)
+    with pytest.raises(gov.AdmissionError):
+        gov.reserve(TOKEN, timeout=0)
+    assert gov.snapshot()["minute_window_clears_at"] == pytest.approx(frozen + 60)
