@@ -196,6 +196,8 @@ to bypass a control-plane mismatch.
 
 Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-class Turso failures (Hrana / dns / timeout / connection) with 2s/5s/15s backoff before failing startup — a transient DNS blip hard-failed radon-api on 2026-06-12. SQL/schema errors still fail immediately.
 
+`deploy.sh` applies the target release's pending migrations before teardown (`apply_target_migrations`, after the Turso probe, `RADON_DEPLOY_MIGRATE_TIMEOUT` default 300s) while the current release serves; a failure aborts the deploy with nothing stopped and no rollback. The boot apply keeps its 20s deadline and normally finds nothing pending. A Hrana transport error mid-file (`stream not found`) reconnects and replays that file. Automatic migrations must be additive because the serving release runs on the new schema until promotion; destructive DDL goes in a `-- radon-migrate: manual` file. Two deploys rolled back on 2026-11-14 when 0112 outran the 20s boot deadline.
+
 ### Build constraint
 
 `web/package.json` runs `next build --experimental-build-mode=compile` because Next.js 16's standard build crashes during prerender of `/_global-error` and `/_not-found` (the root ClerkProvider context isn't materialised in isolated workers — `useContext` returns null). Compile mode skips prerender entirely; every page is `force-dynamic` already so the runtime behavior is unchanged. If a future Next.js patch fixes the underlying issue, drop the flag and the build returns to the standard pipeline.

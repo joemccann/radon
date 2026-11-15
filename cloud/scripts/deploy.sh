@@ -85,6 +85,10 @@ readonly DATABASE_PROBE_ATTEMPTS=3
 readonly DATABASE_PROBE_TIMEOUT=10
 readonly DATABASE_PROBE_WAIT=10
 readonly DATABASE_PROBE_SQL="from scripts.db.client import get_db; get_db().execute('SELECT 1').fetchone()"
+# Pre-teardown migration bound. radon-api's boot apply stays at 20s; a
+# multi-statement ALTER file outran it on 2026-11-14 (0112) and rolled back
+# two deploys. The deploy applies pending migrations here first.
+readonly MIGRATE_TIMEOUT="${RADON_DEPLOY_MIGRATE_TIMEOUT:-300}"
 readonly SURFACE_RETRY_WAIT=2
 readonly SURFACE_TIMEOUT=3
 # The slowest managed restart policy is newsfeed's RestartSec=30. A 40-second
@@ -528,6 +532,24 @@ preflight_database() {
   done
   log_error "Turso is not answering; refusing teardown while the current release serves"
   return 1
+}
+
+# Apply the TARGET release's pending migrations while the current release
+# still serves, so radon-api's 20s boot apply finds nothing to do. The serving
+# release runs against the new schema for this window, as it already does
+# after any rollback: migrations must be additive (scripts/db/migrate.py).
+# The live venv runs it; migrate.py needs only dotenv and libsql. The marker
+# goes to the live checkout's data/, which radon-api reads on boot.
+apply_target_migrations() {
+  log_info "Applying pending migrations for the target release while the current release serves..."
+  if ! (cd "$STAGED_RELEASE_DIR" && run_with_cloud_env "$ENV_FILE_DEFAULT" \
+    env "RADON_SCHEMA_MARKER_DIR=${RADON_DIR}/data" \
+    timeout "$MIGRATE_TIMEOUT" "${VENV_DIR}/bin/python" \
+    "${STAGED_RELEASE_DIR}/scripts/db/migrate.py"); then
+    log_error "Migrations did not complete within ${MIGRATE_TIMEOUT}s; refusing teardown while the current release serves"
+    return 1
+  fi
+  log_success "Schema is current for the target release"
 }
 
 refresh_control_plane() {
@@ -2056,6 +2078,7 @@ main() {
   prepull_app_images "$requested_sha"
   stage_model_clients "$requested_sha"
   preflight_database
+  apply_target_migrations
 
   log_info "Promoting staged artifacts and restarting services..."
   restart_services "$requested_sha" "$prev_commit"

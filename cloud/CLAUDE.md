@@ -469,7 +469,11 @@ push or every deploy step fails the handshake. The deploy job:
    `cloud/tests/test_deploy_corrections.py::TestFrozenArtifacts`. The parallel prepull job is an optimization; deploy
    still requires the exact-SHA app image pair locally before teardown and
    refuses if its pull fails. A bounded database preflight also refuses teardown
-   when Turso does not answer, leaving the current release serving.
+   when Turso does not answer, leaving the current release serving. Then
+   `apply_target_migrations` runs the staged release's `migrate.py` under
+   `RADON_DEPLOY_MIGRATE_TIMEOUT` (300s) and refuses teardown on failure, so
+   radon-api's 20s boot apply finds nothing pending (0112 outran it and rolled
+   back two deploys, 2026-11-14). Automatic migrations must be additive.
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.
