@@ -465,3 +465,40 @@ def test_blob_redirect_with_previews_left_is_still_unauthenticated(env):
     session.login()
     with pytest.raises(auth.MarketDeskError, match="unauthenticated"):
         session.blob("/files/4AJs5Adl2Yp/blob", limit=1024)
+
+
+# Captured 2026-11-14 from GET https://marketdesk.ai/files/IQSa8ONnKqF/blob (101 attempts, all this body).
+MISSING_FILE_BODY = (b'{"statusCode":500,"error":"Internal Server Error",'
+                     b'"message":"Cannot read properties of null (reading \'path\')"}')
+
+
+def test_blob_500_for_a_file_with_no_stored_path_is_file_missing_and_terminal(env):
+    url = "https://marketdesk.ai/files/IQSa8ONnKqF/blob"
+    opener = FakeOpener({("POST", LOGIN_URL): [login_ok()],
+                         ("GET", url): [(500, MISSING_FILE_BODY, {"Content-Type": "application/json"})]})
+    session, _ = _session(env, opener)
+    session.login()
+    with pytest.raises(auth.MarketDeskError) as info:
+        session.blob("/files/IQSa8ONnKqF/blob", limit=1024)
+    assert str(info.value) == "file_missing" and info.value.transient is False
+    assert [r["url"] for r in opener.requests] == [LOGIN_URL, url]
+
+
+@pytest.mark.parametrize("body", [b"", b"boom", b'{"statusCode":500,"message":"upstream timeout"}', b"[1]"])
+def test_blob_500_with_any_other_body_stays_a_transient_http_500(env, body):
+    url = "https://marketdesk.ai/files/IQSa8ONnKqF/blob"
+    opener = FakeOpener({("POST", LOGIN_URL): [login_ok()], ("GET", url): [(500, body, {})]})
+    session, _ = _session(env, opener)
+    session.login()
+    with pytest.raises(auth.MarketDeskError) as info:
+        session.blob("/files/IQSa8ONnKqF/blob", limit=1024)
+    assert str(info.value) == "http_500" and info.value.transient is True
+
+
+def test_api_500_with_the_missing_path_body_is_not_reclassified(env):
+    opener = FakeOpener({("POST", LOGIN_URL): [login_ok()], ("POST", LATEST_URL): [(500, MISSING_FILE_BODY, {})]})
+    session, _ = _session(env, opener)
+    session.login()
+    with pytest.raises(auth.MarketDeskError) as info:
+        session.api("POST", "/api/mobile/latest/latest", {})
+    assert str(info.value) == "http_500"

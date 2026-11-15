@@ -473,3 +473,46 @@ def test_command_exit_and_sanitized_errors_restore_signal_handler(monkeypatch, c
     assert signal.getsignal(signal.SIGTERM) == previous
     out = capsys.readouterr()
     assert 'signed private secret' not in out.err + out.out
+
+
+def test_file_missing_retires_the_item_without_an_error_row_or_failed_oneshot(tmp_path, monkeypatch, capsys):
+    """marketdesk.ai answers 500 "Cannot read properties of null (reading 'path')" for a file it has
+    no bytes for. That is terminal for the item, not a provider outage: no deferral, no error row."""
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    def fail(session, key):
+        raise MarketDeskError("file_missing")
+
+    dependency = deps(tmp_path, download=fail)
+    dependency.service_cycle = recording
+    dependency.store.blocked = lambda: None
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert recorded == []
+    assert dependency.store.retries[0][0] == "file_missing"
+    assert not dependency.store.downloads
+    assert "ABCdef12345 retired: file_missing" in capsys.readouterr().err
+
+
+def test_file_missing_does_not_hide_a_real_failure_in_the_same_batch(tmp_path):
+    class Batch(Queue):
+        def claim_batch(self, **kwargs):
+            return [SimpleNamespace(article_id="ABCdef12345", token="a"),
+                    SimpleNamespace(article_id="XYZabc12345", token="b")]
+
+    def fail(session, key):
+        raise MarketDeskError("file_missing" if key == "ABCdef12345" else "not_pdf")
+
+    dependency = deps(tmp_path, download=fail)
+    dependency.store = Batch()
+    with pytest.raises(job.DownloadDeferred, match="not_pdf"):
+        job.run_cycle(env={}, deps=dependency)
+    assert [code for code, _ in dependency.store.retries] == ["file_missing", "not_pdf"]

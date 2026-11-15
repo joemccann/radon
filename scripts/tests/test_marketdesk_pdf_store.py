@@ -629,3 +629,33 @@ def test_priority_migration_preserves_existing_queue_and_clock():
     assert conn.execute('SELECT next_attempt_at,priority FROM marketdesk_pdf_queue').fetchone() == ('retry', 0)
     assert conn.execute('SELECT * FROM marketdesk_pdf_throttle').fetchall() == before
     conn.close()
+
+
+def test_file_missing_retires_the_row_at_once_and_leaves_the_account_clock_alone(db):
+    published(db, "XYZabc12345")
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    store.enqueue(ref("XYZabc12345"), now=NOW)
+    before = db.execute("SELECT interval_seconds,batch_size,soft_streak,last_error,next_attempt_at "
+                        "FROM marketdesk_pdf_throttle").fetchone()
+    work = store.claim_next(now=NOW)
+    clock = db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0]
+    store.retry(work, "file_missing", now=NOW)
+    row = db.execute("SELECT status,disposition,disposition_reason,last_error,lease_token FROM marketdesk_pdf_queue "
+                     "WHERE article_id=?", (work.article_id,)).fetchone()
+    assert row == ("pending", "exhausted", "file_missing", "file_missing", None)
+    after = db.execute("SELECT interval_seconds,batch_size,soft_streak,last_error,next_attempt_at "
+                       "FROM marketdesk_pdf_throttle").fetchone()
+    assert after[:4] == before[:4] and after[4] == clock
+    assert store.blocked() is None
+    # Never offered again; the other report takes the next window.
+    nxt = store.claim_next(now=NOW + timedelta(days=30))
+    assert nxt is not None and nxt.article_id == "XYZabc12345"
+
+
+def test_file_missing_is_not_reactivated_by_a_selection_refresh(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    store.retry(store.claim_next(now=NOW), "file_missing", now=NOW)
+    assert store.claim_next(now=NOW + timedelta(days=30)) is None
+    assert db.execute("SELECT disposition FROM marketdesk_pdf_queue").fetchone() == ("exhausted",)
