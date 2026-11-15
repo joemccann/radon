@@ -47,6 +47,15 @@ _VALID_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 # (MOG A, GEF B, CRD A, BH A). Match only that provider format; arbitrary
 # embedded whitespace must still fail the existing constituent validator.
 _ISHARES_CLASS_TICKER = re.compile(r"^([A-Z]{1,5}) ([A-Z])$")
+# BlackRock files unlisted earnout tranches, CVRs, escrows and private lines
+# under assetClass "Equity" with placeholder tickers ("2200964D" = OmniAb
+# $15.00 vesting, Nov 2026). Its own exchange field marks them untradeable on
+# a listed venue. Skip those rows, but only while their combined index weight
+# stays negligible: a large unlisted sleeve means the payload changed shape.
+_ISHARES_UNLISTED_EXCHANGES = frozenset(
+    {"NO MARKET (E.G. UNLISTED)", "NON-NMS QUOTATION SERVICE (NNQS)"}
+)
+_R2K_MAX_UNLISTED_WEIGHT_PCT = 0.5
 _VALID_PRESET_KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _VALID_GROUP_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,&'()+-]{0,79}$")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -383,6 +392,7 @@ def fetch_r2k() -> List[Dict]:
                 "sectorName",
                 "assetClass",
                 "holdingPercent",
+                "exchange",
             )
         }
     except (KeyError, TypeError) as exc:
@@ -396,12 +406,21 @@ def fetch_r2k() -> List[Dict]:
         raise InvalidConstituentData("r2k: BlackRock holdings column lengths differ")
 
     companies = []
-    for ticker_value, name_value, sector_value, asset_value, weight_value in zip(
+    unlisted_weight = 0.0
+    for (
+        ticker_value,
+        name_value,
+        sector_value,
+        asset_value,
+        weight_value,
+        exchange_value,
+    ) in zip(
         columns["ticker"],
         columns["issueName"],
         columns["sectorName"],
         columns["assetClass"],
         columns["holdingPercent"],
+        columns["exchange"],
     ):
         ticker = str(ticker_value or "").strip().upper()
         # Match Radon's dash-form constituent seeds before deduplication/diffing.
@@ -412,6 +431,20 @@ def fetch_r2k() -> List[Dict]:
         weight_str = str(weight_value or "0").strip()
 
         if not ticker or ticker == "-" or asset_class != "Equity":
+            continue
+        if str(exchange_value or "").strip().upper() in _ISHARES_UNLISTED_EXCHANGES:
+            try:
+                unlisted_weight += float(weight_str.replace(",", ""))
+            except ValueError as exc:
+                raise InvalidConstituentData(
+                    f"r2k: unlisted holding {ticker!r} has unparseable weight "
+                    f"{weight_str!r}"
+                ) from exc
+            if unlisted_weight > _R2K_MAX_UNLISTED_WEIGHT_PCT:
+                raise InvalidConstituentData(
+                    f"r2k: unlisted equity holdings exceed "
+                    f"{_R2K_MAX_UNLISTED_WEIGHT_PCT}% of the fund"
+                )
             continue
         excluded_name_terms = (
             "CASH COLLATERAL",
