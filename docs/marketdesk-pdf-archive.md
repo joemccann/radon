@@ -68,6 +68,16 @@ day and never earlier than the account clock. After `PRIORITY_MAX_FAILURES` (3)
 attempts ending in such a failure, a priority row stops reserving precedence, so
 one bad file cannot starve the backlog. It keeps its place when due.
 
+One provider 500 is terminal instead. When `/files/<id>/blob` answers 500 with
+the JSON message `Cannot read properties of null (reading 'path')`, marketdesk.ai
+has no stored bytes for that file. It repeats on every retry (`IQSa8ONnKqF`
+failed 101 times from 2026-10-27 to 2026-11-14, and each daily retry put the
+service row in error). The session maps that exact body to `file_missing`; the
+store marks the row `disposition=exhausted`, `disposition_reason=file_missing`
+at once, without touching the account clock, soft streak or `last_error`; the
+job logs `<id> retired: file_missing` and the cycle stays ok. Any other 500
+body is still the transient `http_500` above.
+
 One timer fire admits one batch, then waits out the persisted account interval.
 Migration 0113 is the safety reset: the live row starts at 900 seconds and batch
 1, then ramps. It does not open at 300 seconds and batch 6. A clean cycle
