@@ -12,7 +12,7 @@ import json
 import re
 from collections.abc import Callable
 
-RUBRIC_VERSION = "radon-humanizer-2026-10-27-v2"
+RUBRIC_VERSION = "radon-humanizer-2026-11-14-v3"
 MIN_SCORE = 90
 MAX_REWRITES = 2
 MAX_FINDINGS = 4096
@@ -26,7 +26,7 @@ WEIGHTS = {
     "vague_attribution": 8,
 }
 VOCABULARY = (
-    "delve", "tapestry", "leverage", "multifaceted", "nuanced", "pivotal",
+    "delve", "tapestry", "multifaceted", "nuanced", "pivotal",
     "realm", "robust", "seamless", "testament", "transformative", "utilize",
     "whilst", "keen", "embark", "comprehensive", "intricate", "commendable",
     "meticulous", "paramount", "groundbreaking", "innovative", "cutting-edge",
@@ -36,8 +36,9 @@ VOCABULARY = (
     "breathtaking", "nestled", "stunning",
 )
 # These qualifiers come from the supplied image. A noun "highlight" or a
-# physical landscape must not incur an unconditional vocabulary penalty.
-CONTEXTUAL_VOCABULARY = ("landscape", "underscore", "highlight")
+# physical landscape must not incur an unconditional vocabulary penalty. Gross and
+# net leverage are measured financial metrics; only the verb "leverage" is a tell.
+CONTEXTUAL_VOCABULARY = ("landscape", "underscore", "highlight", "leverage")
 CONTEXTUAL_VERB_FORMS = ("underscores", "underscored", "underscoring",
                          "highlights", "highlighted", "highlighting")
 QUALITATIVE = {
@@ -72,7 +73,8 @@ This is editorial self-assessment, not proof of human authorship.
 The supplied Humanizer image includes vocabulary and only patterns 1-5 of 24.
 Start at 100, clamp 0-100, require at least 90. Code calculates the score.
 - vocabulary: -5 PER OCCURRENCE (case-insensitive), including repeated words:
-{vocabulary}. Context-sensitive: landscape only abstract; underscore and
+{vocabulary}. Context-sensitive: landscape only abstract; leverage only as a verb
+meaning use (gross/net leverage and leverage ratios are financial metrics); underscore and
 highlight only verbs (including grammatical forms underscores, underscored,
 underscoring, highlights, highlighted, highlighting). Flag contextual uses, not physical landscapes or noun
 highlights. Include exact occurrences. Code independently scans unconditional
