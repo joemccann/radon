@@ -27,6 +27,10 @@ Detectable negative parallelisms block even when a reviewer returns empty
 findings: `X, not Y`, `not X but Y`, and adjacent-sentence variants. Real numeric
 corrections and source uncertainty remain valid. Local checks supplement the
 contextual reviewer rather than claiming to recognize every writing defect.
+`leverage` is contextual vocabulary (rubric v3, 2026-11-14): only the verb
+meaning "use" costs points. Gross and net leverage are measured metrics; the
+local scan used to charge them, and the rewrite that renamed them to "exposure"
+failed fact verification, holding the article.
 
 Python certificates hash title, body and every displayed figure caption. A
 changed caption or old rubric version invalidates the certificate. Captions are
