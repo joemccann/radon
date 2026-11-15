@@ -123,6 +123,90 @@ class TestHeadroomIsReported:
         assert "headroom" not in outcome["detail"]["errors"]
 
 
+class TestDeployLockedHeadroomIsAdvisory:
+    """2026-11-14 15:45 UTC: the supervisor's reclaim-locked run measured
+    9.3 GiB free while the running and the prepulled target image sets
+    coexisted, reclaimed only journald, and latched `failed: headroom`. The
+    deploy then passed model disk admission (check-model-space required
+    5.1 GB) at 10.1 GiB free and promoted; the post-deploy prune restored
+    14.9 GiB five minutes later. Inside a deploy, admission is the gate and
+    a refusal already fails the deploy, so the static steady-state threshold
+    (which also counts a not-yet-pulled release set) must not page there."""
+
+    def test_a_short_deploy_locked_reclaim_is_not_an_error(self):
+        outcome = disk_cleanup.run_cleanup(
+            categories=(("journal", lambda: (1008 * 1024**2, "vacuumed")),),
+            free_space=iter([int(9.3 * GIB), int(10.1 * GIB)]).__next__,
+            threshold=12 * GIB,
+            headroom_is_error=False,
+        )
+        assert outcome["state"] == "ok"
+        assert "headroom" not in outcome["detail"]["errors"]
+        assert "failed" not in outcome["detail"]["summary"]
+        assert "below" in outcome["detail"]["headroom_short"]
+        assert "headroom short" in outcome["detail"]["summary"]
+
+    def test_a_category_failure_still_errors_inside_a_deploy(self):
+        def boom():
+            raise RuntimeError("engine wedged")
+
+        outcome = disk_cleanup.run_cleanup(
+            categories=(("dangling-images", boom),),
+            free_space=iter([5 * GIB, 5 * GIB]).__next__,
+            threshold=12 * GIB,
+            headroom_is_error=False,
+        )
+        assert outcome["state"] == "error"
+        assert set(outcome["detail"]["errors"]) == {"dangling-images"}
+
+    def test_the_hourly_guard_still_errors_on_headroom(self):
+        outcome = disk_cleanup.run_cleanup(
+            categories=(("journal", lambda: (0, "vacuumed")),),
+            free_space=iter([10 * GIB, 10 * GIB]).__next__,
+            threshold=12 * GIB,
+        )
+        assert outcome["state"] == "error"
+        assert "headroom" in outcome["detail"]["errors"]
+
+    def test_the_deploy_locked_entry_point_runs_headroom_as_advisory(self, monkeypatch, tmp_path):
+        lock = tmp_path / "deploy.lock"
+        lock.write_text("", encoding="utf-8")
+        monkeypatch.setattr(disk_cleanup, "DEPLOY_LOCK_FILE", lock)
+        free = iter([int(9.3 * GIB), int(9.3 * GIB), int(10.1 * GIB)])
+        monkeypatch.setattr(disk_cleanup, "_free_space", lambda: next(free))
+        monkeypatch.setattr(disk_cleanup, "DEPLOY_CATEGORIES", (("journal", lambda: (GIB, "vacuumed")),))
+        writes = []
+        monkeypatch.setattr(
+            disk_cleanup, "write_service_health",
+            lambda state, detail, started: writes.append((state, detail)),
+        )
+        holder = open(lock, "r")
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            monkeypatch.setattr(disk_cleanup, "LOCK_STDIN_FD", holder.fileno())
+            assert disk_cleanup.main(["--deploy-locked"]) == 0
+        finally:
+            holder.close()
+        assert [state for state, _ in writes] == ["ok"]
+        assert "headroom" not in writes[0][1]["errors"]
+
+    def test_the_hourly_guard_entry_point_still_pages_on_headroom(self, monkeypatch, tmp_path):
+        lock = tmp_path / "deploy.lock"
+        lock.write_text("", encoding="utf-8")
+        monkeypatch.setattr(disk_cleanup, "DEPLOY_LOCK_FILE", lock)
+        monkeypatch.setattr(disk_cleanup, "LEGACY_DEPLOY_LOCK_FILE", lock)
+        free = iter([int(9.3 * GIB), int(9.3 * GIB), int(10.1 * GIB)])
+        monkeypatch.setattr(disk_cleanup, "_free_space", lambda: next(free))
+        monkeypatch.setattr(disk_cleanup, "CATEGORIES", (("journal", lambda: (GIB, "vacuumed")),))
+        writes = []
+        monkeypatch.setattr(
+            disk_cleanup, "write_service_health",
+            lambda state, detail, started: writes.append(state),
+        )
+        assert disk_cleanup.main(["--if-below"]) == 0
+        assert writes == ["error"]
+
+
 class TestGuardEntryPoint:
     def _wire(self, monkeypatch, tmp_path, free):
         lock = tmp_path / "deploy.lock"
