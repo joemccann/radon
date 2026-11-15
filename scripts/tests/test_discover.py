@@ -796,3 +796,151 @@ def test_late_admission_busy_does_not_sleep_past_the_curl_budget():
     assert sleeps == []
     assert clock["t"] < DISCOVER_CURL_BUDGET_S
     assert result["error"] == "discover rate limit shed"
+
+
+def test_options_flow_full_minute_window_waits_for_the_window_then_scores():
+    """A full governor minute window is a short refusal too. Wait it out.
+
+    2026-11-13 21:00Z: scanner and flow-analysis spent 96 standard
+    admissions (the 120 RPM x 0.8 limit) in the first 20s of the hour.
+    POST /discover was refused at once (the window clears in ~40s, past the
+    5s admission wait). The governor embargo had expired at 20:00:09Z, so
+    the retry delay computed 0s and the scan shed without retrying. Every
+    hourly run did the same from 2026-10-21 (governor landed) to 2026-11-13:
+    discover's last ok heartbeat is 2026-10-21T16:00:54Z.
+    """
+    from discover import discover
+
+    frozen = 1_800_000_000.0
+    window_clears_in = 41.0
+    sleeps = []
+    outcomes = [_admission_busy(), [_flow_alert("AAPL") for _ in range(3)]]
+
+    def _flow(*_args, **_kwargs):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", side_effect=_flow), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", return_value=_dp_ok()), \
+         patch("utils.uw_governor.snapshot", return_value={
+             "embargo_until": frozen - 3600,
+             "minute_window_clears_at": frozen + window_clears_in,
+         }), \
+         patch("time.time", return_value=frozen), \
+         patch("time.sleep", side_effect=sleeps.append):
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert sleeps == [pytest.approx(window_clears_in)]
+    assert [row["ticker"] for row in result["candidates"]] == ["AAPL"]
+    assert "error" not in result
+
+
+def test_market_wide_darkpool_walk_is_capped_to_the_strongest_flow():
+    """The dark-pool scoring set must fit the governor's minute budget.
+
+    127 tickers x up to 4 sessions x 2 pages cannot be admitted at 96/min
+    inside the 137s post budget; the 2026-10-29 run skipped 111 of 112
+    tickers on admission. Score the tickers with the most flow alerts.
+    """
+    from discover import DISCOVER_MAX_SCORED_TICKERS, discover
+
+    alerts = []
+    tickers = [f"T{i:03d}" for i in range(DISCOVER_MAX_SCORED_TICKERS + 15)]
+    for rank, ticker in enumerate(tickers):
+        alerts.extend(_flow_alert(ticker) for _ in range(3 + len(tickers) - rank))
+    fetched = []
+
+    def _fetch(ticker, *_args, **_kwargs):
+        fetched.append(ticker)
+        return _dp_ok()
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", return_value=alerts), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", side_effect=_fetch):
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert DISCOVER_MAX_SCORED_TICKERS == 25
+    assert sorted(fetched) == tickers[:DISCOVER_MAX_SCORED_TICKERS]
+    assert "error" not in result
+
+
+@pytest.mark.parametrize("darkpool,expected", [
+    ({"AAPL": _admission_busy(), "MSFT": _admission_busy()}, "discover rate limit shed"),
+    ({"AAPL": _dp_ok(), "MSFT": UWAPIError("budget")}, "discover degraded"),
+])
+def test_unpublished_run_writes_a_discover_error_row(darkpool, expected, capsys):
+    """A run that publishes nothing must say so in discover's own row.
+
+    Shed and degraded runs skipped the mirror, which is the only writer of
+    the ``discover`` service_health row, so 24 days of sheds read as
+    "discover silent for 24d" with no reason anywhere.
+    """
+    from discover import main
+
+    alerts = []
+    for ticker in darkpool:
+        alerts.extend(_flow_alert(ticker) for _ in range(3))
+
+    def _fetch(ticker, *_args, **_kwargs):
+        outcome = darkpool[ticker]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    frozen = 1_800_000_000.0
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", return_value=alerts), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", side_effect=_fetch), \
+         patch("utils.uw_governor.snapshot", return_value={"embargo_until": frozen + 30}), \
+         patch("time.time", return_value=frozen), \
+         patch("discover.mirror_scan_snapshot") as mirror, \
+         patch("discover.run_alerts_for_results"), \
+         patch("db.writer.record_service_health") as health, \
+         patch.object(sys, "argv", ["discover.py", "--min-alerts", "3", "--dp-pages", "2"]):
+        main()
+
+    json.loads(capsys.readouterr().out)
+    mirror.assert_not_called()
+    health.assert_called_once()
+    args, kwargs = health.call_args
+    assert args == ("discover", "error")
+    assert kwargs["error"]["message"].startswith(expected)
+    assert "budget" not in json.dumps(kwargs["error"])
+    assert "admission is busy" not in json.dumps(kwargs["error"])
+
+
+def test_published_run_does_not_write_an_error_row(capsys):
+    """A clean scan heartbeats through the mirror only."""
+    from discover import main
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", return_value=[_flow_alert("AAPL") for _ in range(3)]), \
+         patch("discover.get_existing_tickers", return_value=set()), \
+         patch("discover.fetch_darkpool_multi", return_value=_dp_ok()), \
+         patch("discover.mirror_scan_snapshot") as mirror, \
+         patch("discover.run_alerts_for_results"), \
+         patch("db.writer.record_service_health") as health, \
+         patch.object(sys, "argv", ["discover.py", "--min-alerts", "3", "--dp-pages", "2"]):
+        main()
+
+    json.loads(capsys.readouterr().out)
+    mirror.assert_called_once()
+    health.assert_not_called()

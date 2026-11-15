@@ -264,9 +264,14 @@ class TestDiscoverWiring:
 
     def test_error_payload_skips_heartbeat(self, monkeypatch, writer_calls):
         # The server returns 400 + skips the cache for {"error": ...} payloads;
-        # the scan must not heartbeat ok for a failed discovery either.
+        # the scan must not heartbeat ok for a failed discovery either. It
+        # writes an error row naming the failure instead: no row at all read
+        # as "discover silent for 24d" (2026-10-21..11-14).
         self._run(monkeypatch, {"error": "UW unavailable"})
-        assert writer_calls["health"] == []
+        assert _ok_rows(writer_calls) == []
+        assert writer_calls["upserts"] == []
+        [(service, _)] = _error_rows(writer_calls)
+        assert service == "discover"
 
 
 class TestFlowAnalysisWiring:
