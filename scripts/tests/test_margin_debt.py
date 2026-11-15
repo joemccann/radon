@@ -26,6 +26,11 @@ from fetch_margin_debt import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 FINRA_XLSX = (FIXTURES / "margin_statistics_finra.xlsx").read_bytes()
+# FINRA re-saved the workbook on 2026-11-13 (Last-Modified Fri, 13 Nov 2026
+# 20:59:22 GMT) with every string in xl/sharedStrings.xml (t="s") instead of
+# inline strings. The 2026-11-14 13:13Z radon-margin-debt run raised
+# "FINRA workbook parsed to zero rows" on exactly this file.
+FINRA_XLSX_SHARED_STRINGS = (FIXTURES / "margin_statistics_finra_shared_strings.xlsx").read_bytes()
 LEGACY_HTML = (FIXTURES / "nyse_legacy_1969.html").read_text()
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0027_margin_debt_history.sql"
 
@@ -61,6 +66,41 @@ class TestParseFinraXlsx:
         for row in parse_margin_xlsx(FINRA_XLSX):
             assert re.fullmatch(r"\d{4}-\d{2}", row["date"])
             assert row["level"] > 0
+
+
+class TestParseFinraXlsxSharedStrings:
+    def test_shared_string_dates_parse(self):
+        rows = parse_margin_xlsx(FINRA_XLSX_SHARED_STRINGS)
+        assert len(rows) == 358  # 359 sheet rows minus header
+        dates = [r["date"] for r in rows]
+        assert dates == sorted(dates)
+        assert dates[0] == "1997-01"
+        assert dates[-1] == "2026-10"
+
+    def test_shared_string_workbook_values(self):
+        rows = parse_margin_xlsx(FINRA_XLSX_SHARED_STRINGS)
+        assert rows[0] == {
+            "date": "1997-01",
+            "level": 103337.0,
+            "free_credit_cash": 68856.0,
+            "free_credit_margin": None,
+        }
+        assert rows[-1] == {
+            "date": "2026-10",
+            "level": 1448360.0,
+            "free_credit_cash": 210290.0,
+            "free_credit_margin": 212890.0,
+        }
+
+    def test_build_series_does_not_raise_zero_rows(self, monkeypatch):
+        import fetch_margin_debt
+
+        monkeypatch.setattr(fetch_margin_debt, "load_legacy_csv", lambda: [])
+        monkeypatch.setattr(fetch_margin_debt, "_load_normalization_inputs", lambda: ({}, {}, False))
+        monkeypatch.setattr(fetch_margin_debt, "_fetch_spx_monthly_closes", lambda: {})
+        series, _available = fetch_margin_debt.build_series(FINRA_XLSX_SHARED_STRINGS)
+        assert series[-1]["date"] == "2026-10"
+        assert series[-1]["level_yoy_pct"] is not None
 
 
 # ── Legacy NYSE year-table parsing ────────────────────────────────
