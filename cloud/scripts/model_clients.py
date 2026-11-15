@@ -422,7 +422,10 @@ def export_from_image(
     deadline_seconds: float = EXPORT_DEADLINE_SECONDS,
 ) -> None:
     """An isolated unprivileged container exports bytes; nothing runs on root."""
-    command = [engine, "run", "--rm", "--read-only", "--name", EXPORT_NAME, "--pull=never", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--entrypoint", "tar", image, "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-cf", "-"]
+    # --log-driver=none: the host default is journald, which copied this whole
+    # tar stream into the journal (~79 MB per 8h, 2026-11-14). stdout still
+    # reaches this pipe.
+    command = [engine, "run", "--rm", "--read-only", "--log-driver=none", "--name", EXPORT_NAME, "--pull=never", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--entrypoint", "tar", image, "--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner", "-cf", "-"]
     if darwin:
         command += ["-C", "/opt/radon-darwin", "."]
     else:
