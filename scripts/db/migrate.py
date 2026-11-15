@@ -21,6 +21,14 @@ that is still running). The manual path commits each statement on its
 own. Manual files do not advance the boot schema marker, so a deferred
 drop does not fail closed on a Turso brownout.
 
+cloud/scripts/deploy.sh applies the target release's migrations before
+teardown (bounded in minutes, not 20s), so the boot apply normally finds
+nothing. The serving release runs on the new schema until promotion and
+after any rollback: automatic migrations must be additive. DROP TABLE /
+COLUMN / VIEW and RENAME belong in a manual file (test_migrate.py pins it).
+A transport error mid-file (Hrana `stream not found`) reconnects and replays
+that file under RETRY_BACKOFF_SECONDS.
+
 Usage:
     python3.13 scripts/db/migrate.py
     python3.13 scripts/db/migrate.py --demo
@@ -168,6 +176,28 @@ def _connect_with_retry(libsql, url: str, token: str):
             time.sleep(delay)
 
 
+class _ReconnectingConnection:
+    """One logical migrator connection whose Hrana stream can be replaced.
+
+    Turso expires a stream mid-file (`stream not found`, 2026-11-14, 0112).
+    The lock row and its owner-bound release must follow the live stream."""
+
+    def __init__(self, connect):
+        self._connect = connect
+        self._db = connect()
+
+    def reconnect(self) -> None:
+        with contextlib.suppress(Exception):
+            self._db.close()
+        self._db = self._connect()
+
+    def execute(self, *args):
+        return self._db.execute(*args)
+
+    def commit(self):
+        return self._db.commit()
+
+
 def finished_within_deadline(command: list[str], deadline_seconds: float) -> bool:
     """Run ``command`` in a child process; False when the database is
     unreachable (child still hung at the deadline, or it exited
@@ -248,7 +278,7 @@ def is_schema_known_current(label: str) -> bool:
 
 
 def _migrate(libsql, url: str, token: str, label: str) -> None:
-    db = _connect_with_retry(libsql, url, token)
+    db = _ReconnectingConnection(lambda: _connect_with_retry(libsql, url, token))
     try:
         with migration_lock(db):
             apply_pending_migrations(db)
@@ -376,6 +406,47 @@ def resolve_target(*, demo: bool) -> tuple[str, str]:
     return url, token
 
 
+def _apply_file(db, version: int, name: str, sql: str, manual: bool) -> None:
+    for stmt in _split_statements(sql):
+        _execute_statement(db, name, stmt)
+        if manual:
+            db.commit()
+    # The migration file's own INSERT INTO schema_migrations may already
+    # record the version; if not, record it ourselves. INSERT OR IGNORE
+    # keeps both code paths idempotent. Issued BEFORE the commit so the
+    # version lands with the statements, not in a second round trip that
+    # a dropped connection can lose. Manual DDL commits the DROP first,
+    # then this version row, so a killed drop is retried.
+    db.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+        "VALUES (?, datetime('now'))",
+        (version,),
+    )
+    db.commit()
+
+
+def _apply_file_with_reconnect(db, version: int, name: str, sql: str, manual: bool) -> None:
+    """A transport error mid-file reconnects and replays the WHOLE file:
+    statements the dead stream held uncommitted are lost with it, and the
+    ones it committed replay as already applied (R-153)."""
+    remaining_delays = list(RETRY_BACKOFF_SECONDS)
+    while True:
+        try:
+            _apply_file(db, version, name, sql, manual)
+            return
+        except Exception as exc:
+            reconnect = getattr(db, "reconnect", None)
+            if reconnect is None or not _is_transport_error(exc) or not remaining_delays:
+                raise
+            delay = remaining_delays.pop(0)
+            sys.stderr.write(
+                f"[migrate] {name}: transport error ({exc}); reconnecting and "
+                f"replaying the file in {delay}s\n"
+            )
+            time.sleep(delay)
+            reconnect()
+
+
 def apply_pending_migrations(db) -> int:
     """Apply pending numbered SQL migrations to an open connection.
 
@@ -412,22 +483,7 @@ def apply_pending_migrations(db) -> int:
                 f"[migrate] {name}: committing each statement on its own "
                 "(DiskANN drop is about 14 min and must not share a transaction)\n"
             )
-        for stmt in _split_statements(sql):
-            _execute_statement(db, name, stmt)
-            if manual:
-                db.commit()
-        # The migration file's own INSERT INTO schema_migrations may already
-        # record the version; if not, record it ourselves. INSERT OR IGNORE
-        # keeps both code paths idempotent. Issued BEFORE the commit so the
-        # version lands with the statements, not in a second round trip that
-        # a dropped connection can lose. Manual DDL commits the DROP first,
-        # then this version row, so a killed drop is retried.
-        db.execute(
-            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
-            "VALUES (?, datetime('now'))",
-            (version,),
-        )
-        db.commit()
+        _apply_file_with_reconnect(db, version, name, sql, manual)
         applied_count += 1
 
     if applied_count:
