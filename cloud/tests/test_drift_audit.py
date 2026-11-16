@@ -1,8 +1,11 @@
 """Tests for scripts/drift_audit.py pure logic (no system access)."""
 
 import importlib.util
+import os
 import pathlib
 import subprocess
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -419,6 +422,40 @@ def test_repo_artifact_reader_rejects_final_and_nested_symlinks(tmp_path, monkey
     assert da._read_repo("linked-file") is None
     assert da._read_repo("linked-dir/secret") is None
     assert da._read_repo("../outside/secret") is None
+
+
+def test_repo_artifact_reader_rejects_a_fifo_without_blocking(tmp_path, monkeypatch):
+    import threading
+
+    repo = tmp_path / "cloud"
+    repo.mkdir()
+    fifo = repo / "pipe"
+    os.mkfifo(fifo)
+    monkeypatch.setattr(da, "REPO", repo)
+
+    outcome: list = []
+    worker = threading.Thread(target=lambda: outcome.append(da._read_repo("pipe")), daemon=True)
+    worker.start()
+    worker.join(5)
+    if worker.is_alive():
+        # Unblock the stuck open before failing so the interpreter can exit.
+        writer = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(writer)
+        pytest.fail("_read_repo blocked on a FIFO instead of rejecting it")
+    assert outcome == [None]
+
+
+def test_repo_artifact_reader_bounds_the_bytes_it_reads(tmp_path, monkeypatch):
+    repo = tmp_path / "cloud"
+    repo.mkdir()
+    big = repo / "big"
+    with big.open("wb") as handle:
+        handle.truncate(da.MAX_REPO_ARTIFACT_BYTES + 1)
+    (repo / "fits").write_text("x" * 64)
+    monkeypatch.setattr(da, "REPO", repo)
+
+    assert da._read_repo("big") is None
+    assert da._read_repo("fits") == "x" * 64
 
 
 class TestEnvFileGuard:
