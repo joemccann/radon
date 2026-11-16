@@ -991,7 +991,11 @@ The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source; on
 `RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
 role-skipped because Gateway runtime surfaces are absent by design there. It
-must never read or report `.env*` contents. There is no beta carve-out: beta
+must never read or report `.env*` contents. Checkout artifacts are read
+through `_read_repo`: descriptor-relative `O_NOFOLLOW|O_NONBLOCK` opens, then
+an `fstat` gate that admits only a regular file of at most
+`MAX_REPO_ARTIFACT_BYTES` (1 MiB); anything else is a missing repo artifact
+(drift), never a blocking read. There is no beta carve-out: beta
 host artifacts were removed 2026-10-11, so a live `radon-beta*` unit or
 sudoers fragment is `config-drift` (`tests/test_beta_sunset.py`).
 
