@@ -12427,10 +12427,17 @@ Not filed: compact JSON byte-equality (`test_credit_spread_json_compact_budget.p
 
 Acceptance: `default_deps().pdf_backlog is backlog_breach`. An uploaded cycle with a backlog string records `marketdesk-dropbox` `error` with that message. A gauge raise leaves `ok`. A paused no-creds cycle appends the backlog onto the credentials message. Wiring `None` or deleting the flip fails those cases.
 
-Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 1 new finding
+### T-591 — P1 — PDF sim tests mkdir `/opt/cursor/artifacts`, so correct admission math fails off Cursor
+
+`scripts/tests/test_marketdesk_pdf_sim.py:65-66` and `:377-379` write side-effect JSON under `/opt/cursor/artifacts` after the assertions. `/opt` is root-owned here (`PermissionError: [Errno 13] Permission denied: '/opt/cursor'`). Serial: 2 failed (`/tmp/delta-pdfsim-serial.log`) with every admission assert already true. The dump is not the contract.
+
+Acceptance: both sims write under pytest `tmp_path`. Reintroducing `/opt/cursor/artifacts` fails on a host that cannot mkdir `/opt/cursor`.
+
+Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 2 new findings
 
 ## Remediation 2026-11-16
 
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-590 | DONE | Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
+| T-591 | DONE | Serial `/opt/cursor` mkdir: 2 failed (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green: 21 passed (`/tmp/t591-green.log`). Product source unchanged. |

@@ -1428,3 +1428,4 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-590 | DONE | Wiring `None` + deleted health flip: 3 failed / 1 passed (`test_default_deps_wire_real_modules`, `test_pdf_backlog_breach_errors_ok_dropbox_health`, `test_pdf_backlog_appends_to_paused_dropbox_health`). Restored product source. Green 4 passed; `test_marketdesk_job.py` 96 passed. Product source unchanged. |
+| T-591 | DONE | Serial `PermissionError: '/opt/cursor'` after admission asserts (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green 21 passed in `test_marketdesk_pdf_sim.py`. Product source unchanged. |
