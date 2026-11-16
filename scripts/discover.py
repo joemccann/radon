@@ -470,7 +470,9 @@ def _provider_failure(operation: str, exc: Exception, ticker: str | None = None)
 
 
 def _apply_provider_failures(
-    result: dict, provider_failures: list, *, shed_admission: bool = False,
+    result: dict, provider_failures: list, *,
+    shed_admission: bool = False,
+    shed_transport: bool = False,
 ) -> None:
     """Record skipped tickers without turning a scored scan into a hard error.
 
@@ -480,7 +482,9 @@ def _apply_provider_failures(
     degraded: keep the skips, do not publish or alert, and leave the hard
     error for a result that has nothing to cache. A total miss that is only
     a short UW rate limit uses the shed marker instead, so the oneshot does
-    not page (2026-10-22 20:01Z, page 9d06ddf8).
+    not page (2026-10-22 20:01Z, page 9d06ddf8). A total miss that is only
+    the fail-fast page timeout uses the transport shed (2026-11-16 21:01Z,
+    page 10df476c).
     """
     if not provider_failures:
         return
@@ -490,10 +494,12 @@ def _apply_provider_failures(
         key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
     )
     if not result.get("candidates"):
-        result["error"] = (
-            DISCOVER_ADMISSION_SHED if shed_admission
-            else "required provider data unavailable"
-        )
+        if shed_admission:
+            result["error"] = DISCOVER_ADMISSION_SHED
+        elif shed_transport:
+            result["error"] = DISCOVER_TRANSPORT_SHED
+        else:
+            result["error"] = "required provider data unavailable"
 
 
 def discover_targeted(tickers: list, dp_days: int = 3,
@@ -600,6 +606,11 @@ DISCOVER_ADMISSION_SHED = "discover rate limit shed"
 # The wrapper sheds this HTTP 400 the same way as a short rate limit.
 # A provider outage keeps the hard error and still fails the oneshot.
 DISCOVER_BUDGET_SHED = "discover budget shed"
+# Fail-fast client (max_retries=0) maps one requests.Timeout to
+# "UW connection failed after 1 attempts". That is an unfinished page,
+# not a provider outage. The wrapper sheds this HTTP 400.
+DISCOVER_TRANSPORT_SHED = "discover transport shed"
+_TRANSPORT_FAILURE_PREFIX = "UW connection failed after "
 _QUOTA_MARKERS = (
     "daily request limit",
     "quota is exhausted",
@@ -657,9 +668,25 @@ def _rate_limit_is_a_hard_outage(exc: BaseException) -> bool:
     return remaining is not None and remaining > OPTIONS_FLOW_ADMISSION_WAIT_S
 
 
+def _is_transport_failure(exc: BaseException) -> bool:
+    """True for the fail-fast client's one timed-out or reset attempt.
+
+    ``UWClient(max_retries=0)`` raises ``UWAPIError`` with this prefix and
+    drops the requests exception. Quota, auth, and a completed HTTP error
+    use other messages and stay a hard miss.
+    """
+    return (
+        isinstance(exc, UWAPIError)
+        and not isinstance(exc, UWRateLimitError)
+        and str(exc).startswith(_TRANSPORT_FAILURE_PREFIX)
+    )
+
+
 def _provider_error_key(exc: BaseException) -> str:
     if isinstance(exc, UWRateLimitError) and not _rate_limit_is_a_hard_outage(exc):
         return DISCOVER_ADMISSION_SHED
+    if _is_transport_failure(exc):
+        return DISCOVER_TRANSPORT_SHED
     return "required provider data unavailable"
 
 
@@ -817,6 +844,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         candidates = []
         provider_failures = []
         admission_sheds = []
+        transport_sheds = []
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
@@ -849,6 +877,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
                         isinstance(exc, UWRateLimitError)
                         and not _rate_limit_is_a_hard_outage(exc)
                     )
+                    transport_sheds.append(_is_transport_failure(exc))
                     print(f"    [{done}/{total}] {ticker}... SKIP (provider unavailable)", file=sys.stderr)
                     continue
                 if candidate is None:
@@ -867,10 +896,20 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         "candidates_found": len(candidates),
         "candidates": candidates[:top]
     }
+    transient = [
+        admission or transport
+        for admission, transport in zip(admission_sheds, transport_sheds)
+    ]
     _apply_provider_failures(
         result,
         provider_failures,
         shed_admission=bool(provider_failures) and all(admission_sheds),
+        shed_transport=(
+            bool(provider_failures)
+            and any(transport_sheds)
+            and all(transient)
+            and not all(admission_sheds)
+        ),
     )
     # A tape that did not finish, with nothing scored, must not cache as an
     # empty success. The wrapper sheds this body and the next slot retries.
