@@ -792,8 +792,14 @@ def test_pull_holds_the_pull_lock_while_pulling_and_verifying(tmp_path: Path) ->
     )
     assert result.returncode == 0, result.stderr
     lines = probes.read_text(encoding="utf-8").splitlines()
-    assert any(line.startswith("pull ") for line in lines), lines
+    # CIP-030: a local SHA set skips `docker pull` but still inspects under
+    # the shared pull lock. A miss still pulls. Either path must hold it.
+    assert lines, "expected inspect or pull probes while the pull lock is held"
     assert all(line.endswith(" held") for line in lines), lines
+    assert any(
+        line.startswith("pull ") or "ghcr.io/joemccann/radon-" in line
+        for line in lines
+    ), lines
     # Released once the verb exits: the next prune is not blocked by it.
     _hold(lock, fcntl.LOCK_EX).close()
 
