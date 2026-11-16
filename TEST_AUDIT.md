@@ -12410,3 +12410,27 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | credentials xdist flake then serial 11 passed; 19,716 passed / 10 skipped / 40 subtests (216.25s) | 11,627 passed / 21 skipped / 1,208 files (112.65s) | 58 failed / 4,275 passed / 23 skipped (1080.83s) | — |
 | 2 | credentials xdist flake then serial retry 2 passed; 19,716 passed / 10 skipped / 40 subtests (228.92s) | 11,627 passed / 21 skipped / 1,208 files (145.07s) | 58 failed / 4,275 passed / 23 skipped (1091.07s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,716 passed / 10 skipped / 40 subtests (171.49s) | 11,627 passed / 21 skipped / 1,208 files (116.77s) | 58 failed / 4,275 passed / 23 skipped (1098.07s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-16
+
+Range `bb8d8fe4e65808f663a324ed6b9bdf2ec4e70187..8aaad84e999430839ec8b3979b3d6a82bf661c1d`: 52 commits / 79 paths. Newest trusted checkpoint on issue #83 is `audited-through: bb8d8fe4e65808f663a324ed6b9bdf2ec4e70187` (collaborator, 2026-11-14). It carried no open verified finding. No open `testing/` pull request. Highest id T-589. Next id T-590.
+
+Codemap (`tools/codemap/codemap.json`) has no node for `scripts/db/post_id.js`, `scripts/research/marketdesk_pdf_rate.py`, `cloud/scripts/deploy.sh`, or the runner hooks. `rg` confirmed importers: `web/tests/newsfeed-post-id-namespace.test.ts` for the post-id guard; `scripts/tests/test_marketdesk_pdf_sim.py` and `scripts/tests/test_marketdesk_pdf_store.py` for PDF admission; `cloud/tests/test_deploy_premigrate.py` for premigrate; `scripts/tests/test_runner_checkpoint_hook.py` for the checkpoint hook. Inverse: `scripts/research/marketdesk_job.py:176` now sets `pdf_backlog=marketdesk_pdf_store.backlog_breach` and `:654-657` flips dropbox health, but `scripts/tests/test_marketdesk_job.py:724-739` (`test_default_deps_wire_real_modules`) asserted `enqueue_pdf` and never `pdf_backlog`, and `build_deps` left `pdf_backlog` at the dataclass default `None`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-587 / T-588 / T-589 remain DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Not filed: compact JSON byte-equality (`test_credit_spread_json_compact_budget.py:37`); `--log-driver=none` argv pin (`test_model_client_export_logging.py:38`); prompt `isCrossRepository` grep (`test_runner_prompt_checkpoint_trust.py:80-87`, the prompt is the artifact); discover ticker-cap literal `== 25` paired with a behavioral fetch list (`test_discover.py:873-874`); deploy `main()` string-order (`test_deploy_premigrate.py:75-81`) already backed by the event-order walk at `:123`.
+
+### T-590 — P1 — MarketDesk article cycle PDF backlog health is untested, so a silent dropbox-ok would not fail
+
+`scripts/research/marketdesk_job.py:176` wires `pdf_backlog=marketdesk_pdf_store.backlog_breach`. `:648-657` flips an `ok` dropbox row to `error` (and appends on `paused`) so a drowning PDF archive pages. `scripts/tests/test_marketdesk_job.py:724-739` never asserted that wiring; `build_deps` (`:235-244`) omitted `pdf_backlog`, so every job test ran with `None`. Store-level `backlog_breach` lives in `test_marketdesk_pdf_sim.py:274`. Mutation `pdf_backlog=None` plus deleting the flip: 3 failed / 1 passed (`/tmp/t590-red.log`).
+
+Acceptance: `default_deps().pdf_backlog is backlog_breach`. An uploaded cycle with a backlog string records `marketdesk-dropbox` `error` with that message. A gauge raise leaves `ok`. A paused no-creds cycle appends the backlog onto the credentials message. Wiring `None` or deleting the flip fails those cases.
+
+Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 1 new finding
+
+## Remediation 2026-11-16
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-590 | DONE | Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |

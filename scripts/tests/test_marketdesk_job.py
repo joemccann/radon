@@ -95,6 +95,7 @@ class World:
     outcomes: list = field(default_factory=list)
     feedback: list = field(default_factory=list)
     root: Path | None = None
+    pdf_backlog: object | None = None
 
 
 class FakeWriter:
@@ -232,6 +233,12 @@ def build_deps(world: World):
         world.outcomes.append((work, review))
         return publish.record_outcome(work, review)
 
+    def pdf_backlog():
+        world.calls.append(("pdf_backlog",))
+        if isinstance(world.pdf_backlog, Exception):
+            raise world.pdf_backlog
+        return world.pdf_backlog
+
     return job.Deps(
         store=store, publish=real_publish, store_asset=store_asset, read_asset=read_asset,
         expire_stale_held=expire, open_session=open_session, list_latest=list_latest, fetch_article=fetch_article,
@@ -240,7 +247,7 @@ def build_deps(world: World):
         book_tickers=lambda: None, record_outcome=record_outcome,
         feedback_rows=lambda: list(world.feedback), research_root=lambda: world.root or world.tmp / "research",
         marketdesk_path=marketdesk_path, service_cycle=service_cycle, record_health=record_health,
-        clock=clock,
+        clock=clock, pdf_backlog=pdf_backlog,
     )
 
 
@@ -730,12 +737,56 @@ def test_default_deps_wire_real_modules():
     from research import book, marketdesk_pdf_store
     assert not hasattr(deps, "pdf_pages") and not hasattr(deps, "download_pdf")
     assert deps.enqueue_pdf is marketdesk_pdf_store.enqueue
+    assert deps.pdf_backlog is marketdesk_pdf_store.backlog_breach
     assert deps.book_tickers is book.current_tickers and deps.record_outcome is publish.record_outcome
     assert deps.list_latest is marketdesk_scrape.list_latest
     assert deps.write_copy is marketdesk_copy.write_copy
     assert callable(deps.certify)
     assert deps.writer_from_env({}) is None
     assert deps.marketdesk_path is dropbox_writer.marketdesk_path
+
+
+BACKLOG = "PDF archive backlog: 1300 files older than 7 days"
+
+
+def test_pdf_backlog_breach_errors_ok_dropbox_health(world, db):
+    """A drowning PDF archive must page even when Dropbox itself uploaded.
+
+    2026-11-14 wired backlog_breach into the article cycle's dropbox row.
+    The store gauge is tested in test_marketdesk_pdf_sim; this is the
+    health flip the watchdog actually reads. A None pdf_backlog (the
+    test-double default before T-590) left that row ok.
+    """
+    world.refs = [make_ref("Pbbbbbbb01")]
+    preseed_stored_pdf(world, db, world.refs[0])
+    world.pdf_backlog = BACKLOG
+    counts = run(world)
+    assert counts["uploaded"] == 1
+    dropbox = health_for(world, "marketdesk-dropbox")
+    assert dropbox == [("marketdesk-dropbox", "error", {"message": BACKLOG})]
+    assert ("pdf_backlog",) in world.calls
+
+
+def test_pdf_backlog_gauge_miss_does_not_hide_an_ok_upload(world, db):
+    world.refs = [make_ref("Pbbbbbbb02")]
+    preseed_stored_pdf(world, db, world.refs[0])
+    world.pdf_backlog = RuntimeError("turso down")
+    counts = run(world)
+    assert counts["uploaded"] == 1
+    assert health_for(world, "marketdesk-dropbox") == [("marketdesk-dropbox", "ok", None)]
+
+
+def test_pdf_backlog_appends_to_paused_dropbox_health(world, db):
+    world.refs = [make_ref("Pbbbbbbb03")]
+    preseed_stored_pdf(world, db, world.refs[0])
+    world.writer_present = False
+    world.pdf_backlog = BACKLOG
+    counts = run(world)
+    assert counts["upload_skipped"] == 1
+    service, state, error = health_for(world, "marketdesk-dropbox")[0]
+    assert state == "paused"
+    assert "credentials absent" in error["message"]
+    assert BACKLOG in error["message"]
 
 
 def test_default_certifier_wires_private_audit_to_research_root(monkeypatch, tmp_path):
