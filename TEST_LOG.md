@@ -1429,3 +1429,4 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-590 | DONE | Wiring `None` + deleted health flip: 3 failed / 1 passed (`test_default_deps_wire_real_modules`, `test_pdf_backlog_breach_errors_ok_dropbox_health`, `test_pdf_backlog_appends_to_paused_dropbox_health`). Restored product source. Green 4 passed; `test_marketdesk_job.py` 96 passed. Product source unchanged. |
 | T-591 | DONE | Serial `PermissionError: '/opt/cursor'` after admission asserts (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green 21 passed in `test_marketdesk_pdf_sim.py`. Product source unchanged. |
+| T-592 | DONE | Serial 2 failed ×3: empty log fence vs `"Error: CLI crashed"` (`/tmp/delta-security-1.log`). Hook stderr `bad substitution` on bash 3.2 `${//$'\x60\x60\x60'/}`. Escaped backticks. Green 2 passed; file 201 passed. |

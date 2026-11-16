@@ -12433,7 +12433,13 @@ Acceptance: `default_deps().pdf_backlog is backlog_breach`. An uploaded cycle wi
 
 Acceptance: both sims write under pytest `tmp_path`. Reintroducing `/opt/cursor/artifacts` fails on a host that cannot mkdir `/opt/cursor`.
 
-Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 2 new findings
+### T-592 — P1 — Missing-agent security report log tail is empty on bash 3.2
+
+`scripts/runner/hooks/security_post.sh:401` used `clipped="${clipped//$'\x60\x60\x60'/[fence]}"`. Darwin `/bin/bash` 3.2 parses that as an unclosed backtick (`bad substitution: no closing '}'`). `_sanitize_log_tail` then returns empty, so `write_missing_phase_report` publishes a NO AGENT REPORT with a blank log fence. `scripts/tests/test_runner_security_hooks.py:657` (`test_a_missing_agent_report_publishes_a_sanitized_failure_report`) already required `"Error: CLI crashed"` in the published body. Serial: 2 failed ×3 (`/tmp/delta-security-{1,2,3}.log`). Isolated hook stderr: line 401 bad substitution; PHASE_LOG still held the crash lines.
+
+Acceptance: the missing-report body includes the crash line and `session ended` on bash 3.2. Reintroducing `$'\x60\x60\x60'` inside `${//}` fails those cases here.
+
+Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 3 new findings
 
 ## Remediation 2026-11-16
 
@@ -12441,3 +12447,4 @@ Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 2 ne
 |---|---|---|
 | T-590 | DONE | Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
 | T-591 | DONE | Serial `/opt/cursor` mkdir: 2 failed (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green: 21 passed (`/tmp/t591-green.log`). Product source unchanged. |
+| T-592 | DONE | Serial 2 failed ×3 (`/tmp/delta-security-1.log`); hook stderr `bad substitution` at `:401`. Escaped-backtick `${//}` pattern. Green: 2 passed (`/tmp/t592-green.log`); `test_runner_security_hooks.py` 201 passed (`/tmp/t592-file.log`). |
