@@ -84,20 +84,30 @@ Migration 0113 is the safety reset: the live row starts at 900 seconds and batch
 subtracts 30 seconds, down to 300 seconds or to `MARKETDESK_PDF_MIN_INTERVAL_SECONDS`
 when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
 `MARKETDESK_PDF_DAILY_CAP` is a rolling 24 hour admission cap (unset means 400,
-0 turns it off) and the lease SQL enforces it. A missed fire does not stack
-into a catch-up burst.
+0 turns it off). `MARKETDESK_PDF_HOURLY_CAP` is a rolling 1 hour admission cap
+(unset means 12, 0 turns it off). The lease SQL enforces both. The hourly
+default is a hypothesis from the 2026-11-15 pace that drew `preview_quota`
+near 18 admissions in an hour, not a published provider allowance. A missed
+fire does not stack into a catch-up burst.
 
 A provider quota signal (`preview_quota`, `download_quota`, `http_429`,
 `http_401`, `http_402`, `http_403`, or an HTTP-date `Retry-After`) doubles
 the persisted interval, stops the rest of the batch, and resets the batch to 1.
-A delta-seconds `Retry-After` lengthens that one wait and does not
-become the steady pace. The ceiling is 24 hours, the old embargo cap. A single
-HTTP 500 spends the current window and backs that file off on its own clock.
+It refunds the attempt and sets that row's next attempt to the account
+deadline plus one interval (at least 300 seconds), so the file that drew the
+quota is not the next admission. A delta-seconds `Retry-After` lengthens that
+one wait and does not become the steady pace. The ceiling is 24 hours, the
+old embargo cap. After the signal, clean cycles still subtract 30 seconds,
+and every 4 clean cycles the interval also halves toward the floor. A 2100
+second clock is back at the floor in under 6 hours. The 900 second ramp stays
+additive until a quota signal arms this recovery. A single HTTP 500 spends
+the current window and backs that file off on its own clock.
 Three transport or 5xx errors in a row multiply the account interval by 1.5.
 A clean cycle subtracts 30 seconds, never below the floor, and never moves the
 next admission earlier. ea66c3842 metered PDF bytes on the signed-in account
 and picked a fixed 1,800 second slot after `preview_quota`. It does not publish
-a numeric allowance, so the controller is not capped under an invented quota.
+a numeric allowance. The hourly cap is a separate configurable hypothesis.
+The controller does not return to that fixed 1,800 second slot.
 `preview_quota` is the signal that slows it.
 
 A 600-second token lease recovers a killed worker. The admit trigger moves the
@@ -120,8 +130,9 @@ bypasses a provider refusal. Before requesting bytes, the worker checks the
 provider's account allowance. A spent allowance causes no PDF request.
 Allowance errors and HTTP 429 double the shared interval, up to 24 hours, and
 honor `Retry-After` as the minimum for that one wait. The streak survives
-restarts. A verified provider success steps the interval down by 30 seconds;
-a saved receipt does not. Authentication failures wait at least one hour.
+restarts. A verified provider success steps the interval down by 30 seconds,
+and by the post-quota halving when recovery is armed. A saved receipt does not.
+Authentication failures wait at least one hour.
 Other item failures use that file's own exponential clock, capped at one day,
 and do not move the account interval unless they are the third transport or
 5xx error in a row. Item and account updates commit atomically.
