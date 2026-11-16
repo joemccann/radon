@@ -97,6 +97,13 @@ missing, empty, or error rows still go live.
 UW `get_short_data` fee overlay (PERF-024). Merge after both complete;
 source priority stays IB then UW.
 
+`GET /index-options/chain` serves `data/index_options_chain_{SYMBOL}_{YYYYMMDD}.json`
+when `as_of_date` is the current ET day and the file carries contracts, and
+only then spawns `ib_chain.py`. Listed index-option books do not change
+intra-session (PERF-058, same rule as `/futures/chain`). A cross-day or
+empty cache still goes live; a failed live fetch still falls back to the
+last good file flagged `stale`.
+
 `scripts/api/subprocess.py` exposes `run_script(name, args, timeout)` and `run_script_raw(...)`:
 
 - `run_script`: spawns `<script>`, expects JSON on stdout, returns parsed dict. `_find_json_start()` accepts both `{` and `[` as JSON starts (fixed for the leap-scanner array case).
