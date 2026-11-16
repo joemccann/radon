@@ -12448,3 +12448,13 @@ Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 3 ne
 | T-590 | DONE | Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
 | T-591 | DONE | Serial `/opt/cursor` mkdir: 2 failed (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green: 21 passed (`/tmp/t591-green.log`). Product source unchanged. |
 | T-592 | DONE | Serial 2 failed ×3 (`/tmp/delta-security-1.log`); hook stderr `bad substitution` at `:401`. Escaped-backtick `${//}` pattern. Green: 2 passed (`/tmp/t592-green.log`); `test_runner_security_hooks.py` 201 passed (`/tmp/t592-file.log`). |
+
+### Closing gates 2026-11-16
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1 EXIT 0. r2 and r3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (2 passed each). Vitest EXIT 0 each round. Cloud EXIT 1 each round. r2 and r3 match the origin/main worktree at `8aaad84e9` (58 nodes, 0 added / 0 removed). r1 added one extra `test_a_severed_post_is_not_replayed` that was absent on main and on r2/r3. Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 19,823 passed / 10 skipped / 40 subtests (101.54s) | 11,631 passed / 21 skipped / 1,209 files (49.96s) | 59 failed / 4,284 passed / 23 skipped (964.70s) | 1 added (`test_a_severed_post_is_not_replayed`) |
+| 2 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (156.49s) | 11,631 passed / 21 skipped / 1,209 files (101.16s) | 58 failed / 4,285 passed / 23 skipped (981.70s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (152.75s) | 11,631 passed / 21 skipped / 1,209 files (102.79s) | 58 failed / 4,285 passed / 23 skipped (972.75s) | 0 added / 0 removed |
