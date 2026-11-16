@@ -193,6 +193,65 @@ def test_preview_quota_refunds_and_skips_that_row(db):
     assert nxt is not None and nxt.article_id != work.article_id
 
 
+def test_live_2100s_row_with_cleared_last_error_recovers_through_the_migration(monkeypatch):
+    """Production 2026-11-15 07:43 PT: 2100s, batch 1, credits 2, last_error NULL."""
+    import time
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    names = ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql",
+             "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql",
+             "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql",
+             "0113_marketdesk_pdf_safety_cap.sql")
+    for name in names:
+        conn.executescript((ROOT / name).read_text())
+    conn.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=2100,batch_size=1,success_credits=2,"
+        "quota_failures=0,last_error=NULL")
+    started = time.perf_counter()
+    conn.executescript((ROOT / "0114_marketdesk_pdf_hourly_recovery.sql").read_text())
+    elapsed_migration = time.perf_counter() - started
+    row = conn.execute(
+        "SELECT interval_seconds,batch_size,success_credits,quota_failures,last_error,recover_armed,recover_credits "
+        "FROM marketdesk_pdf_throttle").fetchone()
+    assert row == (2100, 1, 2, 0, None, 1, 0)
+    sql = (ROOT / "0114_marketdesk_pdf_hourly_recovery.sql").read_text()
+    assert "marketdesk_pdf_queue" not in sql
+    assert sql.count("ALTER TABLE") == 2
+    assert elapsed_migration < 1.0
+    monkeypatch.setattr(store.policy, "load_context", lambda: store.policy.Context(frozenset(), {}))
+
+    def execute(statement, args=(), **kwargs):
+        return [tuple(item) for item in conn.execute(statement, args).fetchall()]
+
+    def transaction(statements):
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement, args in statements:
+                conn.execute(statement, args)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_transaction", transaction)
+    waited = 0
+    while True:
+        interval = conn.execute("SELECT interval_seconds FROM marketdesk_pdf_throttle").fetchone()[0]
+        if interval <= 300:
+            break
+        waited += interval
+        store.note_success(now=NOW)
+        assert waited < 6 * 3600
+    assert conn.execute("SELECT interval_seconds,recover_armed FROM marketdesk_pdf_throttle").fetchone() == (300, 0)
+    assert waited < 6 * 3600
+    conn.close()
+
+
+def test_recovery_migration_leaves_the_900s_ramp_unarmed(db):
+    assert db.execute(
+        "SELECT interval_seconds,recover_armed,last_error FROM marketdesk_pdf_throttle").fetchone() == (900, 0, None)
+
+
 def test_four_clean_cycles_halve_a_backed_off_interval(db):
     db.execute("UPDATE marketdesk_pdf_throttle SET interval_seconds=2100,batch_size=1,recover_armed=1,recover_credits=0")
     for expected in (2070, 2040, 2010):

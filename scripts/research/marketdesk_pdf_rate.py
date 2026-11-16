@@ -25,7 +25,8 @@ cap still clears 1,275 plus 190 a day inside 7 days. Quota signals, including
 HTTP 401/402/403 and an HTTP-date Retry-After, double the interval and reset
 the batch to 1. After that signal, every 4 clean cycles also halve the
 interval toward the floor, so 2100 seconds is back at the floor in under 6
-hours. The 900 second ramp stays additive until a quota signal arms this.
+hours. The 900 second ramp stays additive. An interval already above 900
+seconds arms the same walk, even after last_error was cleared.
 """
 from __future__ import annotations
 
@@ -194,7 +195,8 @@ def on_soft(state: RateState) -> tuple[RateState, int | None]:
 def on_success(state: RateState, floor: int | None = None) -> RateState:
     """Subtract one step. After a quota signal, also halve every RECOVER_EVERY clean cycles.
 
-    The 900 second ramp is additive until a quota signal sets recover_armed.
+    The 900 second ramp is additive. An interval already above that start
+    (a quota double whose last_error was later cleared) arms the same walk.
     Halving is the walk back to the floor, not a new steady pace.
     """
     low = interval_floor() if floor is None else int(floor)
@@ -205,6 +207,9 @@ def on_success(state: RateState, floor: int | None = None) -> RateState:
         credits = 0
         batch = min(MAX_BATCH, batch + 1)
     armed = 1 if state.recover_armed else 0
+    # The live 2100s row has last_error NULL. The interval is the signal.
+    if not armed and state.interval_seconds > max(START_INTERVAL_SECONDS, low):
+        armed = 1
     recover = 0
     if armed and interval <= low:
         armed = 0

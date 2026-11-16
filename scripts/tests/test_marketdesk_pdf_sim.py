@@ -116,6 +116,21 @@ def test_clean_cycles_after_quota_reach_the_floor_within_six_hours():
     assert elapsed < 6 * 3600
 
 
+def test_interval_above_the_ramp_arms_recovery_without_a_quota_flag():
+    state = RateState(2100, 1, 0, 2)
+    assert state.recover_armed == 0 and state.success_credits == 2
+    stepped = on_success(state)
+    assert stepped.recover_armed == 1 and stepped.success_credits == 3
+    assert stepped.interval_seconds == 2070
+    elapsed = 2100
+    state = stepped
+    while state.interval_seconds > rate.FLOOR_SECONDS:
+        elapsed += state.interval_seconds
+        state = on_success(state)
+        assert elapsed < 6 * 3600
+    assert state.interval_seconds == rate.FLOOR_SECONDS and elapsed < 6 * 3600
+
+
 def test_hourly_cap_env_defaults_and_disables(monkeypatch):
     monkeypatch.delenv(rate.HOURLY_CAP_ENV, raising=False)
     assert rate.hourly_cap() == 12

@@ -100,7 +100,7 @@ one wait and does not become the steady pace. The ceiling is 24 hours, the
 old embargo cap. After the signal, clean cycles still subtract 30 seconds,
 and every 4 clean cycles the interval also halves toward the floor. A 2100
 second clock is back at the floor in under 6 hours. The 900 second ramp stays
-additive until a quota signal arms this recovery. A single HTTP 500 spends
+additive until a quota signal, or an interval already above 900 seconds, arms this recovery. A later success that clears `last_error` does not cancel it. A single HTTP 500 spends
 the current window and backs that file off on its own clock.
 Three transport or 5xx errors in a row multiply the account interval by 1.5.
 A clean cycle subtracts 30 seconds, never below the floor, and never moves the
