@@ -19,7 +19,7 @@ ASSET = store.ASSET_BASE + ("ab" * 32) + ".pdf"
 DIGEST = "ab" * 32
 
 
-def test_hidden_quota_converges_without_a_429_storm():
+def test_hidden_quota_converges_without_a_429_storm(tmp_path):
     quota_per_hour = 30
     state = start_state()
     t = 0
@@ -62,8 +62,7 @@ def test_hidden_quota_converges_without_a_429_storm():
     assert len(signals) >= 1
     assert len(tail) <= 24
     assert series[-1]["admitted"] > quota_per_hour
-    Path("/opt/cursor/artifacts").mkdir(parents=True, exist_ok=True)
-    Path("/opt/cursor/artifacts/marketdesk-pdf-convergence.json").write_text(json.dumps({
+    (tmp_path / "marketdesk-pdf-convergence.json").write_text(json.dumps({
         "quota_per_hour": quota_per_hour, "final_interval": state.interval_seconds,
         "final_batch": state.batch_size, "final_pace_per_hour": round(pace, 2),
         "average_admitted_per_hour": round(average, 2),
@@ -624,7 +623,7 @@ def test_selection_refresh_skips_exhausted_rows(db):
     assert old == ("OldExh001", "stale")
 
 
-def test_interleaved_arrivals_download_protected_rows_under_the_real_caps(db, monkeypatch):
+def test_interleaved_arrivals_download_protected_rows_under_the_real_caps(db, monkeypatch, tmp_path):
     """Arrivals spread through the session. Hourly cap 12 and rolling daily cap 70.
 
     The worker is fast enough to spend the 70 on rows as they arrive. Protected
@@ -752,8 +751,7 @@ def test_interleaved_arrivals_download_protected_rows_under_the_real_caps(db, mo
         "aged_out": aged,
         "pending": len(pending),
     }
-    path = Path("/opt/cursor/artifacts/marketdesk-pdf-age-sim.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "marketdesk-pdf-age-sim.json"
     path.write_text(json.dumps(report, indent=2))
     print("AGE_SIM", json.dumps(report))
 
@@ -784,7 +782,7 @@ def test_fixed_1800s_pace_cannot_hide_a_week_of_intake(db, monkeypatch):
     assert _depth(db) > 400
 
 
-def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch):
+def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch, tmp_path):
     """400/day proof with the hourly cap off. The default cap is the other sim.
     The age window is off so a 10-day starting backlog is still drained."""
     monkeypatch.setenv("MARKETDESK_PDF_MAX_AGE_DAYS", "0")
@@ -860,8 +858,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch):
             "weekend_admissions": weekend,
             "final_depth": _depth(box),
         }
-        path = Path("/opt/cursor/artifacts/marketdesk-pdf-sim.json")
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = tmp_path / "marketdesk-pdf-sim.json"
         path.write_text(json.dumps(report, indent=2))
         print("SIM", json.dumps(report))
     finally:
@@ -876,7 +873,7 @@ def _recent(stamps, now):
     return [stamp for stamp in stamps if stamp > cutoff]
 
 
-def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypatch):
+def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypatch, tmp_path):
     """Real lease and controller. The provider refuses once an hour would pass 15."""
     monkeypatch.delenv(rate.HOURLY_CAP_ENV, raising=False)
     monkeypatch.delenv(rate.DAILY_CAP_ENV, raising=False)
@@ -972,8 +969,7 @@ def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypa
         "final_depth": _depth(db), "final_interval": db.execute(
             "SELECT interval_seconds,batch_size,recover_armed FROM marketdesk_pdf_throttle").fetchone(),
     }
-    path = Path("/opt/cursor/artifacts/marketdesk-pdf-hourly-sim.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "marketdesk-pdf-hourly-sim.json"
     path.write_text(json.dumps(report, indent=2))
     print("HOURLY_SIM", json.dumps(report))
     assert floor_at is not None and floor_at - NOW < timedelta(hours=6)

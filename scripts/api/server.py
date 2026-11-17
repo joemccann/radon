@@ -2191,8 +2191,17 @@ def _require_bounded_body(request: Request) -> None:
 
 @app.post("/ws-ticket/validate")
 async def validate_ws_ticket(request: Request):
-    """Validate a WebSocket ticket (called by the Node.js relay). Internal only."""
+    """Validate a WebSocket ticket (called by the Node.js relay). Internal only.
+
+    Auth-exempt because the loopback relay holds no user JWT, but the route is
+    still reachable through Caddy's `/api/ib/*` mount, so the handler applies
+    the trusted-local discipline itself (loopback peer, no forwarding headers,
+    no browser fetch metadata). The check runs BEFORE the ticket is consumed so
+    a refused caller cannot burn a pending upgrade.
+    """
     _require_bounded_body(request)
+    if not is_trusted_local_request(request):
+        raise HTTPException(status_code=401, detail="Ticket validation is internal only")
     body = await request.json()
     ticket = body.get("ticket", "")
     user_id = validate_ticket(ticket)
@@ -5062,6 +5071,41 @@ async def event_odds_get(ticker: str):
 
 # Under the Next.js 25s abort so a slow child cannot outlive the client.
 _INDEX_OPTIONS_CHAIN_TIMEOUT_S = 24.0
+_INDEX_OPTIONS_EXPIRY_RE = re.compile(r"^\d{8}$")
+
+
+def _index_options_chain_cache_path(symbol_upper: str, expiry: str) -> Path:
+    return DATA_DIR / f"index_options_chain_{symbol_upper}_{expiry}.json"
+
+
+def _is_fresh_index_options_cache(
+    cached: Optional[dict], *, symbol_upper: str, expiry: str
+) -> bool:
+    """A cache is fresh when it was stamped on the current ET trading day
+    for this symbol+expiry and carries at least one contract. The listed
+    index-option book is static intraday (new strikes list at the open),
+    so a same-day cache is valid to serve (PERF-058).
+    """
+    if not isinstance(cached, dict):
+        return False
+    if cached.get("as_of_date") != _today_et_str():
+        return False
+    if cached.get("symbol") != symbol_upper:
+        return False
+    if str(cached.get("expiry") or "") != expiry:
+        return False
+    contracts = cached.get("contracts")
+    return isinstance(contracts, list) and len(contracts) > 0
+
+
+def _stamp_index_options_chain(data: dict, symbol_upper: str, expiry: str) -> dict:
+    stamped = dict(data)
+    stamped["symbol"] = stamped.get("symbol") or symbol_upper
+    stamped["expiry"] = expiry
+    stamped["as_of"] = datetime.now(timezone.utc).isoformat()
+    stamped["as_of_date"] = _today_et_str()
+    stamped["stale"] = False
+    return stamped
 
 
 @app.get("/index-options/chain")
@@ -5072,6 +5116,13 @@ async def index_options_chain(symbol: str, expiry: str = ""):
     /futures/chain is — cross-thread event loop deadlock on the pool's
     data client when result sets exceed ~50 contracts. An unscoped
     VIX/SPX/NDX book is 1000+ contracts, so expiry is required.
+
+    Per-symbol+expiry disk cache + stale-on-failure: the listed index
+    option book is static intraday, so a same-day cache is served
+    immediately (PERF-058). On a cold/cross-day miss we run the
+    subprocess; if that fails we serve the last good cache (flagged
+    stale) rather than surfacing a timeout to the order ticket. Only
+    502 when there is no cache at all.
     """
     from clients.contract_resolver import supports_index_options
 
@@ -5081,12 +5132,49 @@ async def index_options_chain(symbol: str, expiry: str = ""):
             status_code=400,
             detail=f"index options not supported for {symbol_upper}; supported: VIX, SPX, NDX, RUT, XSP",
         )
-    if not expiry.strip():
+    expiry = expiry.strip()
+    if not expiry:
         raise HTTPException(status_code=400, detail="expiry is required")
+    expiry_key = expiry.replace("-", "")
+    cache_path = (
+        _index_options_chain_cache_path(symbol_upper, expiry_key)
+        if _INDEX_OPTIONS_EXPIRY_RE.fullmatch(expiry_key)
+        else None
+    )
+    cached = _read_cache(cache_path) if cache_path is not None else None
+
+    if _is_fresh_index_options_cache(
+        cached, symbol_upper=symbol_upper, expiry=expiry_key
+    ):
+        return cached
 
     args = ["--kind", "option", "--symbol", symbol_upper, "--expiry", expiry]
+    result = await run_script(
+        "ib_chain.py", args, timeout=_INDEX_OPTIONS_CHAIN_TIMEOUT_S
+    )
 
-    result = await run_script("ib_chain.py", args, timeout=_INDEX_OPTIONS_CHAIN_TIMEOUT_S)
+    live_ok = (
+        result.ok
+        and result.data
+        and not result.data.get("error")
+        and isinstance(result.data.get("contracts"), list)
+        and len(result.data["contracts"]) > 0
+    )
+    if live_ok:
+        stamped = _stamp_index_options_chain(result.data, symbol_upper, expiry_key)
+        if cache_path is not None:
+            try:
+                from utils.atomic_io import atomic_save
+                atomic_save(str(cache_path), stamped)
+            except Exception:
+                pass
+        return stamped
+
+    if isinstance(cached, dict) and isinstance(cached.get("contracts"), list):
+        stale = dict(cached)
+        stale["stale"] = True
+        return stale
+
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("error"):

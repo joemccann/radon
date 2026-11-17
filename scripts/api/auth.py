@@ -248,6 +248,7 @@ SERVICE_TOKEN_DENIED_PREFIXES = (
     "/research/tradingview/",
     "/trading/",
     "/uw/",
+    "/ws-ticket",
 )
 
 
