@@ -99,3 +99,36 @@ def test_relative_renewal_state_directory_fails_the_job_without_renewing(monkeyp
     while m.status({'job_id': job['job_id']})['status'] != 'complete' and time.monotonic() < deadline: time.sleep(.005)
     assert m.status({'job_id': job['job_id']})['exit_code'] == 78
     assert calls == []
+
+
+def _full_pass_heartbeat(monkeypatch, states):
+    import subscription_tokens as tokens
+    beats = []
+    monkeypatch.setattr(tokens, 'run', lambda mode, names, runtime: {
+        'exit_code': 0 if states[names[0]] in tokens.HEALTHY_STATES else 1,
+        'providers': [{'provider': names[0], 'state': states[names[0]]}],
+    })
+    monkeypatch.setattr(tokens, 'record_heartbeat', lambda *a, **k: beats.append((a, k)))
+    monkeypatch.delenv('RADON_SUBSCRIPTION_STATE_DIR', raising=False)
+    m = manager(); job = m.start({'mode': 'once'})
+    deadline = time.monotonic() + 2
+    while m.status({'job_id': job['job_id']})['status'] != 'complete' and time.monotonic() < deadline: time.sleep(.005)
+    assert len(beats) == 1
+    return beats[0]
+
+
+def test_fleet_heartbeat_names_the_provider_that_needs_attention(monkeypatch):
+    args, kwargs = _full_pass_heartbeat(monkeypatch, {
+        'anthropic': 'needs_reauth', 'codex': 'live', 'grok': 'live', 'antigravity': 'live'})
+    assert args == ('subscription-tokens', 'error')
+    assert kwargs['error'] == {'message': 'anthropic=needs_reauth'}
+
+
+@pytest.mark.parametrize('anthropic', ['live', 'needs_reauth'])
+def test_fleet_heartbeat_stamps_the_run_finish_time(monkeypatch, anthropic):
+    from datetime import datetime, timezone
+    before = datetime.now(timezone.utc)
+    _, kwargs = _full_pass_heartbeat(monkeypatch, {
+        'anthropic': anthropic, 'codex': 'live', 'grok': 'live', 'antigravity': 'live'})
+    finished = datetime.fromisoformat(kwargs['finished_at'])
+    assert before <= finished <= datetime.now(timezone.utc)
