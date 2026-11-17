@@ -119,7 +119,10 @@ baseline to the attempt count already on the row and restores any row already
 marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
 Quota errors refund the attempt. Fresh reports (published within 36 hours)
 and the oldest backlog alternate windows, so today's file is in the next
-fresh window while the backlog still drains.
+fresh window while the backlog still drains. A download whose lease has
+already expired is ahead of that alternation and is reclaimed on the next
+claim. When a clean cycle shortens the interval, the next admission moves
+forward to that shorter interval; the hourly cap still bounds the burst.
 
 The archive uses the existing authenticated `/files/<id>/blob` operation,
 which the provider routes through its preview file server. Its historical

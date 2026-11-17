@@ -224,10 +224,12 @@ def _sync_disposition(context_hash, now):
 
 
 def _due_sql():
-    # Fresh lane (lane 0) takes reports from the last 36h, newest first, then
-    # the oldest backlog. The next admission flips the lane, so a batch of one
-    # still spends every other slot on the backlog. Priority still wins.
+    # An expired download is ahead of the fresh/backlog lane. A killed batch
+    # otherwise sits out a whole fresh-lane turn, and with a long interval
+    # that is hours. Fresh lane (lane 0) then takes reports from the last 36h,
+    # newest first, then the oldest backlog. Priority still wins over both.
     return (
+        "CASE WHEN status='downloading' AND julianday(lease_until)<=julianday(?) THEN 0 ELSE 1 END,"
         "priority DESC,"
         "CASE WHEN (SELECT lane FROM marketdesk_pdf_throttle WHERE singleton=1)=0 "
         "THEN CASE WHEN julianday(published_at)>=julianday(?)-? THEN 0 ELSE 1 END "
@@ -258,9 +260,11 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
     order = _due_sql()
     daily_value = _cap_value(daily_cap_value)
     hourly_value = _cap_value(hourly_cap_value)
-    rows = hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
-        "lease_until=?,updated_at=? WHERE article_id IN (SELECT article_id FROM marketdesk_pdf_queue "
+    # Read the id list before any lease trigger runs. The trigger moves the
+    # account clock on the first row; a candidate scan that can see that write
+    # stops the rest of the batch (live claims of 2 while batch_size was 5).
+    chosen = hrana_execute(
+        "SELECT article_id FROM marketdesk_pdf_queue "
         f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) AND {_priority_gate()} "
         "AND disposition='active' AND (attempts - attempts_baseline)<? "
         "AND (SELECT julianday(next_attempt_at) FROM marketdesk_pdf_throttle WHERE singleton=1)<=julianday(?) "
@@ -271,13 +275,22 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
         "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
         "WHERE julianday(admitted_at)>julianday(?)-1)) END,"
         "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
-        "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))) "
-        "RETURNING article_id,article_url,title,published_at,lease_token",
-        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
-         context_hash, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
-         stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
+        "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))",
+        (context_hash, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
+         stamp, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
          int(limit), daily_value, int(limit), daily_value, stamp,
          hourly_value, int(limit), hourly_value, stamp))
+    ids = [row[0] for row in chosen]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = hrana_execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
+        "lease_until=?,updated_at=? WHERE article_id IN (" + placeholders + ") "
+        "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
+        "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
+        "RETURNING article_id,article_url,title,published_at,lease_token",
+        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp, *ids, stamp, stamp))
     work = []
     for key, url, title, published, leased in rows:
         if not ID.fullmatch(key) or url != ARTICLE_BASE + key:
@@ -408,14 +421,23 @@ def release(work, *, now=None):
 
 
 def note_success(*, now=None):
-    """One clean cycle. Does not move the next admission earlier."""
+    """One clean cycle. A shorter interval pulls the next admission forward to it.
+
+    The admit trigger already parked the clock at the pre-success interval.
+    Leaving it there is why a halving from ~1h to ~10min still waited out the
+    old hour. The hourly cap still bounds a burst.
+    """
+    current = _time(now)
     state, _jitter = _rate_row()
     new_state = on_success(state)
+    sooner = _stamp(current + timedelta(seconds=new_state.interval_seconds))
     hrana_execute(
         "UPDATE marketdesk_pdf_throttle SET interval_seconds=?,batch_size=?,soft_streak=0,success_credits=?,"
-        "recover_armed=?,recover_credits=? WHERE singleton=1",
+        "recover_armed=?,recover_credits=?,"
+        "next_attempt_at=CASE WHEN next_attempt_at IS NULL OR julianday(next_attempt_at)>julianday(?) "
+        "THEN ? ELSE next_attempt_at END WHERE singleton=1",
         (new_state.interval_seconds, new_state.batch_size, new_state.success_credits,
-         new_state.recover_armed, new_state.recover_credits))
+         new_state.recover_armed, new_state.recover_credits, sooner, sooner))
 
 
 def backlog_breach(*, now=None):

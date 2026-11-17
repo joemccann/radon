@@ -302,6 +302,47 @@ def test_a_500_spends_the_window_and_not_the_next_one(db):
     assert store.claim_next(now=NOW + timedelta(seconds=900)) is not None
 
 
+def test_expired_leases_are_reclaimed_on_the_next_claim_ahead_of_fresh_work(db):
+    """A killed batch must not wait behind today's files for the backlog lane."""
+    for i in range(4):
+        _add(db, f"Old{i:05d}", NOW - timedelta(days=11))
+    for i in range(6):
+        _add(db, f"New{i:05d}", NOW - timedelta(hours=1))
+    expired = (NOW - timedelta(hours=2)).isoformat()
+    db.execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading', lease_until=?, lease_token='x'||article_id "
+        "WHERE article_id LIKE 'Old%'",
+        (expired,))
+    db.execute("DELETE FROM marketdesk_pdf_admissions")
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=600, batch_size=5, lane=0, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    batch = store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=12, daily_cap_value=400)
+    got = [item.article_id for item in batch]
+    assert len(batch) == 5
+    assert set(got[:4]) == {f"Old{i:05d}" for i in range(4)}
+
+
+def test_halving_pulls_the_next_admission_off_the_old_hourly_gap(db):
+    """A halving that only rewrites interval_seconds still waits out the old hour."""
+    for i in range(6):
+        _add(db, f"Due{i:05d}", NOW - timedelta(days=2, minutes=i))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=3600, batch_size=2, recover_armed=1, "
+        "recover_credits=3, success_credits=0, next_attempt_at=?, jitter_bps=0, lane=1",
+        (NOW.isoformat(),))
+    first = store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=0, daily_cap_value=0)
+    assert len(first) == 2
+    _finish(db, first, NOW)
+    interval, nxt = db.execute("SELECT interval_seconds, next_attempt_at FROM marketdesk_pdf_throttle").fetchone()
+    assert interval == (3600 - 30) // 2
+    opened = datetime.fromisoformat(nxt)
+    assert opened <= NOW + timedelta(seconds=interval + 2)
+    assert opened < NOW + timedelta(seconds=3600 - 60)
+    assert store.claim_batch(now=opened - timedelta(seconds=30), jitter_bps=0, hourly_cap_value=0, daily_cap_value=0) == []
+    assert len(store.claim_batch(now=opened, jitter_bps=0, hourly_cap_value=0, daily_cap_value=0)) == 2
+
+
 def test_fresh_file_is_in_the_first_window_while_backlog_exists(db):
     for i in range(12):
         _add(db, f"Old{i:05d}", NOW - timedelta(days=8))
