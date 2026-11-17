@@ -229,6 +229,8 @@ def db(monkeypatch):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -239,6 +241,7 @@ def db(monkeypatch):
             conn.execute("ROLLBACK")
             raise
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     box = type("Box", (), {})()
     box.ctx_key = ctx.key
@@ -417,6 +420,9 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
 
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
+
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -427,9 +433,11 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
             conn.execute("ROLLBACK")
             raise
 
-    previous_execute, previous_transaction = store.hrana_execute, store.hrana_transaction
+    previous_execute, previous_many, previous_transaction = (
+        store.hrana_execute, store.hrana_execute_many, store.hrana_transaction)
     previous_context = store.policy.load_context
     store.hrana_execute = execute
+    store.hrana_execute_many = execute_many
     store.hrana_transaction = transaction
     store.policy.load_context = lambda: ctx
     try:
@@ -484,6 +492,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
         print("SIM", json.dumps(report))
     finally:
         store.hrana_execute = previous_execute
+        store.hrana_execute_many = previous_many
         store.hrana_transaction = previous_transaction
         store.policy.load_context = previous_context
         conn.close()

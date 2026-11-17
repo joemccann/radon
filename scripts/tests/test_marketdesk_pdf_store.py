@@ -21,6 +21,8 @@ def db(monkeypatch):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -31,6 +33,7 @@ def db(monkeypatch):
             conn.execute("ROLLBACK")
             raise
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     yield conn
     conn.close()
@@ -222,6 +225,9 @@ def test_live_2100s_row_with_cleared_last_error_recovers_through_the_migration(m
     def execute(statement, args=(), **kwargs):
         return [tuple(item) for item in conn.execute(statement, args).fetchall()]
 
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
+
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -233,6 +239,7 @@ def test_live_2100s_row_with_cleared_last_error_recovers_through_the_migration(m
             raise
 
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     waited = 0
     while True:
@@ -534,12 +541,14 @@ def test_selection_is_rechecked_if_publication_changes_after_due_scan(db, monkey
     published(db)
     store.seed_missing(now=NOW)
     execute = store.hrana_execute
-    def change(sql, args=(), **kwargs):
-        result = execute(sql, args, **kwargs)
-        if "jitter_bps" in sql:
-            db.execute("UPDATE marketdesk_articles SET status='held'")
-        return result
-    monkeypatch.setattr(store, "hrana_execute", change)
+    def change(statements, **kwargs):
+        results = []
+        for sql, args in statements:
+            results.append(execute(sql, args))
+            if "jitter_bps" in sql:
+                db.execute("UPDATE marketdesk_articles SET status='held'")
+        return results
+    monkeypatch.setattr(store, "hrana_execute_many", change)
     assert store.claim_next(now=NOW) is None
     assert db.execute("SELECT attempts FROM marketdesk_pdf_queue").fetchone() == (0,)
 
@@ -642,10 +651,11 @@ def test_priority_cohort_precedes_older_unrelated_queue_and_survives_restart(db,
     assert db.execute('SELECT next_attempt_at FROM marketdesk_pdf_throttle').fetchall() == clocks
     assert db.execute('SELECT article_id,next_attempt_at FROM marketdesk_pdf_queue ORDER BY article_id').fetchall() == dates
     import importlib
-    execute, transaction = store.hrana_execute, store.hrana_transaction
+    execute, execute_many, transaction = store.hrana_execute, store.hrana_execute_many, store.hrana_transaction
     importlib.reload(store)
     # Reloaded module uses the same durable database, not process-local priority.
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     work = store.claim_next(now=NOW)
     assert work.article_id == priority
@@ -769,12 +779,14 @@ def test_priority_selection_refresh_precedes_unrelated_stale_batches(db):
 def test_priority_update_between_scan_and_claim_is_rechecked(db, monkeypatch):
     _, priority = priority_pair(db)
     execute = store.hrana_execute
-    def change(sql, args=(), **kwargs):
-        result = execute(sql, args, **kwargs)
-        if "jitter_bps" in sql:
-            store.prioritize([priority])
-        return result
-    monkeypatch.setattr(store, 'hrana_execute', change)
+    def change(statements, **kwargs):
+        results = []
+        for sql, args in statements:
+            results.append(execute(sql, args))
+            if "jitter_bps" in sql:
+                store.prioritize([priority])
+        return results
+    monkeypatch.setattr(store, "hrana_execute_many", change)
     assert store.claim_next(now=NOW).article_id == priority
 
 
