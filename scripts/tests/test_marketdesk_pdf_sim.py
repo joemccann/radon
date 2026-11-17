@@ -248,8 +248,9 @@ def db(monkeypatch):
     conn.close()
 
 
-def _add(db, article_id, published, *, attempts=0, priority=0):
+def _add(db, article_id, published, *, attempts=0, priority=0, reason="PDF_MEASURED_MARKET_RESEARCH", first_seen=None):
     stamp = published.isoformat()
+    seen = (first_seen or published).isoformat()
     post_id = "research-" + article_id
     db.execute("INSERT INTO posts(id,title,content,timestamp,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                (post_id, "Selected", "Positioning rose 12%.", stamp, stamp, stamp))
@@ -257,13 +258,13 @@ def _add(db, article_id, published, *, attempts=0, priority=0):
         "kind": "marketdesk", "articleId": article_id, "url": "https://marketdesk.ai/library/browse/" + article_id})))
     db.execute("INSERT INTO marketdesk_articles(article_id,article_url,published_at,post_id,status,first_seen_at,updated_at) "
                "VALUES(?,?,?,?,?,?,?)",
-               (article_id, "https://marketdesk.ai/library/browse/" + article_id, stamp, post_id, "published", stamp, stamp))
+               (article_id, "https://marketdesk.ai/library/browse/" + article_id, stamp, post_id, "published", seen, stamp))
     db.execute("INSERT INTO marketdesk_pdf_queue(article_id,article_url,title,published_at,next_attempt_at,first_seen_at,"
                "updated_at,attempts,priority) VALUES(?,?,?,?,?,?,?,?,?)",
-               (article_id, "https://marketdesk.ai/library/browse/" + article_id, "n", stamp, stamp, stamp, stamp, attempts, priority))
+               (article_id, "https://marketdesk.ai/library/browse/" + article_id, "n", stamp, stamp, seen, stamp, attempts, priority))
     db.execute("INSERT INTO marketdesk_pdf_selection(article_id,context_hash,post_updated_at,eligible,reason_code,updated_at) "
-               "VALUES(?,?,?,1,'PDF_MEASURED_MARKET_RESEARCH',?)",
-               (article_id, db.ctx_key, stamp, stamp))
+               "VALUES(?,?,?,1,?,?)",
+               (article_id, db.ctx_key, stamp, reason, stamp))
 
 
 def _depth(db):
@@ -576,57 +577,181 @@ def test_a_newly_eligible_old_row_ages_out_instead_of_downloading(db):
     assert _disposition(db, "Back00008") == ("pending", "exhausted", "aged_out")
 
 
-def test_thirty_day_intake_above_the_cap_keeps_each_days_newest(db, monkeypatch):
-    """85 passing reports a day, cap 70. Newest 70 of each day download.
-    Nothing older than 7 days stays pending."""
-    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
-    monkeypatch.setenv("MARKETDESK_PDF_MAX_AGE_DAYS", "7")
+def test_protected_rows_outrank_newer_ordinary_and_do_not_age_out_first(db):
+    _add(db, "Ord800008", NOW - timedelta(days=8))
+    _add(db, "OrdNew001", NOW - timedelta(hours=1))
+    _add(db, "Desk00006", NOW - timedelta(days=6), reason="PDF_PREFERRED_DESK")
+    _add(db, "Book00008", NOW - timedelta(days=8), reason="PDF_BOOK_OR_WATCHLIST")
+    first = store.claim_next(now=NOW)
+    assert first.article_id == "Desk00006"
+    assert store.record_download(first, ASSET, DIGEST, now=NOW, provider_success=True)
+    assert _disposition(db, "Book00008") == ("pending", "active", None)
+    assert _disposition(db, "Ord800008") == ("pending", "exhausted", "aged_out")
+    opened = datetime.fromisoformat(db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
+    assert store.claim_next(now=opened).article_id == "Book00008"
+
+
+def test_a_protected_row_ages_out_when_no_ordinary_row_is_inside_the_window(db):
+    _add(db, "Desk00008", NOW - timedelta(days=8), reason="PDF_PREFERRED_DESK")
+    _add(db, "Book00009", NOW - timedelta(days=9), reason="PDF_BOOK_OR_WATCHLIST")
+    assert store.claim_next(now=NOW) is None
+    assert _disposition(db, "Desk00008") == ("pending", "exhausted", "aged_out")
+    assert _disposition(db, "Book00009") == ("pending", "exhausted", "aged_out")
+
+
+def test_backlog_age_uses_published_at_not_first_seen(db):
+    _add(db, "OldPub006", NOW - timedelta(days=6), first_seen=NOW - timedelta(hours=1))
+    _add(db, "NewPub001", NOW - timedelta(hours=1), first_seen=NOW - timedelta(days=6))
     db.execute(
-        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=6, next_attempt_at=?, jitter_bps=0",
+        "INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES('x',?)",
         (NOW.isoformat(),))
-    clock = NOW
-    newest = {}
-    for day in range(30):
-        ids = []
-        for i in range(85):
-            key = f"Day{day:02d}{i:04d}"
-            # Newest report is due at `clock`. Older ones are already due too.
-            _add(db, key, clock - timedelta(minutes=84 - i))
-            ids.append(key)
-        newest[day] = ids[-70:]
-        db.execute(
-            "UPDATE marketdesk_pdf_throttle SET next_attempt_at=?, interval_seconds=300, batch_size=6",
-            (clock.isoformat(),))
-        got = []
-        for _step in range(20):
-            batch = store.claim_batch(now=clock, jitter_bps=0, daily_cap_value=70, hourly_cap_value=0)
-            if not batch:
-                break
-            got.extend(item.article_id for item in batch)
+    breach = store.backlog_breach(now=NOW)
+    assert breach is not None
+    assert "oldest_h=144" in str(breach)
+    assert "pending=2" in str(breach)
+    assert breach.paging is False
+
+
+def test_selection_refresh_skips_exhausted_rows(db):
+    _add(db, "OldExh001", NOW - timedelta(days=8))
+    assert store.claim_next(now=NOW) is None
+    _add(db, "Fresh0001", NOW)
+    db.execute("UPDATE marketdesk_pdf_selection SET context_hash='stale'")
+    store.prepare_selection(now=NOW)
+    fresh, old = db.execute(
+        "SELECT article_id, context_hash FROM marketdesk_pdf_selection ORDER BY article_id").fetchall()
+    assert fresh[0] == "Fresh0001" and fresh[1] == db.ctx_key
+    assert old == ("OldExh001", "stale")
+
+
+def test_interleaved_arrivals_download_protected_rows_under_the_real_caps(db, monkeypatch):
+    """Arrivals spread through the session. Hourly cap 12 and rolling daily cap 70.
+
+    The worker is fast enough to spend the 70 on rows as they arrive. Protected
+    reasons are still downloaded. Ordinary rows download at the leftover rate.
+    Nothing older than 7 days stays pending.
+    """
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    monkeypatch.setenv("MARKETDESK_PDF_HOURLY_CAP", "12")
+    monkeypatch.setenv("MARKETDESK_PDF_MAX_AGE_DAYS", "7")
+    days = 12
+    ordinary_per_day = 78
+    protected_spec = (
+        (15, 0, "PDF_BOOK_OR_WATCHLIST"),
+        (16, 0, "PDF_PREFERRED_DESK"),
+        (17, 0, "PDF_PREFERRED_DESK"),
+        (18, 0, "PDF_BOOK_OR_WATCHLIST"),
+        (18, 30, "PDF_PREFERRED_DESK"),
+        (19, 30, "PDF_BOOK_OR_WATCHLIST"),
+        (20, 0, "PDF_PREFERRED_DESK"),
+    )
+    arrivals = []
+    ordinary = {}
+    protected = []
+    for day in range(days):
+        base = NOW + timedelta(days=day)
+        keys = []
+        for i in range(ordinary_per_day):
+            when = base + timedelta(hours=13, minutes=30) + timedelta(seconds=int(i * 7 * 3600 / ordinary_per_day))
+            key = f"Or{day:02d}{i:04d}"
+            arrivals.append((when, key, "PDF_MEASURED_MARKET_RESEARCH"))
+            keys.append(key)
+        ordinary[day] = keys
+        for hour, minute, reason in protected_spec:
+            when = base + timedelta(hours=hour, minutes=minute)
+            key = f"Pr{day:02d}{hour:02d}{minute:02d}"
+            arrivals.append((when, key, reason))
+            protected.append(key)
+    arrivals.sort(key=lambda item: (item[0], item[1]))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=1, next_attempt_at=?, jitter_bps=0",
+        (arrivals[0][0].isoformat(),))
+    clock = arrivals[0][0]
+    # One extra session so a protected row that arrives after the daily cap fills
+    # still gets the next rolling slot.
+    end = NOW + timedelta(days=days + 1, hours=22)
+    index = 0
+    admitted = 0
+    for _step in range(20000):
+        if clock >= end and index >= len(arrivals):
+            break
+        while index < len(arrivals) and arrivals[index][0] <= clock:
+            when, key, reason = arrivals[index]
+            _add(db, key, when, reason=reason)
+            index += 1
+        batch = store.claim_batch(now=clock, jitter_bps=0, daily_cap_value=70, hourly_cap_value=12)
+        if batch:
             _finish(db, batch, clock)
-            clock = datetime.fromisoformat(
+            admitted += len(batch)
+            nxt = datetime.fromisoformat(
                 db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
-        assert set(got) == set(newest[day])
-        last = db.execute("SELECT MAX(admitted_at) FROM marketdesk_pdf_admissions").fetchone()[0]
-        clock = datetime.fromisoformat(last) + timedelta(days=1, seconds=1)
+            clock = nxt if nxt > clock else clock + timedelta(seconds=300)
+            continue
+        jumps = []
+        if index < len(arrivals):
+            jumps.append(arrivals[index][0])
+        due = datetime.fromisoformat(
+            db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
+        if due > clock:
+            jumps.append(due)
+        stamp = clock.isoformat()
+        hour_count = db.execute(
+            "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at) > julianday(?) - (1.0/24)",
+            (stamp,)).fetchone()[0]
+        day_count = db.execute(
+            "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at) > julianday(?) - 1",
+            (stamp,)).fetchone()[0]
+        if hour_count >= 12:
+            oldest = db.execute(
+                "SELECT MIN(admitted_at) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at) > julianday(?) - (1.0/24)",
+                (stamp,)).fetchone()[0]
+            if oldest:
+                jumps.append(datetime.fromisoformat(oldest) + timedelta(hours=1, seconds=1))
+        if day_count >= 70:
+            oldest = db.execute(
+                "SELECT MIN(admitted_at) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at) > julianday(?) - 1",
+                (stamp,)).fetchone()[0]
+            if oldest:
+                jumps.append(datetime.fromisoformat(oldest) + timedelta(days=1, seconds=1))
+        future = [item for item in jumps if item > clock]
+        clock = min(future) if future else clock + timedelta(minutes=30)
+    else:
+        raise AssertionError("interleaved sim did not finish")
     store.backlog_breach(now=clock)
     pending = db.execute(
-        "SELECT article_id,published_at FROM marketdesk_pdf_queue "
+        "SELECT article_id, published_at FROM marketdesk_pdf_queue "
         "WHERE disposition='active' AND status='pending'").fetchall()
     limit = clock - timedelta(days=7)
-    aged = db.execute(
-        "SELECT COUNT(*) FROM marketdesk_pdf_queue WHERE disposition='exhausted' AND disposition_reason='aged_out'"
-    ).fetchone()[0]
-    assert pending
     assert all(datetime.fromisoformat(published) >= limit for _key, published in pending)
-    assert aged + len(pending) == 15 * 30
-    assert len(pending) <= 15 * 7
-    for day, ids in newest.items():
+    protected_status = db.execute(
+        "SELECT article_id, status, published_at FROM marketdesk_pdf_queue WHERE article_id IN ({})".format(
+            ",".join("?" for _ in protected)), tuple(protected)).fetchall()
+    assert {status for _key, status, _published in protected_status} == {"downloaded"}
+    ordinary_downloaded = {}
+    for day, keys in ordinary.items():
         rows = db.execute(
-            "SELECT article_id,status FROM marketdesk_pdf_queue WHERE article_id IN ({})".format(
-                ",".join("?" for _ in ids)), tuple(ids)).fetchall()
-        assert {status for _key, status in rows} == {"downloaded"}
-    report = {"days": 30, "per_day": 85, "cap": 70, "aged_out": aged, "pending": len(pending)}
+            "SELECT COUNT(*) FROM marketdesk_pdf_queue WHERE status='downloaded' AND article_id IN ({})".format(
+                ",".join("?" for _ in keys)), tuple(keys)).fetchone()[0]
+        ordinary_downloaded[day] = rows
+    # After the first day, the rolling 70 admits the 7 protected rows first and 63 of 78 ordinary.
+    # Day 0 has no protected backlog yet, so it keeps at least that many.
+    assert ordinary_downloaded[0] >= 63
+    assert [ordinary_downloaded[day] for day in range(1, 6)] == [63, 63, 63, 63, 63]
+    aged = db.execute(
+        "SELECT COUNT(*) FROM marketdesk_pdf_queue WHERE disposition_reason='aged_out'").fetchone()[0]
+    report = {
+        "days": days,
+        "ordinary_per_day": ordinary_per_day,
+        "protected_per_day": len(protected_spec),
+        "hourly_cap": 12,
+        "daily_cap": 70,
+        "admitted": admitted,
+        "protected_downloaded": len(protected),
+        "ordinary_downloaded_by_day": ordinary_downloaded,
+        "ordinary_steady_days_1_to_5": 63,
+        "aged_out": aged,
+        "pending": len(pending),
+    }
     path = Path("/opt/cursor/artifacts/marketdesk-pdf-age-sim.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2))

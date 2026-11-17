@@ -1,3 +1,10 @@
+# MarketDesk PDF protected claim tier (2026-11-17)
+
+- [x] T1 Preferred desk and book rows outrank ordinary research and do not age out while an ordinary in-window row is pending.
+- [x] T2 Interleaved sim: hourly cap 12, daily cap 70, all 84 protected downloaded, steady ordinary rate 63 of 78.
+- [x] T3 Health oldest_h uses published_at. Selection refresh skips exhausted rows.
+- [ ] T4 Push, CI green, PR body matches the sim, one Pushover. Do not merge.
+
 # MarketDesk PDF age retirement (2026-11-17)
 
 - [x] T1 depends_on: [] Failing tests: 8-day passing row retired and out of the health backlog; 6-day still claimed; same-tier newest first; seed and book change do not revive; filtered, file_missing, downloaded unchanged; env override.

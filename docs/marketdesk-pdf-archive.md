@@ -37,7 +37,8 @@ scope. Ambiguous relevance is excluded with an explicit reason rather than
 spending account allowance. No PDF or extra model call is needed for selection.
 
 At most 100 stale/new decisions are refreshed per timer cycle, using published
-source titles and feed text. The context hash changes with book/rules/policy;
+source titles and feed text. Exhausted rows, including `aged_out`, are not in
+that refresh. The context hash changes with book/rules/policy;
 post edits also invalidate selection. Claims require a current eligible
 selection, so old decisions cannot leak through during a refresh. Rejected
 rows do not block later batches and can become eligible after a book change.
@@ -57,8 +58,9 @@ While any priority row is unfinished, currently published with matching source,
 and selected by current PDF policy, ordinary rows cannot claim an account slot.
 A future retry or active lease reserves precedence without bypassing its deadline.
 Claim-time SQL rechecks priority, including a concurrent operator update. Within
-the cohort, the existing retry/publication/ID ordering remains. Finished or
-currently excluded/withdrawn priority rows do not block other permitted work;
+the cohort, `PDF_PREFERRED_DESK` and `PDF_BOOK_OR_WATCHLIST` outrank
+`PDF_MEASURED_MARKET_RESEARCH`, then the newest `published_at`, then article id.
+Finished or currently excluded/withdrawn priority rows do not block other permitted work;
 selection refresh processes stale priority rows first. Preference persists across
 restarts; completed membership is inert and needs no operator cleanup.
 
@@ -131,12 +133,14 @@ return if the book changes. Eight non-quota failures after `attempts_baseline` b
 `disposition=exhausted` and drop out of the backlog. Migration 0113 sets that
 baseline to the attempt count already on the row and restores any row already
 marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
-Quota errors refund the attempt. Within a priority tier the queue admits
-newest `published_at` first. The fresh/backlog lane no longer splits the day:
-with intake above the daily cap, half the slots were going to rows that age
-out, and a same-day report waited behind them. A download whose lease has
-already expired is still ahead of that order and is reclaimed on the next
-claim. When a clean cycle shortens the interval, the next admission moves
+Quota errors refund the attempt. Claim order is an expired download lease,
+then operator priority, then preferred-desk and book-or-watchlist ahead of
+ordinary measured research, then newest `published_at`. A download whose lease
+has already expired is still reclaimed on the next claim. Ordinary measured
+research older than the window is retired. A preferred-desk or book row older
+than the window stays while any ordinary passing row inside the window is
+still pending, and it is claimed ahead of that row. When a clean cycle
+shortens the interval, the next admission moves
 forward to that shorter interval; the hourly cap still bounds the burst.
 
 The archive uses the existing authenticated `/files/<id>/blob` operation,
@@ -180,8 +184,10 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 
 `marketdesk-pdf` uses a continuous 15-minute freshness window, maps to
 `radon-marketdesk-pdf.service`, and reports error during provider backoff.
-It flags the eligible active backlog when it is older than 24 hours or its
-depth is growing past 48 rows. The message is
+It flags the eligible active backlog when its oldest `published_at` is older
+than 24 hours or its depth is growing past 48 rows. `oldest_h` is that
+publication age, not `first_seen_at` (a backfill can first see an old report
+within the hour). The message is
 `PDF archive backlog: pending=N oldest_h=H growing=0|1 stalled=0|1`.
 A backlog that is still being admitted reports `warn`, which never pages
 (2026-11-17: 588 rows admitted oldest-first every ~48 min held the row red).
@@ -198,10 +204,13 @@ including an 18-download hour that did not trip. Treat the provider limit as
 about 74 previews per rolling 24 hours. Eligible weekday intake is 70 to 100.
 `MARKETDESK_PDF_DAILY_CAP=70` keeps admissions under the allowance, so a quota
 trip no longer doubles the interval. Passing rows older than
-`MARKETDESK_PDF_MAX_AGE_DAYS` (default 7) leave the active backlog, so the
-pending count is the reports still inside the window. Newest-first admission
-spends the 70 on the current day's reports. The rows that do not fit age out
-instead of blocking the next day.
+`MARKETDESK_PDF_MAX_AGE_DAYS` (default 7) leave the active backlog when they
+are ordinary measured research. Preferred-desk and book rows are admitted
+first and are not aged out while an ordinary row inside the window is still
+pending. With arrivals spread through the session, the hourly cap of 12 and
+the rolling 70 spend slots as rows arrive. In the interleaved sim that is 7
+protected rows and 63 of 78 ordinary rows on a steady day. The ordinary rows
+that do not fit age out. They do not block the next protected report.
 A normal admission wait with a young, stable queue is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
 deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.

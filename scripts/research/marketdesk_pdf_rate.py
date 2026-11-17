@@ -21,9 +21,10 @@ defaults to 400 admissions (MARKETDESK_PDF_DAILY_CAP, 0 disables it). A rolling
 stays under the pace that drew preview_quota on 2026-11-15. That 12 is a
 hypothesis, not a published allowance. At 12 an hour, 603 backlog rows plus
 190 new PDFs a day clear in about a week. With the hourly cap off, the 400/day
-cap still clears 1,275 plus 190 a day inside 7 days. Passing rows older than
+cap still clears 1,275 plus 190 a day inside 7 days. Ordinary passing rows older than
 MARKETDESK_PDF_MAX_AGE_DAYS (default 7, 0 off) retire instead of waiting
-for that drain, and admission within a priority tier is newest-published first. Quota signals, including
+for that drain. Preferred-desk and book rows are claimed ahead of ordinary
+measured research and stay while an ordinary row inside the window is pending. Quota signals, including
 HTTP 401/402/403 and an HTTP-date Retry-After, double the interval and reset
 the batch to 1. After that signal, every 4 clean cycles also halve the
 interval toward the floor, so 2100 seconds is back at the floor in under 6
