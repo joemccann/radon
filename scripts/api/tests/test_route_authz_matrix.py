@@ -190,16 +190,19 @@ class TestExemptPathsPinned:
         status (200, or a body-parse error for the POST ticket validator) is out
         of scope here."""
         if exempt_path == "/ws-ticket/validate":
-            # POST-only, and the handler ITSELF returns 401 for a bad ticket —
-            # indistinguishable by status from a perimeter denial. Mint a real
-            # ticket so a clean pass through both perimeter AND handler yields 200,
-            # which is unambiguous proof the route is exempt.
-            from api.ws_ticket import create_ticket
-
-            ticket = create_ticket("authz-matrix-probe")
-            response = untrusted_client.post(exempt_path, json={"ticket": ticket})
-        else:
-            response = untrusted_client.get(exempt_path)
+            # POST-only, and the handler ITSELF refuses a non-loopback caller
+            # with 401 (see test_ws_ticket_validate_local_only.py), which is
+            # indistinguishable by status from a perimeter denial. Prove the
+            # perimeter let the request through by asserting the HANDLER's own
+            # refusal reason, not the middleware's.
+            response = untrusted_client.post(exempt_path, json={"ticket": "probe"})
+            assert response.status_code == 401
+            assert response.json()["detail"] == "Ticket validation is internal only", (
+                f"{exempt_path} was denied before reaching its handler: "
+                f"{response.text}"
+            )
+            return
+        response = untrusted_client.get(exempt_path)
         assert response.status_code not in _DENIED_STATUSES, (
             f"{exempt_path} is in AUTH_EXEMPT_PATHS but an anonymous caller was "
             f"denied ({response.status_code}); the exemption is not taking effect."

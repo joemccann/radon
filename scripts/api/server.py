@@ -2191,8 +2191,17 @@ def _require_bounded_body(request: Request) -> None:
 
 @app.post("/ws-ticket/validate")
 async def validate_ws_ticket(request: Request):
-    """Validate a WebSocket ticket (called by the Node.js relay). Internal only."""
+    """Validate a WebSocket ticket (called by the Node.js relay). Internal only.
+
+    Auth-exempt because the loopback relay holds no user JWT, but the route is
+    still reachable through Caddy's `/api/ib/*` mount, so the handler applies
+    the trusted-local discipline itself (loopback peer, no forwarding headers,
+    no browser fetch metadata). The check runs BEFORE the ticket is consumed so
+    a refused caller cannot burn a pending upgrade.
+    """
     _require_bounded_body(request)
+    if not is_trusted_local_request(request):
+        raise HTTPException(status_code=401, detail="Ticket validation is internal only")
     body = await request.json()
     ticket = body.get("ticket", "")
     user_id = validate_ticket(ticket)
