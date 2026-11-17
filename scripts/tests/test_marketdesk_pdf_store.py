@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1] / "db/migrations"
 def db(monkeypatch):
     monkeypatch.setattr(store.policy, "load_context", lambda: store.policy.Context(frozenset(), {}))
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql", "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql"):
+    for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql", "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql", "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql", "0114_marketdesk_pdf_hourly_recovery.sql"):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
@@ -92,17 +92,21 @@ def test_receipt_success_does_not_clear_a_quota_embargo(db):
     assert after == (held[1], held[2])
 
 
-def test_suspension_doubles_the_interval_resets_the_batch_and_stops(db):
+@pytest.mark.parametrize("code", ["http_401", "http_402", "http_403", "unauthenticated"])
+def test_suspension_doubles_the_interval_resets_the_batch_and_stops(db, code):
     published(db, "XYZabc12345")
     published(db)
     store.enqueue(ref(), now=NOW)
     store.enqueue(ref("XYZabc12345"), now=NOW)
     work = store.claim_next(now=NOW)
-    store.retry(work, "http_401", now=NOW)
-    interval, batch, attempts = db.execute(
-        "SELECT t.interval_seconds, t.batch_size, q.attempts FROM marketdesk_pdf_throttle t, marketdesk_pdf_queue q "
-        "WHERE q.article_id=?", (work.article_id,)).fetchone()
-    assert interval == 1800 and batch == 1 and attempts == 0
+    store.retry(work, code, now=NOW)
+    interval, batch, attempts, account_due, armed = db.execute(
+        "SELECT t.interval_seconds, t.batch_size, q.attempts, t.next_attempt_at, t.recover_armed "
+        "FROM marketdesk_pdf_throttle t, marketdesk_pdf_queue q WHERE q.article_id=?",
+        (work.article_id,)).fetchone()
+    assert interval == 1800 and batch == 1 and attempts == 0 and armed == 1
+    row_due = db.execute("SELECT next_attempt_at FROM marketdesk_pdf_queue WHERE article_id=?", (work.article_id,)).fetchone()[0]
+    assert datetime.fromisoformat(row_due) >= datetime.fromisoformat(account_due) + timedelta(seconds=interval)
     assert store.claim_next(now=NOW + timedelta(seconds=1799)) is None
 
 
@@ -116,6 +120,147 @@ def test_attempts_from_before_the_cap_migration_are_not_exhausted(db):
     assert db.execute("SELECT status,disposition FROM marketdesk_pdf_queue").fetchone() == ("downloading", "active")
 
 
+def test_hourly_cap_is_inside_the_lease(db, monkeypatch):
+    monkeypatch.delenv("MARKETDESK_PDF_HOURLY_CAP", raising=False)
+    for i in range(6):
+        key = f"Hour{i:05d}"
+        published(db, key)
+        store.enqueue(ref(key), now=NOW)
+    db.execute("UPDATE marketdesk_pdf_throttle SET batch_size=6,interval_seconds=300")
+    for i in range(12):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"H{i:07d}", (NOW - timedelta(minutes=30)).isoformat()))
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0) == []
+    db.execute("UPDATE marketdesk_pdf_admissions SET admitted_at=?", ((NOW - timedelta(hours=2)).isoformat(),))
+    assert len(store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0, hourly_cap_value=12)) == 6
+
+
+def test_hourly_cap_clips_a_batch_to_the_remaining_slot(db):
+    for i in range(4):
+        key = f"Slot{i:05d}"
+        published(db, key)
+        store.enqueue(ref(key), now=NOW)
+    db.execute("UPDATE marketdesk_pdf_throttle SET batch_size=6,interval_seconds=300")
+    for i in range(11):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"S{i:07d}", NOW.isoformat()))
+    assert len(store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=400, hourly_cap_value=12)) == 1
+
+
+def test_hourly_cap_zero_does_not_block(db):
+    published(db)
+    store.enqueue(ref(), now=NOW)
+    for i in range(20):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"Z{i:07d}", NOW.isoformat()))
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0, hourly_cap_value=0)[0].article_id == ref().article_id
+
+
+def test_tighter_of_daily_and_hourly_room_wins(db):
+    for i in range(4):
+        key = f"Both{i:05d}"
+        published(db, key)
+        store.enqueue(ref(key), now=NOW)
+    db.execute("UPDATE marketdesk_pdf_throttle SET batch_size=6,interval_seconds=300")
+    for i in range(390):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"D{i:07d}", (NOW - timedelta(hours=3)).isoformat()))
+    for i in range(10):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
+                   (f"R{i:07d}", (NOW - timedelta(minutes=20)).isoformat()))
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=400, hourly_cap_value=12) == []
+    db.execute("DELETE FROM marketdesk_pdf_admissions WHERE article_id LIKE 'D%' AND rowid IN "
+               "(SELECT rowid FROM marketdesk_pdf_admissions WHERE article_id LIKE 'D%' LIMIT 5)")
+    assert len(store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=400, hourly_cap_value=12)) == 2
+
+
+def test_preview_quota_refunds_and_skips_that_row(db):
+    published(db)
+    published(db, "XYZabc12345")
+    store.enqueue(ref(), now=NOW)
+    store.enqueue(ref("XYZabc12345"), now=NOW)
+    work = store.claim_next(now=NOW)
+    store.retry(work, "preview_quota", now=NOW)
+    attempts, status, row_due = db.execute(
+        "SELECT attempts,status,next_attempt_at FROM marketdesk_pdf_queue WHERE article_id=?",
+        (work.article_id,)).fetchone()
+    account_due, interval, armed = db.execute(
+        "SELECT next_attempt_at,interval_seconds,recover_armed FROM marketdesk_pdf_throttle").fetchone()
+    assert attempts == 0 and status == "pending" and interval == 1800 and armed == 1
+    assert datetime.fromisoformat(row_due) >= datetime.fromisoformat(account_due) + timedelta(seconds=interval)
+    assert store.claim_next(now=datetime.fromisoformat(account_due) - timedelta(milliseconds=1)) is None
+    nxt = store.claim_next(now=datetime.fromisoformat(account_due))
+    assert nxt is not None and nxt.article_id != work.article_id
+
+
+def test_live_2100s_row_with_cleared_last_error_recovers_through_the_migration(monkeypatch):
+    """Production 2026-11-15 07:43 PT: 2100s, batch 1, credits 2, last_error NULL."""
+    import time
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    names = ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql",
+             "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql",
+             "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql",
+             "0113_marketdesk_pdf_safety_cap.sql")
+    for name in names:
+        conn.executescript((ROOT / name).read_text())
+    conn.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=2100,batch_size=1,success_credits=2,"
+        "quota_failures=0,last_error=NULL")
+    started = time.perf_counter()
+    conn.executescript((ROOT / "0114_marketdesk_pdf_hourly_recovery.sql").read_text())
+    elapsed_migration = time.perf_counter() - started
+    row = conn.execute(
+        "SELECT interval_seconds,batch_size,success_credits,quota_failures,last_error,recover_armed,recover_credits "
+        "FROM marketdesk_pdf_throttle").fetchone()
+    assert row == (2100, 1, 2, 0, None, 1, 0)
+    sql = (ROOT / "0114_marketdesk_pdf_hourly_recovery.sql").read_text()
+    assert "marketdesk_pdf_queue" not in sql
+    assert sql.count("ALTER TABLE") == 2
+    assert elapsed_migration < 1.0
+    monkeypatch.setattr(store.policy, "load_context", lambda: store.policy.Context(frozenset(), {}))
+
+    def execute(statement, args=(), **kwargs):
+        return [tuple(item) for item in conn.execute(statement, args).fetchall()]
+
+    def transaction(statements):
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement, args in statements:
+                conn.execute(statement, args)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_transaction", transaction)
+    waited = 0
+    while True:
+        interval = conn.execute("SELECT interval_seconds FROM marketdesk_pdf_throttle").fetchone()[0]
+        if interval <= 300:
+            break
+        waited += interval
+        store.note_success(now=NOW)
+        assert waited < 6 * 3600
+    assert conn.execute("SELECT interval_seconds,recover_armed FROM marketdesk_pdf_throttle").fetchone() == (300, 0)
+    assert waited < 6 * 3600
+    conn.close()
+
+
+def test_recovery_migration_leaves_the_900s_ramp_unarmed(db):
+    assert db.execute(
+        "SELECT interval_seconds,recover_armed,last_error FROM marketdesk_pdf_throttle").fetchone() == (900, 0, None)
+
+
+def test_four_clean_cycles_halve_a_backed_off_interval(db):
+    db.execute("UPDATE marketdesk_pdf_throttle SET interval_seconds=2100,batch_size=1,recover_armed=1,recover_credits=0")
+    for expected in (2070, 2040, 2010):
+        store.note_success(now=NOW)
+        assert db.execute("SELECT interval_seconds,recover_armed FROM marketdesk_pdf_throttle").fetchone() == (expected, 1)
+    store.note_success(now=NOW)
+    assert db.execute("SELECT interval_seconds,recover_armed FROM marketdesk_pdf_throttle").fetchone() == (990, 1)
+
+
 def test_rolling_cap_is_inside_the_lease(db):
     published(db)
     store.enqueue(ref(), now=NOW)
@@ -123,7 +268,7 @@ def test_rolling_cap_is_inside_the_lease(db):
         db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)",
                    (f"A{i:07d}", NOW.isoformat()))
     assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=400) == []
-    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0)[0].article_id == ref().article_id
+    assert store.claim_batch(now=NOW, jitter_bps=0, daily_cap_value=0, hourly_cap_value=0)[0].article_id == ref().article_id
 
 
 def test_provider_backoff_is_global_and_does_not_retire_backlog(db):
@@ -132,9 +277,16 @@ def test_provider_backoff_is_global_and_does_not_retire_backlog(db):
     store.enqueue(ref(), now=NOW)
     store.enqueue(ref("XYZabc12345"), now=NOW)
     work = store.claim_next(now=NOW, interval_seconds=300)
-    store.retry(work, "download_quota", now=NOW, retry_after=21600)
-    assert store.claim_next(now=NOW + timedelta(seconds=21599), interval_seconds=300) is None
-    assert store.claim_next(now=NOW + timedelta(seconds=21600), interval_seconds=300) is not None
+    store.retry(work, "download_quota", now=NOW, retry_after=21600, suspension=True)
+    account_due = datetime.fromisoformat(db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
+    row_due = datetime.fromisoformat(db.execute(
+        "SELECT next_attempt_at FROM marketdesk_pdf_queue WHERE article_id=?", (work.article_id,)).fetchone()[0])
+    assert account_due == NOW + timedelta(seconds=21600)
+    assert row_due >= account_due + timedelta(seconds=1800)
+    assert db.execute("SELECT attempts FROM marketdesk_pdf_queue WHERE article_id=?", (work.article_id,)).fetchone() == (0,)
+    assert store.claim_next(now=account_due - timedelta(milliseconds=1), interval_seconds=300) is None
+    nxt = store.claim_next(now=account_due, interval_seconds=300)
+    assert nxt is not None and nxt.article_id != work.article_id
 
 
 @pytest.mark.parametrize("failed_table", ["marketdesk_pdf_throttle", "marketdesk_pdf_queue"])
@@ -355,8 +507,9 @@ def test_quota_escalation_is_account_wide_capped_and_atomic(db, code):
         account = db.execute("SELECT next_attempt_at,quota_failures,last_error FROM marketdesk_pdf_throttle").fetchone()
         assert datetime.fromisoformat(account[0]) == deadline
         assert account[1] <= 3 and account[2] == code
-        item = db.execute("SELECT next_attempt_at FROM marketdesk_pdf_queue WHERE article_id=?", (work.article_id,)).fetchone()
-        assert item[0] == account[0]
+        item = db.execute("SELECT next_attempt_at,attempts FROM marketdesk_pdf_queue WHERE article_id=?", (work.article_id,)).fetchone()
+        assert datetime.fromisoformat(item[0]) >= deadline + timedelta(seconds=interval)
+        assert item[1] == 0
         assert store.claim_next(now=deadline-timedelta(milliseconds=1)) is None
         current = deadline
 
@@ -572,9 +725,15 @@ def test_priority_still_obeys_account_backoff_and_token_lease(db):
     _, priority = priority_pair(db)
     store.prioritize([priority])
     first = store.claim_next(now=NOW)
+    assert first.article_id == priority
     store.retry(first, 'preview_quota', now=NOW)
-    assert store.claim_next(now=NOW + timedelta(seconds=1799)) is None
-    new = store.claim_next(now=NOW + timedelta(seconds=1800))
+    assert db.execute('SELECT attempts FROM marketdesk_pdf_queue WHERE article_id=?', (priority,)).fetchone() == (0,)
+    cooled = datetime.fromisoformat(db.execute(
+        'SELECT next_attempt_at FROM marketdesk_pdf_queue WHERE article_id=?', (priority,)).fetchone()[0])
+    assert cooled >= NOW + timedelta(seconds=3600)
+    # Account opens at 1800s. This file is still cooling, and it still reserves the slot.
+    assert store.claim_next(now=NOW + timedelta(seconds=1800)) is None
+    new = store.claim_next(now=cooled)
     assert new.article_id == priority and new.token != first.token
     assert not store.record_download(first, store.ASSET_BASE+'b'*64+'.pdf', 'b'*64)
 
