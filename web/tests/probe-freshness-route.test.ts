@@ -26,11 +26,34 @@ type RowMap = {
   vcg?: string | null;
   gex?: string | null;
   journal?: string | null;
+  /** null = both pipeline rows absent. undefined = healthy defaults. */
+  pipeline?: Array<Record<string, unknown>> | null;
 };
 
-function dbStub({ relay, vcg, gex, journal }: RowMap) {
+function defaultPipeline(): Array<Record<string, unknown>> {
+  return [
+    {
+      service: "journal-sync",
+      state: "ok",
+      last_error: null,
+      updated_at: iso(OPEN_NOW - 30_000),
+    },
+    {
+      service: "journal-gap-sli",
+      state: "ok",
+      last_error: JSON.stringify({ missing_exec_id_count: 0, window_days: 7 }),
+      updated_at: iso(OPEN_NOW - 60_000),
+    },
+  ];
+}
+
+function dbStub({ relay, vcg, gex, journal, pipeline }: RowMap) {
+  const pipelineRows = pipeline === null ? [] : (pipeline ?? defaultPipeline());
   return {
     execute: vi.fn(async ({ sql }: { sql: string }) => {
+      if (sql.includes("journal-sync") || sql.includes("journal-gap-sli")) {
+        return { rows: pipelineRows };
+      }
       if (sql.includes("service_health")) return { rows: relay ? [relay] : [] };
       if (sql.includes("vcg_snapshots")) return { rows: [{ scan_time: vcg ?? null }] };
       if (sql.includes("gex_snapshots")) return { rows: [{ scan_time: gex ?? null }] };
@@ -108,9 +131,141 @@ describe("/api/probe/freshness", () => {
     expect(body.checks.gex_scan.applicable).toBe(true);
     expect(body.checks.gex_scan.fresh).toBe(true);
     expect(body.checks.journal).toEqual({ applicable: true, age_secs: 3600, fresh: true });
+    expect(body.journal_last_fill).toEqual({ age_secs: 3600, warning: null });
     expect(body.all_fresh).toBe(true);
+    const sqls = mockGetDb.mock.results[0]?.value.execute.mock.calls.map(
+      (call: [{ sql: string }]) => call[0].sql,
+    );
+    expect(sqls.some((sql: string) => sql.includes("journal-sync") && sql.includes("journal-gap-sli"))).toBe(true);
+    expect(sqls.some((sql: string) => sql.includes("service_health_events") && sql.includes("not_ok_since"))).toBe(true);
+    expect(body.journal_gap_warning).toBeNull();
     expect(body.database_ok).toBe(true);
     expect(body.database_failures).toEqual([]);
+  });
+
+  it("RTH quiet book: no fills for 5 days, healthy pipeline, all_fresh=true", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      journal: iso(OPEN_NOW - 5 * 24 * 3_600_000),
+    }));
+
+    const res = await callRoute();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.checks.journal.fresh).toBe(true);
+    expect(body.checks.journal.age_secs).toBe(5 * 24 * 3_600);
+    expect(body.all_fresh).toBe(true);
+    expect(body.journal_last_fill.warning).toBe(
+      "last fill is older than 3 days; journal freshness follows pipeline liveness",
+    );
+    expect(body.database_ok).toBe(true);
+  });
+
+  it("RTH one-cycle journal-sync error stays fresh", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "error",
+          last_error: "IB connect failed",
+          updated_at: iso(OPEN_NOW - 30_000),
+          not_ok_since: iso(OPEN_NOW - 30_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "ok",
+          last_error: JSON.stringify({ missing_exec_id_count: 0 }),
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(true);
+    expect(body.all_fresh).toBe(true);
+    expect(body.journal_gap_warning).toBeNull();
+  });
+
+  it("RTH gap-sli self-error warns and stays fresh", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "ok",
+          last_error: null,
+          updated_at: iso(OPEN_NOW - 30_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "error",
+          last_error: "Hrana: api error 404 stream not found",
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(true);
+    expect(body.all_fresh).toBe(true);
+    expect(body.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
+  });
+
+  it("RTH stale journal-sync heartbeat: all_fresh=false", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "ok",
+          last_error: null,
+          updated_at: iso(OPEN_NOW - 11 * 60_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "ok",
+          last_error: JSON.stringify({ missing_exec_id_count: 0 }),
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(false);
+    expect(body.all_fresh).toBe(false);
+  });
+
+  it("RTH gap-sli missing_exec_id_count>0: all_fresh=false", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "ok",
+          last_error: null,
+          updated_at: iso(OPEN_NOW - 30_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "error",
+          last_error: JSON.stringify({ missing_exec_id_count: 2, window_days: 7 }),
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(false);
+    expect(body.all_fresh).toBe(false);
   });
 
   it("RTH with a stale vcg scan: all_fresh=false, still 200", async () => {
