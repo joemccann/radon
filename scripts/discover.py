@@ -67,6 +67,13 @@ def is_market_open(date: datetime) -> bool:
 # Scoring only needs direction, not the full 20k-print tape.
 # evaluate.py still walks DARKPOOL_MAX_PAGES (40).
 DISCOVER_DARKPOOL_MAX_PAGES = 2
+# Market-wide dark-pool scoring set, strongest flow first. The governor
+# admits 96 standard requests a minute (120 RPM x 0.8), shared with the
+# scanner and flow-analysis POSTs that run just before discover. A full
+# options-flow tape is ~25 pages; 25 tickers x today's 2 pages (prior
+# sessions are disk-cached) fits one window. 127 tickers did not: the
+# 2026-10-29 run skipped 111 of 112 on admission and published nothing.
+DISCOVER_MAX_SCORED_TICKERS = 25
 
 # Scoring weights (must sum to 100)
 WEIGHTS = {
@@ -586,6 +593,8 @@ DISCOVER_POST_BUDGET_S = (
     DISCOVER_CURL_BUDGET_S - DISCOVER_INFLIGHT_PAGE_S - DISCOVER_RESPONSE_MARGIN_S
 )
 _OPTIONS_FLOW_ADMISSION_POLL_S = 8.0
+# Another worker can take the slot a window opened. Never spin on 0s.
+_DARKPOOL_ADMISSION_MIN_WAIT_S = 1.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
 # The wrapper sheds HTTP 400 only when the body carries this exact phrase.
 # Quota exhaustion and a multi-hour embargo keep the hard provider error.
@@ -601,7 +610,13 @@ _QUOTA_MARKERS = (
 
 
 def _governor_embargo_remaining() -> float | None:
-    """Seconds until the shared UW embargo lifts. None when the ledger is unreadable."""
+    """Seconds until shared UW admission reopens. None when the ledger is unreadable.
+
+    Two refusals have no other end time: a provider embargo and a full
+    minute window. A full window with an expired embargo used to read as
+    0s, so the one admission wait never ran and every hourly discover shed
+    (2026-10-21..11-13).
+    """
     try:
         from utils import uw_governor
         snap = uw_governor.snapshot(None)
@@ -612,7 +627,11 @@ def _governor_embargo_remaining() -> float | None:
     embargo = snap.get("embargo_until")
     if isinstance(embargo, bool) or not isinstance(embargo, (int, float)):
         return None
-    remaining = float(embargo) - time.time()
+    reopens = float(embargo)
+    window = snap.get("minute_window_clears_at")
+    if isinstance(window, (int, float)) and not isinstance(window, bool):
+        reopens = max(reopens, float(window))
+    remaining = reopens - time.time()
     if remaining != remaining:  # NaN
         return None
     return max(0.0, remaining)
@@ -715,6 +734,37 @@ def _fetch_options_flow_after_admission(
             time.sleep(delay)
 
 
+def _fetch_darkpool_after_admission(
+    ticker: str, *, client, dp_days: int, dp_pages: int, deadline: float,
+) -> dict:
+    """Score one ticker's dark pool, waiting out short admission refusals.
+
+    The top of the hour fills the governor's standard minute window before
+    discover reaches its dark-pool phase. A walk that gives up after the 5s
+    admission wait skips the ticker, and one skip keeps the scan unpublished
+    (2026-11-16 20:01Z: 11 of 25 skipped). Wait for the window while the post
+    budget allows a full sleep; past that the refusal stands.
+    """
+    while True:
+        try:
+            return fetch_darkpool_multi(
+                ticker,
+                days=dp_days,
+                _client=client,
+                max_pages=dp_pages,
+                deadline=deadline,
+                retry_transient=False,
+            )
+        except UWRateLimitError as exc:
+            delay = _admission_retry_delay(exc)
+            if delay is None:
+                raise
+            delay = max(delay, _DARKPOOL_ADMISSION_MIN_WAIT_S)
+            if time.monotonic() + delay >= deadline:
+                raise
+            time.sleep(delay)
+
+
 def discover(min_premium: int = 500000, min_alerts: int = 1,
              dp_days: int = 3, exclude_indices: bool = True,
              tickers: list = None, top: int = 20,
@@ -790,6 +840,10 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
             and all_flow[t]["alerts"] >= min_alerts
             and not (exclude_indices and t in index_symbols)
         ]
+        tickers_to_check = sorted(
+            tickers_to_check,
+            key=lambda t: (-all_flow[t]["alerts"], -all_flow[t]["total_premium"], t),
+        )[:DISCOVER_MAX_SCORED_TICKERS]
 
         print(f"  Checking {len(tickers_to_check)} candidates with DP data ({dp_days} days)...", file=sys.stderr)
 
@@ -804,13 +858,12 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
             # instead of opening another UW walk.
             if time.monotonic() >= deadline:
                 return None
-            dp = fetch_darkpool_multi(
+            dp = _fetch_darkpool_after_admission(
                 ticker,
-                days=dp_days,
-                _client=client,
-                max_pages=dp_pages,
+                client=client,
+                dp_days=dp_days,
+                dp_pages=dp_pages,
                 deadline=deadline,
-                retry_transient=False,
             )
             return _build_candidate(ticker, all_flow[ticker], dp)
 
@@ -916,7 +969,50 @@ def main():
             run_alerts_for_results(result.get("candidates", []))
         except Exception:  # pragma: no cover — alerts never break discovery
             pass
+    else:
+        _record_unpublished_health(result)
     print(json.dumps(result, indent=2))
+
+
+def _record_unpublished_health(result: dict) -> None:
+    """Name an unpublished run in discover's own service_health row.
+
+    The mirror is the row's only other writer and it skips shed and degraded
+    runs, so 24 days of sheds read as "discover silent for 24d" with no
+    reason (2026-10-21..11-14). Best-effort: never fails the scan.
+    """
+    failures = result.get("provider_failures") or []
+    if result.get("error"):
+        message = str(result["error"])
+    else:
+        message = (
+            f"discover degraded: {len(failures)} provider fetch(es) skipped; "
+            "scan not published"
+        )
+    try:
+        from db import writer
+        writer.record_service_health(
+            "discover",
+            "error",
+            error={
+                "message": message,
+                "class": "discover",
+                "skipped": len(failures),
+                "candidates_found": result.get("candidates_found", 0),
+                "provider_failures": _failure_kinds(failures),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — health is best-effort
+        print(f"[discover] service_health write skipped: {exc}", file=sys.stderr)
+
+
+def _failure_kinds(failures: list) -> list:
+    """Which UW call failed and how, without tickers or response text."""
+    kinds = {(f.get("operation", ""), f.get("error_type", "")) for f in failures}
+    return [
+        {"operation": operation, "error_type": error_type}
+        for operation, error_type in sorted(kinds, key=lambda k: (k[1], k[0]))
+    ]
 
 
 if __name__ == "__main__":

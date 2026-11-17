@@ -419,6 +419,7 @@ write_prestage() {{ event prestage; }}
 load_prestage() {{ return 1; }}
 prepull_app_images() {{ event image-pull; }}
 preflight_database() {{ event database-preflight; }}
+apply_target_migrations() {{ event migrate; }}
 restart_services() {{ event restart; }}
 deploy_gate() {{ event gate; }}
 write_transition_phase() {{ event transition-phase; }}

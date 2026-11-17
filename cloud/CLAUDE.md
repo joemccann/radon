@@ -141,8 +141,10 @@ and manifest-pinned. Normal green deployment installs and enables them at
 `*:02/5:17`, independently of article publication. The Python container runs
 as the application UID with a private research bind and an allowlist limited
 to Turso and MarketDesk login, without model, broker or Dropbox grants.
-Migration 0103 supplies the durable queue and global minimum 300-second
-admission interval; provider refusal persists a one-hour embargo. Deployment
+Migration 0103 supplies the durable queue. Migration 0113 resets the live
+admission row to 900 seconds and batch 1 so the controller ramps, with a
+rolling cap of 400 PDFs per 24 hours (`MARKETDESK_PDF_DAILY_CAP`, 0 off).
+Provider quota doubles the interval and resets the batch to 1. Deployment
 rollback restores the installed unit/drop-in state. See
 [archive operations](../docs/marketdesk-pdf-archive.md).
 
@@ -467,7 +469,11 @@ push or every deploy step fails the handshake. The deploy job:
    `cloud/tests/test_deploy_corrections.py::TestFrozenArtifacts`. The parallel prepull job is an optimization; deploy
    still requires the exact-SHA app image pair locally before teardown and
    refuses if its pull fails. A bounded database preflight also refuses teardown
-   when Turso does not answer, leaving the current release serving.
+   when Turso does not answer, leaving the current release serving. Then
+   `apply_target_migrations` runs the staged release's `migrate.py` under
+   `RADON_DEPLOY_MIGRATE_TIMEOUT` (300s) and refuses teardown on failure, so
+   radon-api's 20s boot apply finds nothing pending (0112 outran it and rolled
+   back two deploys, 2026-11-14). Automatic migrations must be additive.
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.

@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -139,8 +140,10 @@ class RefreshManager:
                 fleet = "error"
             if fleet is not None:
                 try:
+                    pairs = [(row["provider"], row["state"]) for row in results]
                     tokens.record_heartbeat(tokens.SERVICE_NAME, fleet,
-                                            error=None if fleet == "ok" else {"message": "Model credentials require attention"})
+                                            finished_at=datetime.now(timezone.utc).isoformat(),
+                                            error=None if fleet == "ok" else tokens.fleet_error(pairs))
                 except Exception:
                     code = code or 1
         except Exception:

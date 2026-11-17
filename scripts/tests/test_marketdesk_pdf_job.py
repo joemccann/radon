@@ -110,7 +110,7 @@ def test_preview_quota_download_exits_zero_after_durable_retry(tmp_path, monkeyp
     monkeypatch.setattr(job, "default_deps", lambda: dependency)
     assert job.main([]) == 0
     assert dependency.store.retries[0][0] == "preview_quota"
-    assert dependency.store.retries[0][1]["backoff_seconds"] >= 21600
+    assert dependency.store.retries[0][1]["backoff_seconds"] == 900
     assert not dependency.store.downloads
 
 
@@ -150,7 +150,7 @@ def test_http_500_download_exits_zero_after_durable_retry(tmp_path, monkeypatch)
     assert not dependency.store.downloads
 
 
-@pytest.mark.parametrize("code", ["not_pdf", "http_transport", "unauthenticated", "http_404"])
+@pytest.mark.parametrize("code", ["not_pdf", "unauthenticated", "http_404"])
 def test_non_allowance_deferral_still_fails_the_oneshot(tmp_path, monkeypatch, code):
     dependency = deps(tmp_path)
     dependency.store.work = None
@@ -228,7 +228,7 @@ def test_runtime_error_chained_from_timeout_still_fails_the_oneshot(tmp_path, mo
     assert job.main([]) == 1
 
 
-@pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429", "http_transport"])
+@pytest.mark.parametrize("code", ["download_quota", "preview_quota", "http_429"])
 def test_provider_failure_backoff_is_visible_and_durable(tmp_path, code):
     def fail(session, key):
         raise MarketDeskError(code)
@@ -353,10 +353,10 @@ def test_sigkill_at_each_ack_boundary_resumes_without_second_download(tmp_path, 
     assert json.loads(wal[0])["asset"].endswith(".pdf")
 
 
-@pytest.mark.parametrize("value", [None, "300", "1", "garbage", "1800"])
-def test_archive_interval_is_conservative_even_with_old_configuration(value):
+@pytest.mark.parametrize("value,expected", [(None, 300), ("300", 300), ("1", 300), ("garbage", 300), ("1800", 1800), ("900", 900)])
+def test_min_interval_env_is_a_floor(value, expected):
     env = {} if value is None else {"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}
-    assert job._interval(env) == 1800
+    assert job._interval(env) == expected
 
 
 @pytest.mark.parametrize("code", ["preview_quota", "download_quota", "http_429"])
@@ -366,7 +366,7 @@ def test_account_limit_refusals_request_at_least_six_hour_backoff(tmp_path, code
     dependency = deps(tmp_path, download=fail)
     with pytest.raises(job.DownloadDeferred):
         job.run_cycle(env={}, deps=dependency)
-    assert dependency.store.retries[0][1]["backoff_seconds"] == 21600
+    assert dependency.store.retries[0][1]["backoff_seconds"] == 900
 
 
 def test_exhausted_account_is_checked_before_any_pdf_request():
@@ -379,9 +379,9 @@ def test_exhausted_account_is_checked_before_any_pdf_request():
         job.download_pdf(Session(), "ABCdef12345")
 
 
-@pytest.mark.parametrize("value", ["3600", "999999"])
-def test_operator_can_only_slow_archive_pacing_further(value):
-    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == min(int(value),86400)
+@pytest.mark.parametrize("value,expected", [("3600", 3600), ("999999", 86400)])
+def test_min_interval_env_cannot_exceed_the_ceiling(value, expected):
+    assert job._interval({"MARKETDESK_PDF_MIN_INTERVAL_SECONDS": value}) == expected
 
 
 def test_missing_book_context_never_authenticates_or_downloads(tmp_path):
@@ -462,7 +462,7 @@ def test_command_exit_and_sanitized_errors_restore_signal_handler(monkeypatch, c
     previous = signal.getsignal(signal.SIGTERM)
     def run():
         if outcome == "deferred":
-            raise job.DownloadDeferred('PDF archive deferred: http_transport')
+            raise job.DownloadDeferred('PDF archive deferred: not_pdf')
         if outcome == "unexpected":
             raise RuntimeError('signed private secret')
         if outcome == "terminated":
@@ -473,3 +473,46 @@ def test_command_exit_and_sanitized_errors_restore_signal_handler(monkeypatch, c
     assert signal.getsignal(signal.SIGTERM) == previous
     out = capsys.readouterr()
     assert 'signed private secret' not in out.err + out.out
+
+
+def test_file_missing_retires_the_item_without_an_error_row_or_failed_oneshot(tmp_path, monkeypatch, capsys):
+    """marketdesk.ai answers 500 "Cannot read properties of null (reading 'path')" for a file it has
+    no bytes for. That is terminal for the item, not a provider outage: no deferral, no error row."""
+    recorded = []
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        try:
+            yield SimpleNamespace(finished_at=None)
+        except BaseException as exc:
+            recorded.append(str(exc))
+            raise
+
+    def fail(session, key):
+        raise MarketDeskError("file_missing")
+
+    dependency = deps(tmp_path, download=fail)
+    dependency.service_cycle = recording
+    dependency.store.blocked = lambda: None
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert recorded == []
+    assert dependency.store.retries[0][0] == "file_missing"
+    assert not dependency.store.downloads
+    assert "ABCdef12345 retired: file_missing" in capsys.readouterr().err
+
+
+def test_file_missing_does_not_hide_a_real_failure_in_the_same_batch(tmp_path):
+    class Batch(Queue):
+        def claim_batch(self, **kwargs):
+            return [SimpleNamespace(article_id="ABCdef12345", token="a"),
+                    SimpleNamespace(article_id="XYZabc12345", token="b")]
+
+    def fail(session, key):
+        raise MarketDeskError("file_missing" if key == "ABCdef12345" else "not_pdf")
+
+    dependency = deps(tmp_path, download=fail)
+    dependency.store = Batch()
+    with pytest.raises(job.DownloadDeferred, match="not_pdf"):
+        job.run_cycle(env={}, deps=dependency)
+    assert [code for code, _ in dependency.store.retries] == ["file_missing", "not_pdf"]

@@ -791,3 +791,142 @@ def test_rel108_library_main_requires_explicit_target_arguments(migrate_module, 
     with pytest.raises(SystemExit, match="explicit"):
         migrate_module.main()
     assert selected == [], "target selection must not occur for an ambiguous library call"
+
+
+def test_automatic_migrations_are_additive(migrate_module):
+    """deploy.sh applies migrations BEFORE teardown, so the serving release
+    runs on the new schema until promotion (and after any rollback). A
+    destructive statement breaks that release; it must be a manual file."""
+    import re
+
+    destructive = re.compile(r"\b(DROP\s+(TABLE|COLUMN|VIEW)|RENAME)\b", re.IGNORECASE)
+    offenders = [
+        name
+        for _version, name, path in migrate_module._list_migrations()
+        if not migrate_module._is_manual_migration(sql := path.read_text(encoding="utf-8"))
+        and any(destructive.search(stmt) for stmt in migrate_module._split_statements(sql))
+    ]
+    assert offenders == []
+
+
+STREAM_EXPIRED = ValueError(
+    'Hrana: api error: status=404 Not Found, '
+    'body={"error":"stream not found: 4ee1d1c0"}'
+)
+
+
+class _ExpiringStream:
+    """A connection whose Hrana stream dies on one statement, as on
+    2026-11-14 (0112): every later call on it fails the same way."""
+
+    def __init__(self, path: Path, fail_on: str | None):
+        import sqlite3
+
+        self.raw = sqlite3.connect(str(path))
+        self.fail_on = fail_on
+        self.dead = False
+
+    def execute(self, sql, params=()):
+        if self.dead or (self.fail_on and self.fail_on in sql):
+            self.dead = True
+            raise STREAM_EXPIRED
+        return self.raw.execute(sql, params)
+
+    def commit(self):
+        if self.dead:
+            raise STREAM_EXPIRED
+        return self.raw.commit()
+
+    def close(self):
+        self.raw.close()
+
+
+class TestStreamExpiryMidMigration:
+    """2026-11-14: a 10-statement ALTER file lost its Hrana stream mid-file
+    (`stream not found`), migrate exited 75, radon-api never started and the
+    deploy rolled back. A transport error inside a file reconnects and replays
+    that file; already-applied statements are skipped (R-153)."""
+
+    def _migrations(self, migrate_module, monkeypatch, tmp_path, sql: str):
+        d = tmp_path / "migrations"
+        d.mkdir()
+        (d / "0001_rate.sql").write_text(sql)
+        monkeypatch.setattr(migrate_module, "MIGRATIONS_DIR", d)
+        return tmp_path / "turso.db"
+
+    def _connector(self, migrate_module, monkeypatch, db_path, fail_on, *, every=False):
+        conns: list[_ExpiringStream] = []
+
+        def connect(*_a):
+            conn = _ExpiringStream(db_path, fail_on if (every or not conns) else None)
+            conn.raw.execute(migrate_module._BOOTSTRAP_SQL)
+            conn.raw.commit()
+            conns.append(conn)
+            return conn
+
+        monkeypatch.setattr(migrate_module, "_connect_with_retry", connect)
+        return conns
+
+    def test_stream_not_found_mid_file_reconnects_and_finishes(
+        self, migrate_module, monkeypatch, tmp_path, recorded_sleeps
+    ):
+        import sqlite3
+
+        db_path = self._migrations(
+            migrate_module, monkeypatch, tmp_path,
+            "CREATE TABLE IF NOT EXISTS q (id INTEGER PRIMARY KEY);\n"
+            "ALTER TABLE q ADD COLUMN a INTEGER;\n"
+            "ALTER TABLE q ADD COLUMN b INTEGER;\n"
+            "ALTER TABLE q ADD COLUMN c INTEGER;\n",
+        )
+        conns = self._connector(migrate_module, monkeypatch, db_path, "ADD COLUMN b")
+
+        migrate_module._migrate(MagicMock(), "libsql://x", "tok", "prod")
+
+        assert len(conns) == 2, "the dead stream was not replaced"
+        assert recorded_sleeps == [2]
+        check = sqlite3.connect(str(db_path))
+        columns = {row[1] for row in check.execute("PRAGMA table_info(q)")}
+        assert {"a", "b", "c"} <= columns
+        assert check.execute("SELECT version FROM schema_migrations").fetchall() == [(1,)]
+        assert check.execute("SELECT COUNT(*) FROM schema_migrations_lock").fetchone() == (0,), (
+            "the lock was released on the dead stream instead of the live one"
+        )
+
+    def test_a_stream_that_never_recovers_still_exits_unreachable(
+        self, migrate_module, monkeypatch, tmp_path, recorded_sleeps
+    ):
+        import sqlite3
+
+        db_path = self._migrations(
+            migrate_module, monkeypatch, tmp_path,
+            "CREATE TABLE IF NOT EXISTS x (id INTEGER);\n",
+        )
+        conns = self._connector(
+            migrate_module, monkeypatch, db_path, "CREATE TABLE IF NOT EXISTS x", every=True
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            migrate_module._unless_unreachable(
+                lambda: migrate_module._migrate(MagicMock(), "libsql://x", "tok", "prod")
+            )
+
+        assert exc.value.code == migrate_module.EXIT_DATABASE_UNREACHABLE
+        assert recorded_sleeps == [2, 5, 15]
+        assert len(conns) == 4
+        check = sqlite3.connect(str(db_path))
+        assert check.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (0,)
+
+    def test_sql_error_mid_file_is_not_retried(
+        self, migrate_module, monkeypatch, tmp_path, recorded_sleeps
+    ):
+        db_path = self._migrations(
+            migrate_module, monkeypatch, tmp_path, "CREATE TABLEX nope (id INTEGER);\n"
+        )
+        conns = self._connector(migrate_module, monkeypatch, db_path, None)
+
+        with pytest.raises(Exception, match="syntax error"):
+            migrate_module._migrate(MagicMock(), "libsql://x", "tok", "prod")
+
+        assert len(conns) == 1
+        assert recorded_sleeps == []

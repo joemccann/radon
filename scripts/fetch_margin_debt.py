@@ -80,21 +80,42 @@ def _cell_column(ref: Optional[str]) -> Optional[str]:
     return letters or None
 
 
-def _cell_value(cell: ElementTree.Element) -> Optional[str]:
-    if cell.get("t") == "inlineStr":
+def _shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+    except KeyError:
+        return []
+    # A rich-text <si> splits its text across several <r><t> runs.
+    return [
+        "".join(t.text or "" for t in si.iter(f"{{{_SHEET_NS['m']}}}t"))
+        for si in root.findall("m:si", _SHEET_NS)
+    ]
+
+
+def _cell_value(cell: ElementTree.Element, shared: list[str]) -> Optional[str]:
+    kind = cell.get("t")
+    if kind == "inlineStr":
         return cell.findtext("m:is/m:t", None, _SHEET_NS)
-    return cell.findtext("m:v", None, _SHEET_NS)
+    value = cell.findtext("m:v", None, _SHEET_NS)
+    if kind == "s" and value is not None:
+        try:
+            return shared[int(value)]
+        except (ValueError, IndexError):
+            return None
+    return value
 
 
 def parse_margin_xlsx(data: bytes) -> list[dict[str, Any]]:
     """Parse the FINRA margin-statistics workbook into ascending month rows.
 
-    The sheet stores strings as inlineStr (no sharedStrings part) and some
-    rows omit trailing cells, so cells are mapped by their r= column
-    reference. Levels are $ millions, dates already YYYY-MM.
+    Strings arrive either inline (inlineStr, the 2021-2026 file) or through
+    xl/sharedStrings.xml (t="s", FINRA's 2026-11-13 re-save). Some rows omit
+    trailing cells, so cells are mapped by their r= column reference.
+    Levels are $ millions, dates already YYYY-MM.
     """
     with zipfile.ZipFile(BytesIO(data)) as archive:
         sheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        shared = _shared_strings(archive)
 
     rows: list[dict[str, Any]] = []
     for sheet_row in sheet.findall(".//m:sheetData/m:row", _SHEET_NS):
@@ -102,7 +123,7 @@ def parse_margin_xlsx(data: bytes) -> list[dict[str, Any]]:
         for cell in sheet_row.findall("m:c", _SHEET_NS):
             name = _XLSX_COLUMNS.get(_cell_column(cell.get("r")) or "")
             if name:
-                raw[name] = _cell_value(cell)
+                raw[name] = _cell_value(cell, shared)
         date = raw.get("date")
         if not date or not _MONTH_KEY_RE.match(date):
             continue  # header / malformed row

@@ -196,6 +196,8 @@ to bypass a control-plane mismatch.
 
 Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-class Turso failures (Hrana / dns / timeout / connection) with 2s/5s/15s backoff before failing startup — a transient DNS blip hard-failed radon-api on 2026-06-12. SQL/schema errors still fail immediately.
 
+`deploy.sh` applies the target release's pending migrations before teardown (`apply_target_migrations`, after the Turso probe, `RADON_DEPLOY_MIGRATE_TIMEOUT` default 300s) while the current release serves; a failure aborts the deploy with nothing stopped and no rollback. The boot apply keeps its 20s deadline and normally finds nothing pending. A Hrana transport error mid-file (`stream not found`) reconnects and replays that file. Automatic migrations must be additive because the serving release runs on the new schema until promotion; destructive DDL goes in a `-- radon-migrate: manual` file. Two deploys rolled back on 2026-11-14 when 0112 outran the 20s boot deadline.
+
 ### Build constraint
 
 `web/package.json` runs `next build --experimental-build-mode=compile` because Next.js 16's standard build crashes during prerender of `/_global-error` and `/_not-found` (the root ClerkProvider context isn't materialised in isolated workers — `useContext` returns null). Compile mode skips prerender entirely; every page is `force-dynamic` already so the runtime behavior is unchanged. If a future Next.js patch fixes the underlying issue, drop the flag and the build returns to the standard pipeline.
@@ -679,7 +681,7 @@ Jul 11. `radon-disk-cleanup` automates the manual reclaim.
 |---|---|---|
 | `radon-demo-mirror.timer` | VPS | Daily **21:45 UTC** plus a **23:30 UTC** retry slot, weekends included, `Persistent=true`. A weekday-only schedule aged demo snapshots past the regime routes' 48h budget every weekend, and a pass a deploy SIGTERMed was never re-run. |
 | `radon-demo-mirror.service` | VPS | Oneshot: `migrate.py --demo`, then `demo_seed.py` (re-anchors the synthetic book's expiries to the run date; refuses any non `radon-demo` URL), then `mirror_market_snapshots_to_demo.js`. Heartbeat: `demo-mirror` (26h). Contract: [`demo-environment.md`](demo-environment.md). |
-| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages. 8-day freshness window. |
+| `service_health` heartbeat | row `disk-cleanup` | Written on every run that reclaims (the weekly sweep always does; a guard that finds headroom writes nothing) — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. A run that ends below `HEADROOM_THRESHOLD_BYTES` reports `headroom` as a failed category, which the watchdog error bucket pages; the `--deploy-locked` run records the shortfall as `headroom_short` instead, because model disk admission gates the deploy next. 8-day freshness window. |
 
 Retention constants (`cloud/scripts/disk_cleanup.py`):
 

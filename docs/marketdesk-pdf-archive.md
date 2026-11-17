@@ -68,15 +68,48 @@ day and never earlier than the account clock. After `PRIORITY_MAX_FAILURES` (3)
 attempts ending in such a failure, a priority row stops reserving precedence, so
 one bad file cannot starve the backlog. It keeps its place when due.
 
-One cycle admits at most one PDF. The global minimum interval is 1,800 seconds
-(30 minutes). `MARKETDESK_PDF_MIN_INTERVAL_SECONDS` can increase it; existing
-values below 1,800 are clamped in both the worker and the store. Admission is
-committed before provider access, so restart/deployment cannot cause a catch-up
-burst. A 600-second token lease recovers a killed worker and protects against
-stale acknowledgements. The successful lease token is recorded separately so
-a stale owner cannot claim another worker's acknowledgement. This is conservative local pacing, not a documented
-MarketDesk rate guarantee; the same account's interactive use also consumes
-its provider allowance.
+One provider 500 is terminal instead. When `/files/<id>/blob` answers 500 with
+the JSON message `Cannot read properties of null (reading 'path')`, marketdesk.ai
+has no stored bytes for that file. It repeats on every retry (`IQSa8ONnKqF`
+failed 101 times from 2026-10-27 to 2026-11-14, and each daily retry put the
+service row in error). The session maps that exact body to `file_missing`; the
+store marks the row `disposition=exhausted`, `disposition_reason=file_missing`
+at once, without touching the account clock, soft streak or `last_error`; the
+job logs `<id> retired: file_missing` and the cycle stays ok. Any other 500
+body is still the transient `http_500` above.
+
+One timer fire admits one batch, then waits out the persisted account interval.
+Migration 0113 is the safety reset: the live row starts at 900 seconds and batch
+1, then ramps. It does not open at 300 seconds and batch 6. A clean cycle
+subtracts 30 seconds, down to 300 seconds or to `MARKETDESK_PDF_MIN_INTERVAL_SECONDS`
+when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
+`MARKETDESK_PDF_DAILY_CAP` is a rolling 24 hour admission cap (unset means 400,
+0 turns it off) and the lease SQL enforces it. A missed fire does not stack
+into a catch-up burst.
+
+A provider quota signal (`preview_quota`, `download_quota`, `http_429`,
+`http_401`, `http_402`, `http_403`, or an HTTP-date `Retry-After`) doubles
+the persisted interval, stops the rest of the batch, and resets the batch to 1.
+A delta-seconds `Retry-After` lengthens that one wait and does not
+become the steady pace. The ceiling is 24 hours, the old embargo cap. A single
+HTTP 500 spends the current window and backs that file off on its own clock.
+Three transport or 5xx errors in a row multiply the account interval by 1.5.
+A clean cycle subtracts 30 seconds, never below the floor, and never moves the
+next admission earlier. ea66c3842 metered PDF bytes on the signed-in account
+and picked a fixed 1,800 second slot after `preview_quota`. It does not publish
+a numeric allowance, so the controller is not capped under an invented quota.
+`preview_quota` is the signal that slows it.
+
+A 600-second token lease recovers a killed worker. The admit trigger moves the
+account clock only when a lease changes hands. A lease that matches no row
+leaves the clock alone. Policy rejects are `disposition=filtered` and can
+return if the book changes. Eight non-quota failures after `attempts_baseline` become
+`disposition=exhausted` and drop out of the backlog. Migration 0113 sets that
+baseline to the attempt count already on the row and restores any row already
+marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
+Quota errors refund the attempt. Fresh reports (published within 36 hours)
+and the oldest backlog alternate windows, so today's file is in the next
+fresh window while the backlog still drains.
 
 The archive uses the existing authenticated `/files/<id>/blob` operation,
 which the provider routes through its preview file server. Its historical
@@ -85,13 +118,13 @@ download endpoint has been verified; a `downloads: true` account flag does not
 make a blocked preview hop work. The archive never guesses file-server URLs or
 bypasses a provider refusal. Before requesting bytes, the worker checks the
 provider's account allowance. A spent allowance causes no PDF request.
-Allowance errors and HTTP 429 defer the entire account for 6 hours, then 12,
-then 24 hours, capped at 24 across all subsequent refusals. The streak is
-shared across reports and survives restarts. Only a verified fresh provider
-success resets it; recovering a saved receipt does not. Authentication failures
-back off one hour, other failures at least 15 minutes, with the 30-minute
-admission floor still enforced. Item/account retry clocks commit atomically.
-Queued work is retained rather than retired after a fixed number of failures.
+Allowance errors and HTTP 429 double the shared interval, up to 24 hours, and
+honor `Retry-After` as the minimum for that one wait. The streak survives
+restarts. A verified provider success steps the interval down by 30 seconds;
+a saved receipt does not. Authentication failures wait at least one hour.
+Other item failures use that file's own exponential clock, capped at one day,
+and do not move the account interval unless they are the third transport or
+5xx error in a row. Item and account updates commit atomically.
 Blocked archive health does not stop news publication.
 
 ## Storage, recovery and attachment
@@ -118,7 +151,23 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 
 `marketdesk-pdf` uses a continuous 15-minute freshness window, maps to
 `radon-marketdesk-pdf.service`, and reports error during provider backoff.
-A normal admission wait with no provider failure is healthy. A persisted
+It also reports error when the eligible active backlog is older than 24 hours
+or its depth is growing past 48 rows. The message is
+`PDF archive backlog: pending=N oldest_h=H growing=0|1`.
+Only `marketdesk-pdf` reports this breach. `marketdesk-dropbox` reflects the Dropbox
+outbox alone (2026-11-16): one condition on two rows read as a Dropbox fault, and the
+second caller overwrote `observed_pending` minutes apart, so `growing` compared two
+writers' samples. A stalled archive timer still surfaces as a stale `marketdesk-pdf` row.
+
+Measured allowance (2026-11-16): both `preview_quota` trips on 2026-11-15
+(12:12 and 20:52 UTC) came after 73 and 74 downloads in the preceding 24 hours,
+including an 18-download hour that did not trip. Treat the provider limit as
+about 74 previews per rolling 24 hours. Eligible weekday intake is 70 to 100,
+so the backlog alarm cannot clear by pacing alone. It needs a larger provider
+allowance, a narrower PDF policy, or an operator decision to retire old rows.
+`MARKETDESK_PDF_DAILY_CAP=70` keeps admissions under the allowance, so a quota
+trip no longer doubles the interval.
+A normal admission wait with a young, stable queue is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
 deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.
 A persisted provider `http_5xx` deferral does the same: the error row and the

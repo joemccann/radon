@@ -50,6 +50,19 @@ PREVIEW_QUOTA = "preview_quota"
 TRANSIENT_CODES = frozenset({"unauthenticated", "http_transport", "http_429", PREVIEW_QUOTA})
 FILE_SERVER_RE = re.compile(r"ts\d{1,2}\.marketdesk\.ai")
 REDIRECTS = (301, 302, 303, 307, 308)
+# marketdesk.ai answers GET /files/<id>/blob with this 500 when the file record has no stored
+# bytes. It repeats on every retry (IQSa8ONnKqF: 101 attempts), so it is terminal for the item.
+FILE_MISSING = "file_missing"
+_MISSING_FILE_MESSAGE = "Cannot read properties of null (reading 'path')"
+ERROR_BODY_LIMIT = 2048
+
+
+def _is_missing_file(body: bytes) -> bool:
+    try:
+        payload = json.loads(body or b"null")
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and payload.get("message") == _MISSING_FILE_MESSAGE
 
 
 class MarketDeskAuthError(RuntimeError):
@@ -58,6 +71,14 @@ class MarketDeskAuthError(RuntimeError):
 
 class MarketDeskError(RuntimeError):
     """Short machine-readable reason ('unauthenticated', 'http_404', 'too_large', ...). Never a URL or body."""
+
+    def __init__(self, code="download_failed", *args, retry_after=None, suspension=False):
+        super().__init__(code, *args)
+        try:
+            self.retry_after = None if retry_after is None else max(0, min(86400, int(retry_after)))
+        except (TypeError, ValueError):
+            self.retry_after = None
+        self.suspension = bool(suspension)
 
     @property
     def transient(self) -> bool:
@@ -239,6 +260,14 @@ class MarketDeskSession:
         self.jar = CookieJar()
         self.opener = opener or build_opener(self.jar)
 
+    def _status_error(self, status: int) -> MarketDeskError:
+        """401/402/403 and an HTTP-date Retry-After are account suspension signals."""
+        wait = getattr(self, "_retry_after", None)
+        dated = bool(getattr(self, "_suspension", False))
+        return MarketDeskError(
+            f"http_{status}", retry_after=wait,
+            suspension=dated or status in (401, 402, 403, 429))
+
     def _send(self, method: str, url: str, body: bytes | None, headers: dict, *, limit: int,
               timeout: int) -> tuple[int, bytes, str, str]:
         """(status, body, content type, Location). HTTP errors and redirects come back as a status."""
@@ -253,7 +282,15 @@ class MarketDeskSession:
                 content_type = str(response.headers.get("Content-Type", "") or "")
                 status = response.status
         except urllib.error.HTTPError as exc:
-            location = str((exc.headers or {}).get("Location", "") or "")
+            headers = exc.headers
+            location = str((headers or {}).get("Location", "") or "")
+            raw_wait = (headers or {}).get("Retry-After")
+            from research.marketdesk_pdf_rate import parse_retry_after
+            self._retry_after, self._suspension = parse_retry_after(raw_wait)
+            try:
+                self._error_body = exc.read(ERROR_BODY_LIMIT) or b""
+            except Exception:  # noqa: BLE001 - the status is the signal; the body only refines a 500
+                self._error_body = b""
             exc.close()
             return exc.code, b"", "", location
         except MarketDeskError:
@@ -294,7 +331,7 @@ class MarketDeskSession:
         for attempt in (1, 2):
             status, raw, _, _ = self._send(method, url, data, headers, limit=MAX_RESPONSE, timeout=TIMEOUT)
             if status != 200:
-                raise MarketDeskError(f"http_{status}")
+                raise self._status_error(status)
             try:
                 payload = json.loads(raw)
             except ValueError:
@@ -336,8 +373,10 @@ class MarketDeskSession:
                 if self._same_site(location, path) and not self.previews_available():
                     raise MarketDeskError(PREVIEW_QUOTA)
                 raise MarketDeskError("unauthenticated")
+            if status == 500 and _is_missing_file(getattr(self, "_error_body", b"")):
+                raise MarketDeskError(FILE_MISSING)
             if status != 200:
-                raise MarketDeskError(f"http_{status}")
+                raise self._status_error(status)
             return data, content_type
         raise MarketDeskError("unauthenticated")
 

@@ -400,8 +400,12 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
     severity = _resolve_severity(service=service, kind="stale", market_state=market_state)
     age_fmt = _format_age(age_s) if age_s is not None else "no data"
     window_fmt = _format_age(window_s)
-    market_label = market_state
-    msg = f"silent for {age_fmt} (window {window_fmt}) — market {market_label}"
+    msg = f"silent for {age_fmt} (window {window_fmt})"
+    # Only where the market state chose the window. On a uniform window the
+    # suffix read as an excuse ("discover silent for 24d ... market closed").
+    window = services_mod.SCHEDULED_SERVICES.get(service)
+    if window is not None and window["open"] != window["closed"]:
+        msg = f"{msg} — market {market_state}"
     last_error = health.get("last_error") if health else None
     if last_error is not None and not isinstance(last_error, str):
         last_error = json.dumps(last_error)

@@ -85,6 +85,7 @@ def _make_iwm_payload(rows: List[Dict[str, Any]]) -> str:
         "sectorName": [row.get("sector", "Technology") for row in rows],
         "assetClass": [row.get("asset_class", "Equity") for row in rows],
         "holdingPercent": [str(row.get("weight", "0.05")) for row in rows],
+        "exchange": [row.get("exchange", "NASDAQ") for row in rows],
     }
     points = {
         name: {"name": name, "value": values, "formattedValue": values}
@@ -353,6 +354,35 @@ def test_ishares_class_shares_publish_or_abort_all_presets(tmp_path, monkeypatch
         assert canonical <= set(result["indices"]["r2k"]["added"])
 
 
+def test_unlisted_upstream_placeholder_does_not_abort_all_presets(tmp_path, monkeypatch):
+    """The 2026-11-14 IWM payload: one unlisted earnout row must not block publishing."""
+    helper = TestFailClosedExecution()
+    sp500 = helper._companies("S", 500)
+    ndx100 = helper._companies("N", 100)
+    r2k = helper._companies("R", 1900)
+    for index, rows in (("sp500", sp500), ("ndx100", ndx100), ("r2k", r2k)):
+        (tmp_path / f"{index}.json").write_text(json.dumps(
+            helper._master(index, [row["ticker"] for row in rows])
+        ))
+    sp500[-1] = dict(sp500[-1], ticker="SNEW")
+    upstream = r2k + [dict(TestFetchR2kParsing._OMNIAB_EARNOUT)]
+    response = MagicMock()
+    response.read.return_value = _make_iwm_payload(upstream).encode()
+    monkeypatch.setattr(pr, "PRESETS_DIR", tmp_path)
+    monkeypatch.setattr(pr, "CHANGELOG_PATH", tmp_path / "changelog.json")
+    monkeypatch.setattr(pr, "fetch_sp500", lambda: sp500)
+    monkeypatch.setattr(pr, "fetch_ndx100", lambda: ndx100)
+    monkeypatch.setattr(pr, "urlopen", lambda *args, **kwargs: response)
+
+    result = pr.execute()
+
+    assert result["status"] == "ok", result.get("error")
+    assert result["total_files_written"] > 0
+    master = json.loads((tmp_path / "r2k.json").read_text())
+    assert "2200964D" not in master["tickers"]
+    assert len(master["tickers"]) == 1900
+
+
 def test_atomic_json_write_preserves_target_on_serialization_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -618,6 +648,72 @@ class TestFetchR2kParsing:
         tickers = [c["ticker"] for c in result]
         assert "REAL" in tickers
         assert "FCASH" not in tickers
+
+    # Verbatim shape of the IWM row (as of Nov 12, 2026) that aborted every
+    # preset on 2026-11-14: an unlisted OmniAb earnout tranche BlackRock files
+    # under assetClass "Equity" with a SEDOL-style placeholder ticker.
+    _OMNIAB_EARNOUT = {
+        "ticker": "2200964D", "name": "OMNIAB INC $15.00 VESTING  Prvt",
+        "sector": "Health Care", "asset_class": "Equity", "weight": "0.00",
+        "exchange": "NO MARKET (E.G. UNLISTED)",
+    }
+
+    def test_skips_unlisted_equity_placeholder_rows(self):
+        payload = _make_iwm_payload([
+            {"ticker": "REAL", "name": "Real Co", "sector": "Energy",
+             "asset_class": "Equity", "weight": "0.10", "exchange": "NYSE"},
+            dict(self._OMNIAB_EARNOUT),
+            {"ticker": "P5N994", "name": "Petrocorp Inc Escrow", "sector": "Energy",
+             "asset_class": "Equity", "weight": "0.00",
+             "exchange": "Non-Nms Quotation Service (Nnqs)"},
+            {"ticker": "TXCP", "name": "TEXAS CAPITAL BANCSHARES",
+             "sector": "Financials", "asset_class": "Equity", "weight": "0.15",
+             "exchange": "TXE"},
+        ])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            tickers = [c["ticker"] for c in pr.fetch_r2k()]
+        assert tickers == ["REAL", "TXCP"]
+
+    def test_aborts_when_unlisted_equity_weight_exceeds_tolerance(self):
+        payload = _make_iwm_payload([
+            {"ticker": "REAL", "name": "Real Co", "exchange": "NASDAQ"},
+            {"ticker": "GONE1", "name": "Gone One", "weight": "0.40",
+             "exchange": "NO MARKET (E.G. UNLISTED)"},
+            {"ticker": "GONE2", "name": "Gone Two", "weight": "0.40",
+             "exchange": "NO MARKET (E.G. UNLISTED)"},
+        ])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            with pytest.raises(pr.InvalidConstituentData, match="unlisted"):
+                pr.fetch_r2k()
+
+    def test_aborts_when_unlisted_equity_weight_is_unparseable(self):
+        payload = _make_iwm_payload([
+            {"ticker": "REAL", "name": "Real Co", "exchange": "NASDAQ"},
+            dict(self._OMNIAB_EARNOUT, weight="n/a"),
+        ])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            with pytest.raises(pr.InvalidConstituentData, match="unlisted"):
+                pr.fetch_r2k()
+
+    def test_malformed_listed_equity_ticker_still_reaches_validation(self):
+        payload = _make_iwm_payload([
+            dict(self._OMNIAB_EARNOUT, exchange="NASDAQ"),
+        ])
+        with patch.object(pr, "urlopen", return_value=self._mock_response(payload)):
+            result = pr.fetch_r2k()
+        assert [c["ticker"] for c in result] == ["2200964D"]
+
+    def test_rejects_payload_without_exchange_column(self):
+        payload = json.loads(_make_iwm_payload([{"ticker": "REAL"}]))
+        points = payload["componentsByNameMap"]["holdings"]["containersByNameMap"][
+            "all"
+        ]["dataPointsByNameMap"]
+        del points["exchange"]
+        with patch.object(
+            pr, "urlopen", return_value=self._mock_response(json.dumps(payload))
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="columns are missing"):
+                pr.fetch_r2k()
 
     def test_rejects_html_instead_of_blackrock_json(self):
         with patch(
