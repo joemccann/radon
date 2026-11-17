@@ -702,6 +702,164 @@ def test_caddy_status_unreachable_outside_deploy_window_pages(
     assert outcome.severity == "P1"
 
 
+def test_parse_systemctl_timestamp_accepts_healthd_active_enter() -> None:
+    from scripts.watchdog import external_probe
+
+    parsed = external_probe._parse_systemctl_timestamp("Sat 2026-11-14 20:37:00 UTC")
+    assert parsed == datetime(2026, 11, 14, 20, 37, tzinfo=timezone.utc)
+    assert external_probe._parse_systemctl_timestamp("") is None
+    assert external_probe._parse_systemctl_timestamp("n/a") is None
+
+
+def test_failed_deploy_cleared_journal_caddy_floor_is_suppressed(
+    tmp_path, monkeypatch
+) -> None:
+    # 2026-11-14 20:40Z page 1f7d0c4e3b198cdecc4ed6e4743f93d9. Deploy via SSH
+    # failed after stop-clean. commit-transition removed the journal and left
+    # the previous green marker in place. The off-box row was still the Caddy
+    # floor from that restart, and the serving path was already back up.
+    import os
+
+    from scripts.watchdog import external_probe
+
+    sample_age = timedelta(minutes=3)
+    sample_time = NOW - sample_age
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=3, detail="status_unreachable:caddy"
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=82)
+    lock = tmp_path / "radon-deploy-root.lock"
+    lock.write_text("")
+    lock_at = (sample_time + timedelta(seconds=1)).timestamp()
+    os.utime(lock, (lock_at, lock_at))
+    monkeypatch.setattr(external_probe, "DEPLOY_ROOT_LOCK_FILE", str(lock))
+    monkeypatch.setattr(
+        external_probe,
+        "_healthd_active_enter",
+        lambda: sample_time - timedelta(seconds=2),
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is False
+    assert outcome.status == "healthy"
+    assert outcome.severity is None
+    assert "failed deploy" in outcome.message
+
+
+def _failed_deploy_floor(tmp_path, monkeypatch, *, detail="status_unreachable:caddy"):
+    """Cleared journal, stale green marker, floor sample from three minutes ago."""
+    import os
+
+    from scripts.watchdog import external_probe
+
+    sample_time = NOW - timedelta(minutes=3)
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=3, detail=detail),
+    )
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=82)
+    return external_probe, sample_time
+
+
+def test_caddy_floor_without_deploy_root_lock_still_pages(tmp_path, monkeypatch) -> None:
+    external_probe, sample_time = _failed_deploy_floor(tmp_path, monkeypatch)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    monkeypatch.setattr(
+        external_probe,
+        "DEPLOY_ROOT_LOCK_FILE",
+        str(tmp_path / "missing-deploy-root.lock"),
+    )
+    monkeypatch.setattr(
+        external_probe,
+        "_healthd_active_enter",
+        lambda: sample_time - timedelta(seconds=2),
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_caddy_floor_healthd_restart_far_from_deploy_lock_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    import os
+
+    external_probe, sample_time = _failed_deploy_floor(tmp_path, monkeypatch)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    lock = tmp_path / "radon-deploy-root.lock"
+    lock.write_text("")
+    lock_at = (sample_time - timedelta(minutes=30)).timestamp()
+    os.utime(lock, (lock_at, lock_at))
+    monkeypatch.setattr(external_probe, "DEPLOY_ROOT_LOCK_FILE", str(lock))
+    monkeypatch.setattr(
+        external_probe,
+        "_healthd_active_enter",
+        lambda: sample_time - timedelta(seconds=2),
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_raw_502_after_failed_deploy_restart_still_pages(tmp_path, monkeypatch) -> None:
+    import os
+
+    external_probe, sample_time = _failed_deploy_floor(
+        tmp_path, monkeypatch, detail="status_http_502"
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    lock = tmp_path / "radon-deploy-root.lock"
+    lock.write_text("")
+    lock_at = (sample_time + timedelta(seconds=1)).timestamp()
+    os.utime(lock, (lock_at, lock_at))
+    monkeypatch.setattr(external_probe, "DEPLOY_ROOT_LOCK_FILE", str(lock))
+    monkeypatch.setattr(
+        external_probe,
+        "_healthd_active_enter",
+        lambda: sample_time - timedelta(seconds=2),
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_caddy_floor_failed_deploy_with_serving_path_down_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    import os
+
+    external_probe, sample_time = _failed_deploy_floor(tmp_path, monkeypatch)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: False)
+    lock = tmp_path / "radon-deploy-root.lock"
+    lock.write_text("")
+    lock_at = (sample_time + timedelta(seconds=1)).timestamp()
+    os.utime(lock, (lock_at, lock_at))
+    monkeypatch.setattr(external_probe, "DEPLOY_ROOT_LOCK_FILE", str(lock))
+    monkeypatch.setattr(
+        external_probe,
+        "_healthd_active_enter",
+        lambda: sample_time - timedelta(seconds=2),
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
 def test_aggregate_invalid_inside_deploy_window_still_pages(
     tmp_path, monkeypatch
 ) -> None:
