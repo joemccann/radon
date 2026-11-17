@@ -593,6 +593,8 @@ DISCOVER_POST_BUDGET_S = (
     DISCOVER_CURL_BUDGET_S - DISCOVER_INFLIGHT_PAGE_S - DISCOVER_RESPONSE_MARGIN_S
 )
 _OPTIONS_FLOW_ADMISSION_POLL_S = 8.0
+# Another worker can take the slot a window opened. Never spin on 0s.
+_DARKPOOL_ADMISSION_MIN_WAIT_S = 1.0
 _ADMISSION_BUSY_MARKER = "admission is busy"
 # The wrapper sheds HTTP 400 only when the body carries this exact phrase.
 # Quota exhaustion and a multi-hour embargo keep the hard provider error.
@@ -732,6 +734,37 @@ def _fetch_options_flow_after_admission(
             time.sleep(delay)
 
 
+def _fetch_darkpool_after_admission(
+    ticker: str, *, client, dp_days: int, dp_pages: int, deadline: float,
+) -> dict:
+    """Score one ticker's dark pool, waiting out short admission refusals.
+
+    The top of the hour fills the governor's standard minute window before
+    discover reaches its dark-pool phase. A walk that gives up after the 5s
+    admission wait skips the ticker, and one skip keeps the scan unpublished
+    (2026-11-16 20:01Z: 11 of 25 skipped). Wait for the window while the post
+    budget allows a full sleep; past that the refusal stands.
+    """
+    while True:
+        try:
+            return fetch_darkpool_multi(
+                ticker,
+                days=dp_days,
+                _client=client,
+                max_pages=dp_pages,
+                deadline=deadline,
+                retry_transient=False,
+            )
+        except UWRateLimitError as exc:
+            delay = _admission_retry_delay(exc)
+            if delay is None:
+                raise
+            delay = max(delay, _DARKPOOL_ADMISSION_MIN_WAIT_S)
+            if time.monotonic() + delay >= deadline:
+                raise
+            time.sleep(delay)
+
+
 def discover(min_premium: int = 500000, min_alerts: int = 1,
              dp_days: int = 3, exclude_indices: bool = True,
              tickers: list = None, top: int = 20,
@@ -825,13 +858,12 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
             # instead of opening another UW walk.
             if time.monotonic() >= deadline:
                 return None
-            dp = fetch_darkpool_multi(
+            dp = _fetch_darkpool_after_admission(
                 ticker,
-                days=dp_days,
-                _client=client,
-                max_pages=dp_pages,
+                client=client,
+                dp_days=dp_days,
+                dp_pages=dp_pages,
                 deadline=deadline,
-                retry_transient=False,
             )
             return _build_candidate(ticker, all_flow[ticker], dp)
 
@@ -967,10 +999,20 @@ def _record_unpublished_health(result: dict) -> None:
                 "class": "discover",
                 "skipped": len(failures),
                 "candidates_found": result.get("candidates_found", 0),
+                "provider_failures": _failure_kinds(failures),
             },
         )
     except Exception as exc:  # noqa: BLE001 — health is best-effort
         print(f"[discover] service_health write skipped: {exc}", file=sys.stderr)
+
+
+def _failure_kinds(failures: list) -> list:
+    """Which UW call failed and how, without tickers or response text."""
+    kinds = {(f.get("operation", ""), f.get("error_type", "")) for f in failures}
+    return [
+        {"operation": operation, "error_type": error_type}
+        for operation, error_type in sorted(kinds, key=lambda k: (k[1], k[0]))
+    ]
 
 
 if __name__ == "__main__":
