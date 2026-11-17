@@ -370,7 +370,7 @@ research assets are served by the same authenticated route.
 | Row | Writer | Window | States |
 |---|---|---|---|
 | `marketdesk-research` | `service_cycle`, continuous bucket | 15m | `ok` every completed cycle (including one with no new article, and one whose only extra failure is the post-publish PDF queue write); `error` on auth, listing or Turso failure, a SIGTERM, a `listing_gap`, a cycle where articles failed or parked and none published, or any article retired to `failed`. Error text is the first line only, bounded. An item waiting for its summary is not an error. A `no_summary` deadline still writes this error row, and the oneshot exits 0. A Turso read timeout while queueing an already published article does not write this error row. |
-| `marketdesk-dropbox` | `record_service_health`, continuous bucket | 15m | `ok` after a cycle with write credentials and no upload failure; `paused` when all three write credentials are absent (a warning, never the error bucket); `error` when an upload failed (retried next cycle) or when only some write credentials are set. |
+| `marketdesk-dropbox` | `record_service_health`, continuous bucket | 15m | `ok` after a cycle with write credentials and no upload failure; `paused` when all three write credentials are absent (a warning, never the error bucket); `error` when an upload failed (retried next cycle) or when only some write credentials are set. It never reports the PDF archive backlog; that is the `marketdesk-pdf` row alone. |
 
 Both rows are registered in `scripts/watchdog/services.py` and
 `web/lib/serviceHealthWindows.ts`, and both map to `radon-marketdesk.service` in
