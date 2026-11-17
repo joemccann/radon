@@ -535,7 +535,7 @@ def _breach_cycle(breach):
         except BaseException as exc:
             rows.append(("error", str(exc)))
             raise
-        rows.append(("warn", handle.warning) if handle.warning else ("ok", None))
+        rows.append(("warn", handle.warning, handle.finished_at) if handle.warning else ("ok", handle.finished_at))
 
     dependency = deps(Path("/nonexistent"))
     dependency.store = Store()
@@ -549,7 +549,7 @@ def test_draining_backlog_reports_warn_and_exits_zero(monkeypatch):
     dependency, rows = _breach_cycle(BacklogBreach(message, paging=False))
     monkeypatch.setattr(job, "default_deps", lambda: dependency)
     assert job.main([]) == 0
-    assert rows == [("warn", message)]
+    assert rows == [("warn", message, NOW.isoformat())]
 
 
 def test_growing_backlog_still_records_error(monkeypatch):

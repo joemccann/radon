@@ -109,8 +109,10 @@ def test_podman_pull_does_not_use_docker_only_buildx(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text()
     assert "buildx" not in log
-    assert f"pull ghcr.io/joemccann/radon-python:{'e' * 40}" in log
-    assert f"pull ghcr.io/joemccann/radon-node:{'e' * 40}" in log
+    # CIP-030: a local SHA set skips the second layer fetch. Podman probes
+    # with `manifest inspect`; docker-only `buildx imagetools` stays unused.
+    assert "manifest inspect" in log
+    assert "exact release image set already local" in result.stderr
 
 
 def test_production_prefers_podman_with_an_explicit_docker_override() -> None:

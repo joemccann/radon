@@ -103,8 +103,10 @@ second clock is back at the floor in under 6 hours. The 900 second ramp stays
 additive until a quota signal, or an interval already above 900 seconds, arms this recovery. A later success that clears `last_error` does not cancel it. A single HTTP 500 spends
 the current window and backs that file off on its own clock.
 Three transport or 5xx errors in a row multiply the account interval by 1.5.
-A clean cycle subtracts 30 seconds, never below the floor, and never moves the
-next admission earlier. ea66c3842 metered PDF bytes on the signed-in account
+A clean cycle subtracts 30 seconds, never below the floor. When that leaves
+the interval shorter than the wait the admit trigger just parked, the next
+admission moves forward to the shorter interval. The daily and hourly caps
+still bound the burst. ea66c3842 metered PDF bytes on the signed-in account
 and picked a fixed 1,800 second slot after `preview_quota`. It does not publish
 a numeric allowance. The hourly cap is a separate configurable hypothesis.
 The controller does not return to that fixed 1,800 second slot.
@@ -119,7 +121,10 @@ baseline to the attempt count already on the row and restores any row already
 marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
 Quota errors refund the attempt. Fresh reports (published within 36 hours)
 and the oldest backlog alternate windows, so today's file is in the next
-fresh window while the backlog still drains.
+fresh window while the backlog still drains. A download whose lease has
+already expired is ahead of that alternation and is reclaimed on the next
+claim. When a clean cycle shortens the interval, the next admission moves
+forward to that shorter interval; the hourly cap still bounds the burst.
 
 The archive uses the existing authenticated `/files/<id>/blob` operation,
 which the provider routes through its preview file server. Its historical
