@@ -738,6 +738,22 @@ def test_default_deps_wire_real_modules():
     assert deps.marketdesk_path is dropbox_writer.marketdesk_path
 
 
+def test_dropbox_row_does_not_report_the_pdf_archive_backlog(world, db, monkeypatch):
+    """marketdesk-pdf owns the backlog breach. A second caller also overwrote the
+    archive's observed_pending sample minutes apart, so growth compared two writers."""
+    from research import marketdesk_pdf_store
+    calls = []
+    monkeypatch.setattr(marketdesk_pdf_store, "backlog_breach",
+                        lambda **_k: calls.append(1) or "PDF archive backlog: pending=597 oldest_h=254 growing=0")
+    assert "pdf_backlog" not in job.Deps.__dataclass_fields__
+    assert not hasattr(job.default_deps(), "pdf_backlog")
+    world.refs = [make_ref("Bbbbbbbb77")]
+    preseed_stored_pdf(world, db, world.refs[0])
+    run(world)
+    assert health_for(world, "marketdesk-dropbox") == [("marketdesk-dropbox", "ok", None)]
+    assert calls == []
+
+
 def test_default_certifier_wires_private_audit_to_research_root(monkeypatch, tmp_path):
     from research import marketdesk_copy
     monkeypatch.setenv("RADON_RESEARCH_DIR", str(tmp_path / "private-research"))
