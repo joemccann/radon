@@ -229,6 +229,15 @@ later cycle.
   revives it. Retrying spent four more red cycles on the same verdict
   (`Z9DQGZqmzRy`, 2026-11-11: MarketDesk's summarizer answered "The document
   content was not provided" instead of bullets).
+- A cycle-level socket failure (a bare `TimeoutError` or connection reset, or
+  `DbHttpError` whose message starts with `TimeoutError:`,
+  `ConnectionResetError:`, `RemoteDisconnected:`, `IncompleteRead:` or
+  `research transaction transport failed: <one of those>`) keeps the
+  `service_cycle` error row, logs `cycle deferred: transport ...` and exits 0;
+  the next timer fire retries. One Hrana read timeout at 2026-11-15 05:34 UTC
+  latched the unit failed and paged although the next four cycles were clean.
+  A Turso statement error, missing credentials, and per-article failures
+  (the `no_summary` rule above) are unchanged.
   Managed cancellation bypasses provider exception handlers, so interrupted
   requests do not advance the model ladder; cleanup and the error heartbeat
   still run before exit 143.
