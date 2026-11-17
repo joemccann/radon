@@ -154,7 +154,19 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 It also reports error when the eligible active backlog is older than 24 hours
 or its depth is growing past 48 rows. The message is
 `PDF archive backlog: pending=N oldest_h=H growing=0|1`.
-`marketdesk-dropbox` reports the same breach on its own health row.
+Only `marketdesk-pdf` reports this breach. `marketdesk-dropbox` reflects the Dropbox
+outbox alone (2026-11-16): one condition on two rows read as a Dropbox fault, and the
+second caller overwrote `observed_pending` minutes apart, so `growing` compared two
+writers' samples. A stalled archive timer still surfaces as a stale `marketdesk-pdf` row.
+
+Measured allowance (2026-11-16): both `preview_quota` trips on 2026-11-15
+(12:12 and 20:52 UTC) came after 73 and 74 downloads in the preceding 24 hours,
+including an 18-download hour that did not trip. Treat the provider limit as
+about 74 previews per rolling 24 hours. Eligible weekday intake is 70 to 100,
+so the backlog alarm cannot clear by pacing alone. It needs a larger provider
+allowance, a narrower PDF policy, or an operator decision to retire old rows.
+`MARKETDESK_PDF_DAILY_CAP=70` keeps admissions under the allowance, so a quota
+trip no longer doubles the interval.
 A normal admission wait with a young, stable queue is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
 deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.
