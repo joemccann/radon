@@ -32,6 +32,18 @@ ITEM_BACKOFF_CAP = 86400
 FRESH_WINDOW_DAYS = 1.5
 OLDEST_SLA_SECONDS = 24 * 60 * 60
 GROWTH_FLOOR = 48
+STALL_SECONDS = 6 * 60 * 60
+PAGING_AGE_SECONDS = 14 * 24 * 60 * 60
+
+
+@dataclass(frozen=True)
+class BacklogBreach:
+    """An aged backlog pages while it grows, admission stalls, or its oldest row passes 14 days."""
+    message: str
+    paging: bool
+
+    def __str__(self):
+        return self.message
 QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
 # Account suspension. Each one doubles the interval and resets the batch to 1.
 SUSPENSION_CODES = frozenset({"http_401", "http_402", "http_403", "unauthenticated"})
@@ -432,9 +444,19 @@ def backlog_breach(*, now=None):
         if seen.tzinfo is None:
             seen = seen.replace(tzinfo=timezone.utc)
         age = int((current - seen).total_seconds())
-    if (oldest and age > OLDEST_SLA_SECONDS) or growing:
-        return f"PDF archive backlog: pending={depth} oldest_h={age // 3600} growing={int(bool(growing))}"
-    return None
+    if not ((oldest and age > OLDEST_SLA_SECONDS) or growing):
+        return None
+    stalled = _admission_stalled(current)
+    message = (f"PDF archive backlog: pending={depth} oldest_h={age // 3600} "
+               f"growing={int(bool(growing))} stalled={int(stalled)}")
+    return BacklogBreach(message, paging=bool(growing) or stalled or age > PAGING_AGE_SECONDS)
+
+
+def _admission_stalled(current):
+    rows = hrana_execute(
+        "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at)>julianday(?)-?",
+        (_stamp(current), STALL_SECONDS / 86400))
+    return not (rows and int(rows[0][0] or 0))
 
 
 def attach_downloads(*, now=None, limit=25):
