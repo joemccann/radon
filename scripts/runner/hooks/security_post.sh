@@ -398,7 +398,8 @@ _sanitize_log_tail() {
   fi
   raw="$(tail -n 80 "$PHASE_LOG" 2>/dev/null || true)"
   clipped="$(printf '%s\n' "$raw" | tail -c 4000)"
-  clipped="${clipped//$'\x60\x60\x60'/[fence]}"
+  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
+  clipped="${clipped//\`\`\`/[fence]}"
   if ! cleaned="$(printf '%s\n' "$clipped" | _redact_secret_classes | _redact_diag_lines)"; then
     printf '%s\n' "(log tail omitted: redaction failed)"
     return 0

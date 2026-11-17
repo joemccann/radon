@@ -19,7 +19,7 @@ ASSET = store.ASSET_BASE + ("ab" * 32) + ".pdf"
 DIGEST = "ab" * 32
 
 
-def test_hidden_quota_converges_without_a_429_storm():
+def test_hidden_quota_converges_without_a_429_storm(tmp_path):
     quota_per_hour = 30
     state = start_state()
     t = 0
@@ -62,8 +62,7 @@ def test_hidden_quota_converges_without_a_429_storm():
     assert len(signals) >= 1
     assert len(tail) <= 24
     assert series[-1]["admitted"] > quota_per_hour
-    Path("/opt/cursor/artifacts").mkdir(parents=True, exist_ok=True)
-    Path("/opt/cursor/artifacts/marketdesk-pdf-convergence.json").write_text(json.dumps({
+    (tmp_path / "marketdesk-pdf-convergence.json").write_text(json.dumps({
         "quota_per_hour": quota_per_hour, "final_interval": state.interval_seconds,
         "final_batch": state.batch_size, "final_pace_per_hour": round(pace, 2),
         "average_admitted_per_hour": round(average, 2),
@@ -302,6 +301,94 @@ def test_a_500_spends_the_window_and_not_the_next_one(db):
     assert store.claim_next(now=NOW + timedelta(seconds=900)) is not None
 
 
+def test_expired_leases_are_reclaimed_on_the_next_claim_ahead_of_fresh_work(db):
+    """A killed batch must not wait behind today's files for the backlog lane."""
+    for i in range(4):
+        _add(db, f"Old{i:05d}", NOW - timedelta(days=11))
+    for i in range(6):
+        _add(db, f"New{i:05d}", NOW - timedelta(hours=1))
+    expired = (NOW - timedelta(hours=2)).isoformat()
+    db.execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading', lease_until=?, lease_token='x'||article_id "
+        "WHERE article_id LIKE 'Old%'",
+        (expired,))
+    db.execute("DELETE FROM marketdesk_pdf_admissions")
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=600, batch_size=5, lane=0, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    batch = store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=12, daily_cap_value=400)
+    got = [item.article_id for item in batch]
+    assert len(batch) == 5
+    assert set(got[:4]) == {f"Old{i:05d}" for i in range(4)}
+
+
+def test_expired_leases_are_reclaimed_while_a_priority_cohort_holds_the_gate(db):
+    """A live priority row blocks ordinary pending work. It must not block a dead lease."""
+    _add(db, "Pri000001", NOW - timedelta(hours=1), priority=1)
+    for i in range(4):
+        _add(db, f"Old{i:05d}", NOW - timedelta(days=11))
+    _add(db, "Wait00001", NOW - timedelta(days=3))
+    db.execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading', lease_until=?, lease_token='x'||article_id "
+        "WHERE article_id LIKE 'Old%'",
+        ((NOW - timedelta(hours=2)).isoformat(),))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=5, lane=0, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    got = [item.article_id for item in store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=12, daily_cap_value=400)]
+    assert {f"Old{i:05d}" for i in range(4)} <= set(got)
+    assert "Wait00001" not in got
+
+
+def test_daily_cap_70_is_why_a_due_batch_of_5_leases_0_then_2(db, monkeypatch):
+    """Production fills a rolling day of 70, then admits only what aged out.
+
+    Unset, the code default is 400 and this same queue leases the batch of 5.
+    MARKETDESK_PDF_DAILY_CAP=70 is the host override the archive doc asks for.
+    """
+    monkeypatch.delenv("MARKETDESK_PDF_HOURLY_CAP", raising=False)
+    for i in range(8):
+        _add(db, f"Due{i:05d}", NOW - timedelta(days=4, minutes=i))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=5, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    inside = (NOW - timedelta(hours=1)).isoformat()
+    for i in range(70):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)", (f"A{i:07d}", inside))
+    monkeypatch.delenv("MARKETDESK_PDF_DAILY_CAP", raising=False)
+    assert len(store.claim_batch(now=NOW, jitter_bps=0)) == 5
+    db.execute("UPDATE marketdesk_pdf_queue SET status='pending', lease_token=NULL, lease_until=NULL")
+    db.execute("DELETE FROM marketdesk_pdf_admissions WHERE article_id LIKE 'Due%'")
+    db.execute("UPDATE marketdesk_pdf_throttle SET next_attempt_at=?, batch_size=5", (NOW.isoformat(),))
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    assert store.claim_batch(now=NOW, jitter_bps=0) == []
+    aged = (NOW - timedelta(hours=25)).isoformat()
+    db.execute(
+        "UPDATE marketdesk_pdf_admissions SET admitted_at=? WHERE article_id IN ('A0000000','A0000001')",
+        (aged,))
+    assert len(store.claim_batch(now=NOW, jitter_bps=0)) == 2
+
+
+def test_halving_pulls_the_next_admission_off_the_old_hourly_gap(db):
+    """A halving that only rewrites interval_seconds still waits out the old hour."""
+    for i in range(6):
+        _add(db, f"Due{i:05d}", NOW - timedelta(days=2, minutes=i))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=3600, batch_size=2, recover_armed=1, "
+        "recover_credits=3, success_credits=0, next_attempt_at=?, jitter_bps=0, lane=1",
+        (NOW.isoformat(),))
+    first = store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=0, daily_cap_value=0)
+    assert len(first) == 2
+    _finish(db, first, NOW)
+    interval, nxt = db.execute("SELECT interval_seconds, next_attempt_at FROM marketdesk_pdf_throttle").fetchone()
+    assert interval == (3600 - 30) // 2
+    opened = datetime.fromisoformat(nxt)
+    assert opened <= NOW + timedelta(seconds=interval + 2)
+    assert opened < NOW + timedelta(seconds=3600 - 60)
+    assert store.claim_batch(now=opened - timedelta(seconds=30), jitter_bps=0, hourly_cap_value=0, daily_cap_value=0) == []
+    assert len(store.claim_batch(now=opened, jitter_bps=0, hourly_cap_value=0, daily_cap_value=0)) == 2
+
+
 def test_fresh_file_is_in_the_first_window_while_backlog_exists(db):
     for i in range(12):
         _add(db, f"Old{i:05d}", NOW - timedelta(days=8))
@@ -404,7 +491,7 @@ def test_fixed_1800s_pace_cannot_hide_a_week_of_intake(db):
     assert _depth(db) > 400
 
 
-def test_fourteen_day_sim_drains_1300_and_keeps_up():
+def test_fourteen_day_sim_drains_1300_and_keeps_up(tmp_path):
     """400/day proof with the hourly cap off. The default cap is the other sim."""
     conn = sqlite3.connect(":memory:", isolation_level=None)
     for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql",
@@ -478,8 +565,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
             "weekend_admissions": weekend,
             "final_depth": _depth(box),
         }
-        path = Path("/opt/cursor/artifacts/marketdesk-pdf-sim.json")
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = tmp_path / "marketdesk-pdf-sim.json"
         path.write_text(json.dumps(report, indent=2))
         print("SIM", json.dumps(report))
     finally:
@@ -494,7 +580,7 @@ def _recent(stamps, now):
     return [stamp for stamp in stamps if stamp > cutoff]
 
 
-def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypatch):
+def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypatch, tmp_path):
     """Real lease and controller. The provider refuses once an hour would pass 15."""
     monkeypatch.delenv(rate.HOURLY_CAP_ENV, raising=False)
     monkeypatch.delenv(rate.DAILY_CAP_ENV, raising=False)
@@ -589,8 +675,7 @@ def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypa
         "final_depth": _depth(db), "final_interval": db.execute(
             "SELECT interval_seconds,batch_size,recover_armed FROM marketdesk_pdf_throttle").fetchone(),
     }
-    path = Path("/opt/cursor/artifacts/marketdesk-pdf-hourly-sim.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "marketdesk-pdf-hourly-sim.json"
     path.write_text(json.dumps(report, indent=2))
     print("HOURLY_SIM", json.dumps(report))
     assert floor_at is not None and floor_at - NOW < timedelta(hours=6)
