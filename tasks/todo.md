@@ -1,3 +1,13 @@
+# Probe journal liveness (2026-11-17)
+
+- [x] T1 depends_on: [] Failing tests: quiet book fresh; stale journal-sync stale; gap count > 0 stale; outside RTH unchanged.
+- [x] T2 depends_on: [T1] Judge journal freshness from service_health journal-sync and journal-gap-sli. Last-fill age informational only.
+- [x] T3 depends_on: [T2] Comments that describe the 3-day paging bound. PR, CI green. Do not merge.
+
+## Review
+
+Journal freshness during RTH is journal-sync state ok inside the registered open window (isStale, including open-bell grace) AND journal-gap-sli state ok, inside its 15-minute window, missing_exec_id_count exactly 0. Last-fill age stays on checks.journal.age_secs and journal_last_fill. It does not page. Production-shaped Tue 2026-11-17 15:00Z / fill Fri 2026-11-13 21:07Z is age 323580s: before fresh false, after fresh true.
+
 # MarketDesk PDF protected claim tier (2026-11-17)
 
 - [x] T1 Preferred desk and book rows outrank ordinary research and do not age out while an ordinary in-window row is pending.

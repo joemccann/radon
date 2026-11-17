@@ -712,6 +712,28 @@ def _freshness_raw(status=200, payload=None):
 
 
 class TestClassifyFreshness:
+    def test_additive_journal_last_fill_stays_fresh(self):
+        # Last-fill age is informational. An extra key inside a check is
+        # malformed; a top-level journal_last_fill is not.
+        payload = {
+            **FRESHNESS_CONTRACT_FIXTURE,
+            "journal_last_fill": {
+                "age_secs": 323580,
+                "warning": (
+                    "last fill is older than 3 days; "
+                    "journal freshness follows pipeline liveness"
+                ),
+            },
+            "checks": {
+                **FRESHNESS_CONTRACT_FIXTURE["checks"],
+                "journal": {"applicable": True, "age_secs": 323580, "fresh": True},
+            },
+        }
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+        assert result["freshness_ok"] == 1
+        assert result["availability_ok"] == 1
+        assert result["detail"] == "fresh"
+
     def test_200_all_fresh_true_is_healthy(self):
         result = probe.classify_freshness(_freshness_raw())
         assert result["freshness_ok"] == 1

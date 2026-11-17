@@ -7,13 +7,17 @@
  *
  *   { generated_at, market_state, database_ok, database_failures,
  *     checks: { relay_tick, vcg_scan, gex_scan, journal },
- *     all_fresh }
+ *     all_fresh, journal_last_fill }
  *
  * Each check is { applicable, age_secs, fresh }. applicable=false (and
  * fresh=null) when the market-state windows say the writer is expected
  * quiet — NEVER a uniform staleness model (feedback_service_health_staleness,
  * feedback_extended_market_state_window). all_fresh ANDs the applicable
  * checks and is null when none apply.
+ *
+ * journal_last_fill is additive. The Tier-3 classifier ignores unknown
+ * top-level keys and rejects any extra key inside a check, so last-fill
+ * age stays out of the paging decision.
  *
  * No DB, no clock, no fetch in this module — the route supplies raw inputs
  * and `now`, so the whole matrix is unit-testable with a pinned clock.
@@ -46,6 +50,27 @@ export type ProbeFreshnessPayload = {
   all_fresh: boolean | null;
   database_ok: boolean;
   database_failures: string[];
+  /** Last journal fill. Informational. Does not affect all_fresh. */
+  journal_last_fill: JournalLastFill;
+};
+
+/** One service_health row for a journal pipeline writer. */
+export type JournalHealthRow = {
+  state: string;
+  last_error: string | null;
+  updated_at: string | null;
+};
+
+export type JournalCheckInput = {
+  writtenAt: string | null;
+  journalSync: JournalHealthRow | null;
+  journalGapSli: JournalHealthRow | null;
+};
+
+export type JournalLastFill = {
+  age_secs: number | null;
+  /** Set when the newest fill is older than {@link JOURNAL_LAST_FILL_QUIET_MS}. */
+  warning: string | null;
 };
 
 /** The relay's service_health row, as read from Turso. */
@@ -63,8 +88,12 @@ export type ProbeFreshnessInputs = {
   vcgScanTime: string | null;
   /** MAX(scan_time) from gex_snapshots. */
   gexScanTime: string | null;
-  /** MAX(written_at) from journal. */
+  /** MAX(written_at) from journal. Informational. Does not page. */
   journalWrittenAt: string | null;
+  /** service_health row `journal-sync`. */
+  journalSync: JournalHealthRow | null;
+  /** service_health row `journal-gap-sli`. Detail lives in last_error. */
+  journalGapSli: JournalHealthRow | null;
   /** Query labels that failed, distinct from valid empty result sets. */
   databaseFailures?: string[];
 };
@@ -86,11 +115,14 @@ export const RELAY_HEARTBEAT_STALE_MS = 5 * 60_000;
  * so the two regimes read as the two distinct assertions they are. */
 export const RELAY_IDLE_HEARTBEAT_STALE_MS = RELAY_HEARTBEAT_STALE_MS;
 
-/** Fills are only asserted loosely: the account trades most sessions, so a
- * journal silent past the weekend-covering window (Fri 16:00 ET -> Mon
- * 09:30 ET ~ 65h) during RTH signals a dead fill pipeline. Matches the
- * journal-sync closed window in serviceHealthWindows. */
-export const JOURNAL_FRESH_WINDOW_MS = 3 * 24 * 3_600_000;
+/** Quiet-book note only. A last fill older than this sets
+ * journal_last_fill.warning and does not change checks.journal.fresh.
+ * This book goes days without a fill (Fri close through the next session),
+ * so a calendar bound on MAX(written_at) pages a live pipeline. */
+export const JOURNAL_LAST_FILL_QUIET_MS = 3 * 24 * 3_600_000;
+
+export const JOURNAL_LAST_FILL_WARNING =
+  "last fill is older than 3 days; journal freshness follows pipeline liveness";
 
 const NOT_APPLICABLE: ProbeCheck = { applicable: false, age_secs: null, fresh: null };
 
@@ -205,24 +237,64 @@ export function evaluateScanCheck(
   };
 }
 
+function lastFillAgeSecs(writtenAt: string | null, nowMs: number): number | null {
+  const parsed = parseScanTime(writtenAt);
+  return ageSecsFrom(parsed ? parsed.getTime() : null, nowMs);
+}
+
+function missingExecCount(lastError: string | null): number | null {
+  if (!lastError) return null;
+  try {
+    const parsed: unknown = JSON.parse(lastError);
+    if (!parsed || typeof parsed !== "object") return null;
+    const count = (parsed as Record<string, unknown>).missing_exec_id_count;
+    return typeof count === "number" && Number.isFinite(count) ? count : null;
+  } catch {
+    return null;
+  }
+}
+
+/** journal-sync heartbeats service_health every cycle (300s), including
+ * a cycle that imports nothing. The open window is 10 minutes, with the
+ * same open-bell grace isStale gives every other RTH-only writer. */
+function journalSyncLive(row: JournalHealthRow | null, nowMs: number): boolean {
+  if (!row || row.state !== "ok") return false;
+  return !isStale("journal-sync", row.updated_at, "open", nowMs);
+}
+
+/** journal-gap-sli writes the same table every 5 minutes, 24/7, with
+ * missing_exec_id_count in last_error. Healthy means state ok, inside the
+ * 15-minute window, and a count of exactly 0. */
+function gapSliHealthy(row: JournalHealthRow | null, nowMs: number): boolean {
+  if (!row || row.state !== "ok") return false;
+  if (isStale("journal-gap-sli", row.updated_at, "open", nowMs)) return false;
+  return missingExecCount(row.last_error) === 0;
+}
+
+export function journalLastFill(writtenAt: string | null, nowMs: number): JournalLastFill {
+  const age_secs = lastFillAgeSecs(writtenAt, nowMs);
+  const quiet = age_secs !== null && age_secs * 1000 > JOURNAL_LAST_FILL_QUIET_MS;
+  return { age_secs, warning: quiet ? JOURNAL_LAST_FILL_WARNING : null };
+}
+
 /**
- * journal — fills are only expected while the market trades, so the check
- * applies during "open" and asserts the newest row is inside the
- * weekend-covering window (a hard intraday window would false-alarm on any
- * quiet trading morning).
+ * journal — applicable during RTH only. fresh follows pipeline liveness:
+ * journal-sync's service_health heartbeat and journal-gap-sli reporting
+ * missing_exec_id_count=0, each inside the window serviceHealthWindows
+ * already registers. age_secs stays the last-fill age and does not page.
+ * A missing row, a non-ok state, a stale heartbeat, or a gap count above
+ * 0 is not fresh. Outside RTH the leg is inapplicable.
  */
 export function evaluateJournalCheck(
-  writtenAt: string | null,
+  input: JournalCheckInput,
   market: MarketState,
   nowMs: number,
 ): ProbeCheck {
   if (market !== "open") return NOT_APPLICABLE;
-  const parsed = parseScanTime(writtenAt);
-  const age_secs = ageSecsFrom(parsed ? parsed.getTime() : null, nowMs);
   return {
     applicable: true,
-    age_secs,
-    fresh: age_secs !== null && age_secs * 1000 <= JOURNAL_FRESH_WINDOW_MS,
+    age_secs: lastFillAgeSecs(input.writtenAt, nowMs),
+    fresh: journalSyncLive(input.journalSync, nowMs) && gapSliHealthy(input.journalGapSli, nowMs),
   };
 }
 
@@ -236,7 +308,15 @@ export function buildFreshnessPayload(
     relay_tick: evaluateRelayTick(inputs.relayRow, market, nowMs),
     vcg_scan: evaluateScanCheck("vcg-scan", inputs.vcgScanTime, market, nowMs),
     gex_scan: evaluateScanCheck("gex-scan", inputs.gexScanTime, market, nowMs),
-    journal: evaluateJournalCheck(inputs.journalWrittenAt, market, nowMs),
+    journal: evaluateJournalCheck(
+      {
+        writtenAt: inputs.journalWrittenAt,
+        journalSync: inputs.journalSync,
+        journalGapSli: inputs.journalGapSli,
+      },
+      market,
+      nowMs,
+    ),
   };
   const applicable = Object.values(checks).filter((check) => check.applicable);
   const database_failures = [...(inputs.databaseFailures ?? [])];
@@ -249,5 +329,6 @@ export function buildFreshnessPayload(
     all_fresh,
     database_ok: database_failures.length === 0,
     database_failures,
+    journal_last_fill: journalLastFill(inputs.journalWrittenAt, nowMs),
   };
 }

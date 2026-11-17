@@ -4,6 +4,7 @@ import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/api
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
 import {
   buildFreshnessPayload,
+  type JournalHealthRow,
   type ProbeFreshnessInputs,
   type RelayHealthRow,
 } from "@/lib/probeFreshness";
@@ -51,23 +52,73 @@ async function readLatestTimestamp(
   return value == null ? null : String(value);
 }
 
+/** journal-sync and journal-gap-sli already heartbeat service_health.
+ * One read, same failure slot as the journal leg: a missed row is
+ * "not proved live", not a new database_failures name. */
+async function readJournalPipeline(): Promise<{
+  journalSync: JournalHealthRow | null;
+  journalGapSli: JournalHealthRow | null;
+}> {
+  const result = await dbExecute(
+    {
+      sql: `SELECT service, state, last_error, updated_at
+            FROM service_health
+            WHERE service IN ('journal-sync', 'journal-gap-sli')`,
+      args: [],
+    },
+    { label: "freshness journal pipeline" },
+  );
+  let journalSync: JournalHealthRow | null = null;
+  let journalGapSli: JournalHealthRow | null = null;
+  for (const row of result.rows) {
+    const record = row as unknown as {
+      service?: unknown;
+      state?: unknown;
+      last_error?: unknown;
+      updated_at?: unknown;
+    };
+    const health: JournalHealthRow = {
+      state: String(record.state ?? ""),
+      last_error: record.last_error == null ? null : String(record.last_error),
+      updated_at: record.updated_at == null ? null : String(record.updated_at),
+    };
+    const service = record.service == null ? "" : String(record.service);
+    if (service === "journal-sync") journalSync = health;
+    if (service === "journal-gap-sli") journalGapSli = health;
+  }
+  return { journalSync, journalGapSli };
+}
+
+async function readJournalLeg(): Promise<
+  Pick<ProbeFreshnessInputs, "journalWrittenAt" | "journalSync" | "journalGapSli">
+> {
+  const [journalWrittenAt, pipeline] = await Promise.all([
+    readLatestTimestamp("journal", "SELECT MAX(written_at) AS latest FROM journal"),
+    readJournalPipeline(),
+  ]);
+  return { journalWrittenAt, ...pipeline };
+}
+
 async function gatherInputs(): Promise<ProbeFreshnessInputs> {
   const labels = ["relay_tick", "vcg_scan", "gex_scan", "journal"] as const;
   const reads = await Promise.allSettled([
     readRelayRow(),
     readLatestTimestamp("vcg", "SELECT MAX(scan_time) AS latest FROM vcg_snapshots"),
     readLatestTimestamp("gex", "SELECT MAX(scan_time) AS latest FROM gex_snapshots"),
-    readLatestTimestamp("journal", "SELECT MAX(written_at) AS latest FROM journal"),
+    readJournalLeg(),
   ]);
   const valueAt = <T>(index: number): T | null => {
     const result = reads[index];
     return result.status === "fulfilled" ? (result.value as T | null) : null;
   };
+  const journal = valueAt<Awaited<ReturnType<typeof readJournalLeg>>>(3);
   return {
     relayRow: valueAt<RelayHealthRow>(0),
     vcgScanTime: valueAt<string>(1),
     gexScanTime: valueAt<string>(2),
-    journalWrittenAt: valueAt<string>(3),
+    journalWrittenAt: journal?.journalWrittenAt ?? null,
+    journalSync: journal?.journalSync ?? null,
+    journalGapSli: journal?.journalGapSli ?? null,
     databaseFailures: labels.filter(
       (_, index) => reads[index].status === "rejected",
     ),
