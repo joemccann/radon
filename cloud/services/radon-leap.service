@@ -1,7 +1,8 @@
 [Unit]
 Description=Radon LEAP IV-mispricing refresh (leap_scanner_uw via FastAPI /leap/scan)
 After=network.target radon-api.service
-Wants=radon-api.service
+# Ordering only: a polkit-granted rerun must not pull radon-api.service back
+# up while a deploy or operator hold has it stopped.
 
 # DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)

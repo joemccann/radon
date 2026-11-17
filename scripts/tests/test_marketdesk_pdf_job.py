@@ -516,3 +516,46 @@ def test_file_missing_does_not_hide_a_real_failure_in_the_same_batch(tmp_path):
     with pytest.raises(job.DownloadDeferred, match="not_pdf"):
         job.run_cycle(env={}, deps=dependency)
     assert [code for code, _ in dependency.store.retries] == ["file_missing", "not_pdf"]
+
+
+def _breach_cycle(breach):
+    rows = []
+
+    class Store(Queue):
+        def claim_batch(self, **kwargs):
+            return []
+        def backlog_breach(self, **kwargs):
+            return breach
+
+    @contextmanager
+    def recording(*args, **kwargs):
+        handle = SimpleNamespace(finished_at=None, warning=None)
+        try:
+            yield handle
+        except BaseException as exc:
+            rows.append(("error", str(exc)))
+            raise
+        rows.append(("warn", handle.warning) if handle.warning else ("ok", None))
+
+    dependency = deps(Path("/nonexistent"))
+    dependency.store = Store()
+    dependency.service_cycle = recording
+    return dependency, rows
+
+
+def test_draining_backlog_reports_warn_and_exits_zero(monkeypatch):
+    from research.marketdesk_pdf_store import BacklogBreach
+    message = "PDF archive backlog: pending=588 oldest_h=258 growing=0 stalled=0"
+    dependency, rows = _breach_cycle(BacklogBreach(message, paging=False))
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    assert job.main([]) == 0
+    assert rows == [("warn", message)]
+
+
+def test_growing_backlog_still_records_error(monkeypatch):
+    from research.marketdesk_pdf_store import BacklogBreach
+    message = "PDF archive backlog: pending=900 oldest_h=30 growing=1 stalled=0"
+    dependency, rows = _breach_cycle(BacklogBreach(message, paging=True))
+    monkeypatch.setattr(job, "default_deps", lambda: dependency)
+    job.main([])
+    assert rows == [("error", message)]

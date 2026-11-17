@@ -161,6 +161,11 @@ ADMISSION_SHED_MARKER="discover rate limit shed"
 # curl budget. Same oneshot policy as a short rate limit: exit 75, no retry,
 # no direct discover.py. A provider-outage 400 keeps the hard error.
 BUDGET_SHED_MARKER="discover budget shed"
+# discover.py sets this when the fail-fast client times out one UW page
+# (max_retries=0, 30s) and nothing was scored. Same oneshot policy as a
+# short rate limit: exit 75, no retry, no direct discover.py. A completed
+# provider error keeps the hard error string.
+TRANSPORT_SHED_MARKER="discover transport shed"
 
 _is_capacity_shed() {
     # $1 = curl exit, $2 = http code, $3 = response body
@@ -184,6 +189,13 @@ _is_budget_shed() {
     [ "$1" -eq 0 ] || return 1
     [ "$2" = "400" ] || return 1
     printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$BUDGET_SHED_MARKER"
+}
+
+_is_transport_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    [ "$2" = "400" ] || return 1
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$TRANSPORT_SHED_MARKER"
 }
 
 _retryable_flow_shed() {
@@ -266,6 +278,11 @@ refresh_scan() {
 
     if _is_budget_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         echo "$(date): ${label} shed for the post budget (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$SHED_EXIT"
+    fi
+
+    if _is_transport_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        echo "$(date): ${label} shed for a UW transport timeout (http=${HTTP_CODE}); the next slot retries" >&2
         return "$SHED_EXIT"
     fi
 

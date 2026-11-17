@@ -628,6 +628,21 @@ failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
   readable aggregate that is not yet serving-path-ok. A raw 502 still
   pages. A stranded journal still does not suppress. Outside the
   journal, a readable down aggregate still pages.
+- **2026-11-14 20:40Z follow-on:** page `1f7d0c4e3b198cdecc4ed6e4743f93d9`.
+  Deploy via SSH for `a5cdd5f1c6` failed 20:34:06Z-20:37:07Z
+  (https://github.com/joemccann/radon/actions/runs/43637794090). stop-clean
+  dropped `radon-health` at 20:36:34Z and recover brought it back at
+  20:37:00Z. The 20:36 off-box probe recorded `status_unreachable:caddy`
+  and exited 2 (https://github.com/joemccann/radon/actions/runs/43638399676).
+  commit-transition then removed the journal and left the previous green
+  marker (19:18:31Z, `1a4d5bd84c`) in place. The deadman at 20:40:02Z saw
+  the floor outside both artifacts and paged. The next probe (20:41:50Z,
+  https://github.com/joemccann/radon/actions/runs/43638836857) was
+  `edge_ok`. A Caddy floor whose sample overlaps both the deploy-root
+  lock and `radon-health` ActiveEnterTimestamp is that failed restart
+  when the serving path is already up. A raw 502 still pages. A lock
+  touch without a healthd restart still pages. A healthd restart without
+  a deploy-root action still pages. Serving-path down still pages.
 - **Regression:**
   `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
   `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
@@ -638,9 +653,16 @@ failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
   `test_caddy_floor_with_readable_down_aggregate_and_stranded_journal_still_pages`,
   `test_raw_502_with_healthd_down_during_deploy_still_pages`,
   `test_caddy_status_unreachable_outside_deploy_window_pages`,
+  `test_parse_systemctl_timestamp_accepts_healthd_active_enter`,
+  `test_failed_deploy_cleared_journal_caddy_floor_is_suppressed`,
+  `test_caddy_floor_without_deploy_root_lock_still_pages`,
+  `test_caddy_floor_healthd_restart_far_from_deploy_lock_still_pages`,
+  `test_raw_502_after_failed_deploy_restart_still_pages`,
+  `test_caddy_floor_failed_deploy_with_serving_path_down_still_pages`,
   `test_aggregate_invalid_inside_deploy_window_still_pages`.
 - **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
-  `scripts/watchdog/external_probe.py` (`_caddy_floor_during_fresh_transition`),
+  `scripts/watchdog/external_probe.py` (`_caddy_floor_during_fresh_transition`,
+  `_failed_deploy_restart_explains_caddy_floor`),
   `cloud/caddy/Caddyfile` (`handle_response` / `handle_errors`).
 
 ---
@@ -3231,7 +3253,9 @@ same fire exited OK.
   fallback is `flow-refresh-connect-refused`. `Result=signal`
   or exit 143 is deploy stop-clean. Options-flow itself raising
   `UWAPIError` (no darkpool writes, empty candidates) stays a
-  hard 400 on purpose. If `/health/lite` is down too, stand down.
+  hard 400 on purpose, except a fail-fast page timeout
+  (`candidates_found` 0, `skipped` 1, about 31s), which is
+  `flow-refresh-discover-page-timeout`. If `/health/lite` is down too, stand down.
 - **Remediation (code):** keep `degraded` and `provider_failures`
   when any ticker is skipped, and set the hard `error` only when
   `candidates` is empty. The API then returns 200 and writes the
@@ -3403,7 +3427,9 @@ a short UW rate limit in a few seconds.
   `required provider data unavailable` after a scored walk is
   `flow-refresh-discover-partial-400`. `curl: (7)` then fallback is
   `flow-refresh-connect-refused`. `Result=signal` is deploy
-  stop-clean. If `/health/lite` is down, or a Turso `SELECT 1` fails
+  stop-clean. HTTP 400 in about 31s with `candidates_found` 0 and
+  `skipped` 1 is `flow-refresh-discover-page-timeout`, not this case.
+  If `/health/lite` is down, or a Turso `SELECT 1` fails
   in the same minute, stand down.
 - **Remediation (code):** the market-wide scan uses a fail-fast client
   (`max_retries=0`, 30s page timeout, 5s admission) and stops new UW
@@ -3425,6 +3451,74 @@ a short UW rate limit in a few seconds.
 - **Code:** `scripts/discover.py` (`discover`, `fetch_options_flow`,
   `fetch_darkpool_multi`), `scripts/run_flow_refresh.sh`
   (`_is_budget_shed`).
+
+---
+
+## flow-refresh-discover-page-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when one fail-fast UW page times out and discover
+returns a hard provider error.** Peak: 2026-11-16 21:01:21Z, page
+`10df476c07a56f38742297bbfd70e677`. Same shape at 15:01:05Z the same
+session (page `828cc039f1e141e5b026ffcf66f29e2c`). Scanner and
+flow-analysis in both fires exited OK. Later hours completed or shed
+a short rate limit.
+
+- **Mechanism:** the market-wide client is fail-fast
+  (`max_retries=0`, 30s page timeout, 5s admission). One
+  `requests.Timeout` becomes
+  `UWAPIError: UW connection failed after 1 attempts`. discover mapped
+  every non-rate-limit `UWAPIError` to
+  `required provider data unavailable`. `_run_flow_tab` returned HTTP
+  400. The wrapper does not retry that body and does not launch a
+  direct `discover.py`, so the oneshot exited 1. The 21:00 discover
+  POST lasted 31.2s, one page timeout plus overhead. The 15:00 POST
+  lasted 38s, the same timeout after a short preceding call.
+  `service_health[discover]` updated in the failure second with
+  `candidates_found` 0 and `skipped` 1. Successful discovers that
+  session took 55s to 62s. `/health/lite` stayed authenticated.
+  Database stayed up. Not a deploy (`Result=exit-code`, API up since
+  the previous day).
+- **Detection:** unit journal scanner OK, flow-analysis OK, then one
+  discover POST, then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)` about
+  31s to 38s later, then
+  `Flow refresh finished with 1 failed scan(s)`. `systemctl show` is
+  `exit-code` / `ExecMainStatus=1` / `NRestarts=0`. The discover
+  health row's `updated_at` matches that second and `last_error` is
+  `required provider data unavailable` with `skipped` 1 and
+  `candidates_found` 0.
+- **Discriminating check:** `curl=0` and `http=400` about one page
+  timeout after the discover POST, not instant and not 180s.
+  `candidates_found` is 0. A scored walk with one darkpool skip is
+  `flow-refresh-discover-partial-400`. HTTP 400 in about 2s is
+  `flow-refresh-discover-admission-busy`. HTTP 400 about 45s to 70s
+  with `discover rate limit shed` is
+  `flow-refresh-discover-rate-limit-shed`. `curl=28` / `http=000` at
+  180s is `flow-refresh-discover-budget-timeout`. Instant
+  `Subprocess capacity exhausted` is `flow-refresh-capacity-502`.
+  `curl: (7)` then fallback is `flow-refresh-connect-refused`.
+  `Result=signal` is deploy stop-clean. Quota text and a completed
+  provider HTTP error stay a hard 400. If `/health/lite` is down, or
+  a Turso `SELECT 1` fails in the same minute, stand down.
+- **Remediation (code):** when the only miss is that transport
+  failure and nothing was scored, set `error` to
+  `discover transport shed`. The wrapper returns exit 75 and the
+  oneshot exits 0 with a warn health row. It does not retry the POST
+  and does not launch a direct `discover.py`. A scored name still
+  returns 200. Quota exhaustion, auth failure, and any completed
+  provider error still set the hard error and the oneshot still
+  exits 1. Do not `reset-failed`. The next timer after deploy is
+  enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_options_flow_page_timeout_sheds_instead_of_failing_the_oneshot`,
+  `test_only_darkpool_page_timeout_sheds_instead_of_failing_the_oneshot`,
+  `test_page_timeout_mixed_with_a_provider_outage_stays_a_hard_error`,
+  `scripts/tests/test_run_flow_refresh_wrapper.py::test_discover_transport_400_sheds_without_retry_or_fallback`,
+  `test_discover_provider_outage_400_still_fails_the_unit`.
+- **Code:** `scripts/discover.py` (`_provider_error_key`,
+  `_apply_provider_failures`), `scripts/run_flow_refresh.sh`
+  (`_is_transport_shed`).
 
 ---
 

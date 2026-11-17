@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -106,3 +107,31 @@ def test_file_backed_start_is_still_granted() -> None:
         ]
     )
     assert results == ["yes", "yes", "yes", "yes"]
+
+
+def _granted_rerunnable_units() -> list[str]:
+    return re.findall(r'"(radon-[a-z0-9-]+\.service)":\s*true', RULES.read_text())
+
+
+def test_granted_rerun_units_pull_in_no_other_service() -> None:
+    """A responder-account start of a granted oneshot must start only that oneshot.
+
+    Wants=/Requires=/BindsTo= on a granted unit would let the grant subject
+    start the named dependency (the API, outside the deploy lock) by proxy.
+    """
+    pull_in = ("wants", "requires", "requisite", "bindsto", "upholds")
+    granted = _granted_rerunnable_units()
+    assert len(granted) >= 20
+    offenders = []
+    for name in granted:
+        body = (SERVICES / name).read_text()
+        for line in body.splitlines():
+            key, sep, value = line.partition("=")
+            if not sep or key.strip().lower() not in pull_in:
+                continue
+            for dep in value.split():
+                # A granted oneshot may pull in another granted oneshot
+                # (radon-skew2d wants its parent); nothing else.
+                if dep.endswith(".service") and dep not in granted:
+                    offenders.append(f"{name}: {line.strip()}")
+    assert offenders == []
