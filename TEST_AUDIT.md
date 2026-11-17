@@ -12445,7 +12445,7 @@ Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 3 ne
 
 | Finding | Status | Red / green evidence |
 |---|---|---|
-| T-590 | DONE | Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
+| T-590 | SUPERSEDED | Main removed `pdf_backlog` from the dropbox row (marketdesk-pdf owns the breach); these tests were dropped when merging main. Original: Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
 | T-591 | DONE | Serial `/opt/cursor` mkdir: 2 failed (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green: 21 passed (`/tmp/t591-green.log`). Product source unchanged. |
 | T-592 | DONE | Serial 2 failed ×3 (`/tmp/delta-security-1.log`); hook stderr `bad substitution` at `:401`. Escaped-backtick `${//}` pattern. Green: 2 passed (`/tmp/t592-green.log`); `test_runner_security_hooks.py` 201 passed (`/tmp/t592-file.log`). |
 
