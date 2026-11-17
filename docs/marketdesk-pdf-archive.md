@@ -91,15 +91,16 @@ when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
 passing report stays downloadable (unset means 7, 0 turns it off). Age is
 `published_at`, the report date copied from the article ledger. `first_seen_at`
 is when the queue noticed the row and lags on backfill, so it is not the age.
-A passing pending row older than the window becomes `disposition=exhausted`
-with `disposition_reason=aged_out`. The 0112 check list cannot grow in an
-additive migration, so this reuses `exhausted` and is distinct by reason.
-Filtered rows, downloads, in-flight and expired leases, and other exhausted
-reasons (`file_missing`, `attempts_exhausted`) are not rewritten. Seed does
-not insert a second row, and a book change revives only `filtered` rows.
-Within a priority tier, pending rows are admitted newest `published_at` first,
-so a same-day report takes the cap ahead of a 6-day-old one. The lease SQL
-enforces both caps. The hourly
+An ordinary measured-research row older than the window becomes
+`disposition=exhausted` with `disposition_reason=aged_out`. A preferred-desk
+or book row does not, while an ordinary passing row inside the window is
+still pending. The 0112 check list cannot grow in an additive migration, so
+this reuses `exhausted` and is distinct by reason. Filtered rows, downloads,
+in-flight and expired leases, and other exhausted reasons (`file_missing`,
+`attempts_exhausted`) are not rewritten. Seed does not insert a second row,
+and a book change revives only `filtered` rows. Claim order is an expired
+lease, then operator priority, then those two protected reasons, then newest
+`published_at`. The lease SQL enforces both caps. The hourly
 default is a hypothesis from the 2026-11-15 pace that drew `preview_quota`
 near 18 admissions in an hour, not a published provider allowance. A missed
 fire does not stack into a catch-up burst.
@@ -209,7 +210,8 @@ are ordinary measured research. Preferred-desk and book rows are admitted
 first and are not aged out while an ordinary row inside the window is still
 pending. With arrivals spread through the session, the hourly cap of 12 and
 the rolling 70 spend slots as rows arrive. In the interleaved sim that is 7
-protected rows and 63 of 78 ordinary rows on a steady day. The ordinary rows
+protected rows and 63 of 78 ordinary rows on a steady day. Day 0, with no
+protected backlog yet, kept 65. The ordinary rows
 that do not fit age out. They do not block the next protected report.
 A normal admission wait with a young, stable queue is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
