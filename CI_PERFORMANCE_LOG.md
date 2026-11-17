@@ -2853,3 +2853,58 @@ no more than 20% higher. Status `VALIDATING`.
 cloud image/bounds tests 36 passed; scripts CIP-026 11 passed. YAML
 parses. Full suites, Vitest, Docker builds, and workflow lint are left
 to PR CI.
+
+## CIP-031 - rest shard distributes per test, not per module (2026-11-17) - VALIDATING
+
+Warm mixed deploys still wait on `pytest (rest)` before coverage and
+prestage. `--dist loadfile` keeps each module on one worker, so two
+runner suites set the shard floor even though they already lead the
+collection list. CIP-030 (open #1585) skips a second podman pull; it
+does not split those modules.
+
+Evidence, attempt-1 mixed warm rest jobs (`gh run view --json jobs`
+plus junit from run 44017827310 artifact `pytest-coverage-rest`).
+Queue 2s is excluded from the gain:
+
+| Run | Clock | Rest job | Pytest step | run_loop | security_hooks |
+|---|---|---|---|---|---|
+| [44017827310](https://github.com/joemccann/radon/actions/runs/44017827310) | 385s | 119s (job 133819978797) | 105.67s / 2482 passed | 81.16s | 52.86s |
+| [44014036689](https://github.com/joemccann/radon/actions/runs/44014036689) | 361s | 134s | — | — | — |
+| [44008732244](https://github.com/joemccann/radon/actions/runs/44008732244) | 356s | 118s | — | — | — |
+| [43675009863](https://github.com/joemccann/radon/actions/runs/43675009863) | 369s | 133s | — | — | — |
+
+Newest mixed-warm p50 clock is 365s (n=4; 10% is 37s). On 44017827310
+junit sum is 231.2s across 4 workers (balanced wall ≈58s) but loadfile
+serialized 81s + 53s. Both modules use function-scoped `tmp_path`
+sandboxes, the same shape as cloud `heavy`. Switching only rest to
+`--dist load` is expected to cut the rest job by about 40s (119s →
+~75s). `scripts-npsz` (106s) then sets the python gate with coverage
+(~20s), so gates fall from 164s toward ~130s (~34s of the 365s clock).
+Letter shards stay loadfile. No new shard (CIP-009 slot cap). Runner
+minutes fall with the shorter rest job.
+
+**Change.** `py-tests` matrix rows carry `xdist`. rest is
+`-n auto --dist load`; the other eight shards stay
+`-n auto --dist loadfile`. Shard globs, lead modules, coverage
+combine, deploy `needs`, health, recovery, rollback, and the
+40-second stability window stay.
+
+**Safety and revert trigger.** Revert if rest flakes from xdist load
+in the first five main runs, if any letter shard loses loadfile, or if
+the shard union no longer equals recursive collection.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| pytest (rest) | 119s | pending | TBD until 5 samples |
+
+Before is the rest job wall on run 44017827310 (job 133819978797).
+Acceptance remains five comparable mixed-warm deploys before and after:
+same-class p50 at least 10% and 15s faster; p95 no worse than 5% or
+15s; cold p50 no worse than 10%; runner minutes no more than 20%
+higher. Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip031_rest_load.py` was red
+(2 failed: missing `xdist` / rest still loadfile) then green (3
+passed). Related shard contracts 64 passed; path filter and gate
+integrity 68 passed. YAML parses. Full suites, Vitest, Docker builds,
+and workflow lint are left to PR CI.
