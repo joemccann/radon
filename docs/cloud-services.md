@@ -381,9 +381,9 @@ After [finalization](grok-page-responder.md#finalize-and-verify),
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
-`radon-grok-upgrade.timer` is installed enabled (daily 07:40 UTC). It
-smokes the latest stable CLI/model and auto-promotes, or stays on
-`/var/lib/radon/grok_lkg.json`. Spec in the same doc (Grok track-latest).
+`radon-grok-upgrade.timer` stays disabled. Setup never enables it, and a
+successful client replacement disables a leftover copy. The service name is
+a read-only gateway readiness check. Spec: [`grok-page-responder.md`](grok-page-responder.md#ci-managed-upgrades).
 Do not install this on any nightly runner clone under `/Users/_radonbot/radon-runner/work/` (each loop deletes and re-clones its own every night; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
