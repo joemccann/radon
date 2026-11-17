@@ -58,7 +58,12 @@ def test_normal_body_still_works(client):
     assert resp.json()["expires_at"].startswith("2026-06-25T16:00:00")
 
 
-def test_normal_ticket_validation_still_reaches_handler(client):
-    resp = client.post("/ws-ticket/validate", json={"ticket": "bogus"})
-    # Body was parsed and the bogus ticket rejected by the handler itself.
+def test_normal_ticket_validation_still_reaches_handler():
+    from scripts.api import server
+
+    # Loopback peer, as the relay is: the local-trust gate passes, the body is
+    # parsed and the bogus ticket is rejected by the handler itself.
+    loopback = TestClient(server.app, client=("127.0.0.1", 40000))
+    resp = loopback.post("/ws-ticket/validate", json={"ticket": "bogus"})
     assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"] == "Invalid or expired ticket"
