@@ -12410,3 +12410,51 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | credentials xdist flake then serial 11 passed; 19,716 passed / 10 skipped / 40 subtests (216.25s) | 11,627 passed / 21 skipped / 1,208 files (112.65s) | 58 failed / 4,275 passed / 23 skipped (1080.83s) | — |
 | 2 | credentials xdist flake then serial retry 2 passed; 19,716 passed / 10 skipped / 40 subtests (228.92s) | 11,627 passed / 21 skipped / 1,208 files (145.07s) | 58 failed / 4,275 passed / 23 skipped (1091.07s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,716 passed / 10 skipped / 40 subtests (171.49s) | 11,627 passed / 21 skipped / 1,208 files (116.77s) | 58 failed / 4,275 passed / 23 skipped (1098.07s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-16
+
+Range `bb8d8fe4e65808f663a324ed6b9bdf2ec4e70187..8aaad84e999430839ec8b3979b3d6a82bf661c1d`: 52 commits / 79 paths. Newest trusted checkpoint on issue #83 is `audited-through: bb8d8fe4e65808f663a324ed6b9bdf2ec4e70187` (collaborator, 2026-11-14). It carried no open verified finding. No open `testing/` pull request. Highest id T-589. Next id T-590.
+
+Codemap (`tools/codemap/codemap.json`) has no node for `scripts/db/post_id.js`, `scripts/research/marketdesk_pdf_rate.py`, `cloud/scripts/deploy.sh`, or the runner hooks. `rg` confirmed importers: `web/tests/newsfeed-post-id-namespace.test.ts` for the post-id guard; `scripts/tests/test_marketdesk_pdf_sim.py` and `scripts/tests/test_marketdesk_pdf_store.py` for PDF admission; `cloud/tests/test_deploy_premigrate.py` for premigrate; `scripts/tests/test_runner_checkpoint_hook.py` for the checkpoint hook. Inverse: `scripts/research/marketdesk_job.py:176` now sets `pdf_backlog=marketdesk_pdf_store.backlog_breach` and `:654-657` flips dropbox health, but `scripts/tests/test_marketdesk_job.py:724-739` (`test_default_deps_wire_real_modules`) asserted `enqueue_pdf` and never `pdf_backlog`, and `build_deps` left `pdf_backlog` at the dataclass default `None`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-587 / T-588 / T-589 remain DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Not filed: compact JSON byte-equality (`test_credit_spread_json_compact_budget.py:37`); `--log-driver=none` argv pin (`test_model_client_export_logging.py:38`); prompt `isCrossRepository` grep (`test_runner_prompt_checkpoint_trust.py:80-87`, the prompt is the artifact); discover ticker-cap literal `== 25` paired with a behavioral fetch list (`test_discover.py:873-874`); deploy `main()` string-order (`test_deploy_premigrate.py:75-81`) already backed by the event-order walk at `:123`.
+
+### T-590 — P1 — MarketDesk article cycle PDF backlog health is untested, so a silent dropbox-ok would not fail
+
+`scripts/research/marketdesk_job.py:176` wires `pdf_backlog=marketdesk_pdf_store.backlog_breach`. `:648-657` flips an `ok` dropbox row to `error` (and appends on `paused`) so a drowning PDF archive pages. `scripts/tests/test_marketdesk_job.py:724-739` never asserted that wiring; `build_deps` (`:235-244`) omitted `pdf_backlog`, so every job test ran with `None`. Store-level `backlog_breach` lives in `test_marketdesk_pdf_sim.py:274`. Mutation `pdf_backlog=None` plus deleting the flip: 3 failed / 1 passed (`/tmp/t590-red.log`).
+
+Acceptance: `default_deps().pdf_backlog is backlog_breach`. An uploaded cycle with a backlog string records `marketdesk-dropbox` `error` with that message. A gauge raise leaves `ok`. A paused no-creds cycle appends the backlog onto the credentials message. Wiring `None` or deleting the flip fails those cases.
+
+### T-591 — P1 — PDF sim tests mkdir `/opt/cursor/artifacts`, so correct admission math fails off Cursor
+
+`scripts/tests/test_marketdesk_pdf_sim.py:65-66` and `:377-379` write side-effect JSON under `/opt/cursor/artifacts` after the assertions. `/opt` is root-owned here (`PermissionError: [Errno 13] Permission denied: '/opt/cursor'`). Serial: 2 failed (`/tmp/delta-pdfsim-serial.log`) with every admission assert already true. The dump is not the contract.
+
+Acceptance: both sims write under pytest `tmp_path`. Reintroducing `/opt/cursor/artifacts` fails on a host that cannot mkdir `/opt/cursor`.
+
+### T-592 — P1 — Missing-agent security report log tail is empty on bash 3.2
+
+`scripts/runner/hooks/security_post.sh:401` used `clipped="${clipped//$'\x60\x60\x60'/[fence]}"`. Darwin `/bin/bash` 3.2 parses that as an unclosed backtick (`bad substitution: no closing '}'`). `_sanitize_log_tail` then returns empty, so `write_missing_phase_report` publishes a NO AGENT REPORT with a blank log fence. `scripts/tests/test_runner_security_hooks.py:657` (`test_a_missing_agent_report_publishes_a_sanitized_failure_report`) already required `"Error: CLI crashed"` in the published body. Serial: 2 failed ×3 (`/tmp/delta-security-{1,2,3}.log`). Isolated hook stderr: line 401 bad substitution; PHASE_LOG still held the crash lines.
+
+Acceptance: the missing-report body includes the crash line and `session ended` on bash 3.2. Reintroducing `$'\x60\x60\x60'` inside `${//}` fails those cases here.
+
+Audited through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d on 2026-11-16 — 3 new findings
+
+## Remediation 2026-11-16
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-590 | SUPERSEDED | Main removed `pdf_backlog` from the dropbox row (marketdesk-pdf owns the breach); these tests were dropped when merging main. Original: Wiring `None` + deleted flip: 3 failed / 1 passed (`/tmp/t590-red.log`). Restored product source. Green: 4 passed (`/tmp/t590-green.log`); `test_marketdesk_job.py` 96 passed. Product source unchanged. |
+| T-591 | DONE | Serial `/opt/cursor` mkdir: 2 failed (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green: 21 passed (`/tmp/t591-green.log`). Product source unchanged. |
+| T-592 | DONE | Serial 2 failed ×3 (`/tmp/delta-security-1.log`); hook stderr `bad substitution` at `:401`. Escaped-backtick `${//}` pattern. Green: 2 passed (`/tmp/t592-green.log`); `test_runner_security_hooks.py` 201 passed (`/tmp/t592-file.log`). |
+
+### Closing gates 2026-11-16
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1 EXIT 0. r2 and r3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (2 passed each). Vitest EXIT 0 each round. Cloud EXIT 1 each round. r2 and r3 match the origin/main worktree at `8aaad84e9` (58 nodes, 0 added / 0 removed). r1 added one extra `test_a_severed_post_is_not_replayed` that was absent on main and on r2/r3. Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 19,823 passed / 10 skipped / 40 subtests (101.54s) | 11,631 passed / 21 skipped / 1,209 files (49.96s) | 59 failed / 4,284 passed / 23 skipped (964.70s) | 1 added (`test_a_severed_post_is_not_replayed`) |
+| 2 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (156.49s) | 11,631 passed / 21 skipped / 1,209 files (101.16s) | 58 failed / 4,285 passed / 23 skipped (981.70s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (152.75s) | 11,631 passed / 21 skipped / 1,209 files (102.79s) | 58 failed / 4,285 passed / 23 skipped (972.75s) | 0 added / 0 removed |
