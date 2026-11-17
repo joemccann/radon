@@ -162,9 +162,13 @@ retain already-stored PDF outbox assets. They do not authorize new downloads.
 
 `marketdesk-pdf` uses a continuous 15-minute freshness window, maps to
 `radon-marketdesk-pdf.service`, and reports error during provider backoff.
-It also reports error when the eligible active backlog is older than 24 hours
-or its depth is growing past 48 rows. The message is
-`PDF archive backlog: pending=N oldest_h=H growing=0|1`.
+It flags the eligible active backlog when it is older than 24 hours or its
+depth is growing past 48 rows. The message is
+`PDF archive backlog: pending=N oldest_h=H growing=0|1 stalled=0|1`.
+A backlog that is still being admitted reports `warn`, which never pages
+(2026-11-17: 588 rows admitted oldest-first every ~48 min held the row red).
+It reports `error` and pages when the depth is growing, no row was admitted in
+the last 6 hours (`stalled=1`), or the oldest row is older than 14 days.
 Only `marketdesk-pdf` reports this breach. `marketdesk-dropbox` reflects the Dropbox
 outbox alone (2026-11-16): one condition on two rows read as a Dropbox fault, and the
 second caller overwrote `observed_pending` minutes apart, so `growing` compared two

@@ -69,6 +69,27 @@ class TestSuccessPath:
         assert kwargs["finished_at"] == "2026-06-12T14:00:00Z"
         assert kwargs["started_at"]  # stamped on entry
 
+    def test_warning_on_clean_exit_records_a_warn_row(self, health_calls):
+        """A healthy writer reporting a known, self-resolving condition. warn never pages."""
+        from db.service_cycle import service_cycle
+
+        with service_cycle("marketdesk-pdf", market_hours_class="continuous") as cycle:
+            cycle.warning = "PDF archive backlog: pending=588 oldest_h=258 growing=0 stalled=0"
+
+        [(service, state, kwargs)] = health_calls
+        assert (service, state) == ("marketdesk-pdf", "warn")
+        assert kwargs["error"] == {"message": "PDF archive backlog: pending=588 oldest_h=258 growing=0 stalled=0"}
+
+    def test_exception_still_records_error_when_a_warning_was_set(self, health_calls):
+        from db.service_cycle import service_cycle
+
+        with pytest.raises(RuntimeError):
+            with service_cycle("marketdesk-pdf", market_hours_class="continuous") as cycle:
+                cycle.warning = "draining"
+                raise RuntimeError("boom")
+
+        assert [state for _s, state, _k in health_calls] == ["error"]
+
     @pytest.mark.parametrize("failure", [KeyboardInterrupt("stopped"), SystemExit(143)])
     def test_control_flow_cancellation_records_error_and_reraises_original(self, health_calls, failure):
         from db.service_cycle import service_cycle
