@@ -25,6 +25,13 @@ def localhost_bypass(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def isolated_cache_dir(tmp_path, monkeypatch):
+    from scripts.api import server
+    monkeypatch.setattr(server, "DATA_DIR", tmp_path)
+    return tmp_path
+
+
 @pytest.fixture
 def client():
     from scripts.api.server import app
