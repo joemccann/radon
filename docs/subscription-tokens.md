@@ -214,7 +214,7 @@ may itself contain a failure-specific recovery command, such as the fallback
 from an explicitly requested unsupported push login. Paging thresholds and
 cooldowns still apply.
 
-The aggregate `service_health` state is the worst provider state of the run.
+The aggregate `service_health` state is the worst provider state of the run. The gateway pass stamps `last_attempt_finished_at` on every write, and an `error` detail names each provider that needs attention (`anthropic=needs_reauth`).
 
 Exit codes: `0` when every provider is `live`, `refreshed`, `restored` or
 `unbootstrapped`; `1` when at least one is `needs_reauth`, `error` or
