@@ -15,7 +15,7 @@ import uuid
 from api.db_http import hrana_execute, hrana_transaction
 from research import marketdesk_pdf_policy as policy
 from research.marketdesk_pdf_rate import (
-    FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, on_quota, on_soft, on_success,
+    FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, max_age_days, on_quota, on_soft, on_success,
     row_cooldown_seconds,
 )
 
@@ -29,7 +29,6 @@ LEASE_SECONDS = 600
 MIN_INTERVAL_SECONDS = FLOOR_SECONDS
 MAX_ITEM_ATTEMPTS = 8
 ITEM_BACKOFF_CAP = 86400
-FRESH_WINDOW_DAYS = 1.5
 OLDEST_SLA_SECONDS = 24 * 60 * 60
 GROWTH_FLOOR = 48
 STALL_SECONDS = 6 * 60 * 60
@@ -224,21 +223,41 @@ def _sync_disposition(context_hash, now):
         "WHERE disposition='active' AND (attempts - attempts_baseline)>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
         "OR julianday(lease_until)<=julianday(?))",
         (stamp, MAX_ITEM_ATTEMPTS, stamp))
+    _retire_aged(context_hash, now)
+
+
+def _retire_aged(context_hash, now):
+    """Passing pending rows older than the window leave the backlog.
+
+    Age is published_at. Enqueue and seed copy it from the article ledger, so
+    it is the report date. first_seen_at is when this queue noticed the row
+    and lags on backfill. The 0112 disposition CHECK cannot grow in an
+    additive migration, so the mark is exhausted with reason aged_out.
+    Filtered rows, exhausted rows, downloads, and live or expired leases stay
+    as they are. A book change revives only filtered rows.
+    """
+    days = max_age_days()
+    if days <= 0:
+        return
+    current = _time(now)
+    hrana_execute(
+        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
+        "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
+        f"AND article_id IN ({_selected()})",
+        (_stamp(current), _stamp(current - timedelta(days=days)), context_hash))
 
 
 def _due_sql():
-    # An expired download is ahead of the fresh/backlog lane. A killed batch
-    # otherwise sits out a whole fresh-lane turn, and with a long interval
-    # that is hours. Fresh lane (lane 0) then takes reports from the last 36h,
-    # newest first, then the oldest backlog. Priority still wins over both.
+    """Expired leases first, then priority, then newest published_at.
+
+    Intake above the daily cap used to alternate a fresh lane with the oldest
+    backlog, so a same-day report waited behind rows the age window retires.
+    Priority still outranks ordinary work. The admit trigger still flips lane.
+    That column is no longer an ordering key.
+    """
     return (
         "CASE WHEN status='downloading' AND julianday(lease_until)<=julianday(?) THEN 0 ELSE 1 END,"
-        "priority DESC,"
-        "CASE WHEN (SELECT lane FROM marketdesk_pdf_throttle WHERE singleton=1)=0 "
-        "THEN CASE WHEN julianday(published_at)>=julianday(?)-? THEN 0 ELSE 1 END "
-        "ELSE CASE WHEN julianday(published_at)<julianday(?)-? THEN 0 ELSE 1 END END,"
-        "CASE WHEN julianday(published_at)>=julianday(?)-? THEN -julianday(published_at) ELSE julianday(published_at) END,"
-        "article_id")
+        "priority DESC,-julianday(published_at),article_id")
 
 
 def _cap_value(raw) -> int:
@@ -282,7 +301,7 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
         "RETURNING article_id,article_url,title,published_at,lease_token",
         (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
          context_hash, stamp, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
-         stamp, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
+         stamp,
          int(limit), daily_value, int(limit), daily_value, stamp,
          hourly_value, int(limit), hourly_value, stamp))
     work = []
@@ -441,6 +460,7 @@ def backlog_breach(*, now=None):
         context_hash = policy.load_context().key
     except policy.SelectionUnavailable:
         return None
+    _retire_aged(context_hash, current)
     rows = hrana_execute(
         "SELECT COUNT(*),MIN(first_seen_at) FROM marketdesk_pdf_queue q WHERE q.disposition='active' "
         "AND q.status IN ('pending','downloading') AND q.article_id IN (" + ELIGIBLE_IDS + ") AND ("

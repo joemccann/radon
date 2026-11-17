@@ -85,7 +85,19 @@ subtracts 30 seconds, down to 300 seconds or to `MARKETDESK_PDF_MIN_INTERVAL_SEC
 when that is higher. The batch grows by one only after 8 clean cycles, up to 6.
 `MARKETDESK_PDF_DAILY_CAP` is a rolling 24 hour admission cap (unset means 400,
 0 turns it off). `MARKETDESK_PDF_HOURLY_CAP` is a rolling 1 hour admission cap
-(unset means 12, 0 turns it off). The lease SQL enforces both. The hourly
+(unset means 12, 0 turns it off). `MARKETDESK_PDF_MAX_AGE_DAYS` is how long a
+passing report stays downloadable (unset means 7, 0 turns it off). Age is
+`published_at`, the report date copied from the article ledger. `first_seen_at`
+is when the queue noticed the row and lags on backfill, so it is not the age.
+A passing pending row older than the window becomes `disposition=exhausted`
+with `disposition_reason=aged_out`. The 0112 check list cannot grow in an
+additive migration, so this reuses `exhausted` and is distinct by reason.
+Filtered rows, downloads, in-flight and expired leases, and other exhausted
+reasons (`file_missing`, `attempts_exhausted`) are not rewritten. Seed does
+not insert a second row, and a book change revives only `filtered` rows.
+Within a priority tier, pending rows are admitted newest `published_at` first,
+so a same-day report takes the cap ahead of a 6-day-old one. The lease SQL
+enforces both caps. The hourly
 default is a hypothesis from the 2026-11-15 pace that drew `preview_quota`
 near 18 admissions in an hour, not a published provider allowance. A missed
 fire does not stack into a catch-up burst.
@@ -119,10 +131,11 @@ return if the book changes. Eight non-quota failures after `attempts_baseline` b
 `disposition=exhausted` and drop out of the backlog. Migration 0113 sets that
 baseline to the attempt count already on the row and restores any row already
 marked exhausted, so a pre-existing attempts=100 row is not dead on arrival.
-Quota errors refund the attempt. Fresh reports (published within 36 hours)
-and the oldest backlog alternate windows, so today's file is in the next
-fresh window while the backlog still drains. A download whose lease has
-already expired is ahead of that alternation and is reclaimed on the next
+Quota errors refund the attempt. Within a priority tier the queue admits
+newest `published_at` first. The fresh/backlog lane no longer splits the day:
+with intake above the daily cap, half the slots were going to rows that age
+out, and a same-day report waited behind them. A download whose lease has
+already expired is still ahead of that order and is reclaimed on the next
 claim. When a clean cycle shortens the interval, the next admission moves
 forward to that shorter interval; the hourly cap still bounds the burst.
 
@@ -182,11 +195,13 @@ writers' samples. A stalled archive timer still surfaces as a stale `marketdesk-
 Measured allowance (2026-11-16): both `preview_quota` trips on 2026-11-15
 (12:12 and 20:52 UTC) came after 73 and 74 downloads in the preceding 24 hours,
 including an 18-download hour that did not trip. Treat the provider limit as
-about 74 previews per rolling 24 hours. Eligible weekday intake is 70 to 100,
-so the backlog alarm cannot clear by pacing alone. It needs a larger provider
-allowance, a narrower PDF policy, or an operator decision to retire old rows.
+about 74 previews per rolling 24 hours. Eligible weekday intake is 70 to 100.
 `MARKETDESK_PDF_DAILY_CAP=70` keeps admissions under the allowance, so a quota
-trip no longer doubles the interval.
+trip no longer doubles the interval. Passing rows older than
+`MARKETDESK_PDF_MAX_AGE_DAYS` (default 7) leave the active backlog, so the
+pending count is the reports still inside the window. Newest-first admission
+spends the 70 on the current day's reports. The rows that do not fit age out
+instead of blocking the next day.
 A normal admission wait with a young, stable queue is healthy. A persisted
 `preview_quota` or `download_quota` deferral keeps that error row, prints the
 deferral, and exits 0 so the 5-minute timer does not page P1 on every fire.

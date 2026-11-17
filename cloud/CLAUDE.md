@@ -146,7 +146,10 @@ admission row to 900 seconds and batch 1 so the controller ramps, with a
 rolling cap of 400 PDFs per 24 hours (`MARKETDESK_PDF_DAILY_CAP`, 0 off).
 Migration 0114 adds a rolling hourly cap (`MARKETDESK_PDF_HOURLY_CAP`, default
 12, 0 off) in that same lease, a per-row cooldown after quota, and a halving
-recovery toward the floor after a quota signal. Provider quota still doubles
+recovery toward the floor after a quota signal. Passing rows older than
+`MARKETDESK_PDF_MAX_AGE_DAYS` (default 7, 0 off), measured from `published_at`,
+retire as `exhausted` / `aged_out` and the same tier admits newest-first.
+Provider quota still doubles
 the interval and resets the batch to 1. Deployment
 rollback restores the installed unit/drop-in state. See
 [archive operations](../docs/marketdesk-pdf-archive.md).

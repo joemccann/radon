@@ -1,3 +1,14 @@
+# MarketDesk PDF age retirement (2026-11-17)
+
+- [x] T1 depends_on: [] Failing tests: 8-day passing row retired and out of the health backlog; 6-day still claimed; same-tier newest first; seed and book change do not revive; filtered, file_missing, downloaded unchanged; env override.
+- [x] T2 depends_on: [T1] Retire on published_at in _sync_disposition. Newest-first within priority. MARKETDESK_PDF_MAX_AGE_DAYS default 7.
+- [x] T3 depends_on: [T2] 30-day sim at 85/day and cap 70: no pending row older than the window, each day's newest 70 downloaded. 360 aged out, 90 pending.
+- [ ] T4 depends_on: [T3] Docs, container env allowlist, PR, CI green, one Pushover. Do not merge.
+
+## Review
+
+Age is published_at. Disposition is exhausted/aged_out because the 0112 CHECK cannot grow additively. Live count on 2026-11-17: 286 of 644 active passing rows retire. Newest-first keeps each day's newest 70.
+
 # MarketDesk PDF hourly cap and quota recovery (2026-11-16)
 
 - [x] T1 depends_on: [] Failing tests: hourly cap in the lease, per-row quota cooldown, recovery from 2100s to the floor in under 6h.
