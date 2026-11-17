@@ -1,7 +1,8 @@
 [Unit]
 Description=Radon CTA sync (MenthorQ positioning via scripts/run_cta_sync.sh)
 After=network.target radon-api.service
-Wants=radon-api.service
+# Ordering only: a polkit-granted rerun must not pull radon-api.service back
+# up while a deploy or operator hold has it stopped.
 
 # CTA card OCR vision cascade. Credit / billing / quota / hard provider
 # fail falls through; ops_only only if the whole cascade misses.

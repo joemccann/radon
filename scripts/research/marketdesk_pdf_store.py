@@ -15,7 +15,8 @@ import uuid
 from api.db_http import hrana_execute, hrana_transaction
 from research import marketdesk_pdf_policy as policy
 from research.marketdesk_pdf_rate import (
-    FLOOR_SECONDS, daily_cap, jittered_delay, load_state, on_quota, on_soft, on_success,
+    FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, on_quota, on_soft, on_success,
+    row_cooldown_seconds,
 )
 
 ARTICLE_BASE = "https://marketdesk.ai/library/browse/"
@@ -31,6 +32,18 @@ ITEM_BACKOFF_CAP = 86400
 FRESH_WINDOW_DAYS = 1.5
 OLDEST_SLA_SECONDS = 24 * 60 * 60
 GROWTH_FLOOR = 48
+STALL_SECONDS = 6 * 60 * 60
+PAGING_AGE_SECONDS = 14 * 24 * 60 * 60
+
+
+@dataclass(frozen=True)
+class BacklogBreach:
+    """An aged backlog pages while it grows, admission stalls, or its oldest row passes 14 days."""
+    message: str
+    paging: bool
+
+    def __str__(self):
+        return self.message
 QUOTA_ERRORS = frozenset({"preview_quota", "download_quota", "http_429"})
 # Account suspension. Each one doubles the interval and resets the batch to 1.
 SUSPENSION_CODES = frozenset({"http_401", "http_402", "http_403", "unauthenticated"})
@@ -177,11 +190,14 @@ def _priority_gate():
 
 def _rate_row():
     rows = hrana_execute(
-        "SELECT interval_seconds,batch_size,soft_streak,success_credits,jitter_bps FROM marketdesk_pdf_throttle WHERE singleton=1")
+        "SELECT interval_seconds,batch_size,soft_streak,success_credits,jitter_bps,recover_armed,recover_credits "
+        "FROM marketdesk_pdf_throttle WHERE singleton=1")
     if not rows:
         return load_state(FLOOR_SECONDS, 1, 0, 0), 0
-    interval, batch, soft, credits, jitter = rows[0]
-    return load_state(interval, batch, soft, credits), int(jitter or 0)
+    interval, batch, soft, credits, jitter, armed, recover = rows[0]
+    state = load_state(
+        interval, batch, soft, credits, recover_armed=int(armed or 0), recover_credits=int(recover or 0))
+    return state, int(jitter or 0)
 
 
 def _sync_disposition(context_hash, now):
@@ -220,11 +236,19 @@ def _due_sql():
         "article_id")
 
 
-def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value):
-    """Lease up to `limit` rows, and never past the rolling 24h cap.
+def _cap_value(raw) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return 0 if value <= 0 else value
 
-    The cap is inside this statement. A second worker sees the admission rows
-    the first worker's trigger just wrote.
+
+def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_cap_value):
+    """Lease up to `limit` rows, and never past the rolling 24h or 1h cap.
+
+    Both caps are inside this statement. A second worker sees the admission
+    rows the first worker's trigger just wrote. 0 on either cap disables it.
     """
     if jitter_bps is not None:
         hrana_execute("UPDATE marketdesk_pdf_throttle SET jitter_bps=? WHERE singleton=1",
@@ -232,6 +256,8 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value):
     stamp = _stamp(current)
     token = uuid.uuid4().hex
     order = _due_sql()
+    daily_value = _cap_value(daily_cap_value)
+    hourly_value = _cap_value(hourly_cap_value)
     rows = hrana_execute(
         "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
         "lease_until=?,updated_at=? WHERE article_id IN (SELECT article_id FROM marketdesk_pdf_queue "
@@ -241,13 +267,17 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value):
         "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
         "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
         f"ORDER BY {order} LIMIT ("
-        "SELECT CASE WHEN ?=0 THEN ? ELSE MIN(?, MAX(0, ? - (SELECT COUNT(*) FROM marketdesk_pdf_admissions "
-        "WHERE julianday(admitted_at) > julianday(?) - 1))) END)) "
+        "SELECT MIN(?,"
+        "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
+        "WHERE julianday(admitted_at)>julianday(?)-1)) END,"
+        "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
+        "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))) "
         "RETURNING article_id,article_url,title,published_at,lease_token",
         (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
          context_hash, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
          stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
-         int(daily_cap_value), int(limit), int(limit), int(daily_cap_value), stamp))
+         int(limit), daily_value, int(limit), daily_value, stamp,
+         hourly_value, int(limit), hourly_value, stamp))
     work = []
     for key, url, title, published, leased in rows:
         if not ID.fullmatch(key) or url != ARTICLE_BASE + key:
@@ -256,14 +286,16 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value):
     return work
 
 
-def claim_batch(*, now=None, jitter_bps=0, daily_cap_value=None):
+def claim_batch(*, now=None, jitter_bps=0, daily_cap_value=None, hourly_cap_value=None):
     """One shared window. A second caller at the same instant gets nothing."""
     current = _time(now)
     context_hash = prepare_selection(now=current)
     _sync_disposition(context_hash, current)
     state, _jitter = _rate_row()
     cap = daily_cap() if daily_cap_value is None else int(daily_cap_value)
-    return _lease(current, context_hash, limit=state.batch_size, jitter_bps=jitter_bps, daily_cap_value=cap)
+    hour = hourly_cap() if hourly_cap_value is None else int(hourly_cap_value)
+    return _lease(current, context_hash, limit=state.batch_size, jitter_bps=jitter_bps,
+                  daily_cap_value=cap, hourly_cap_value=hour)
 
 
 def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
@@ -272,7 +304,8 @@ def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     current = _time(now)
     context_hash = prepare_selection(now=current)
     _sync_disposition(context_hash, current)
-    rows = _lease(current, context_hash, limit=1, jitter_bps=0, daily_cap_value=daily_cap())
+    rows = _lease(
+        current, context_hash, limit=1, jitter_bps=0, daily_cap_value=daily_cap(), hourly_cap_value=hourly_cap())
     return rows[0] if rows else None
 
 
@@ -317,17 +350,21 @@ def retry(work, error, *, now=None, backoff_seconds=900, retry_after=None, suspe
         wait = retry_after
         new_state, delay = on_quota(state, retry_after=wait)
         delay = jittered_delay(delay, 0)
+        # Bound the row deadline here. A subquery of the throttle clock can
+        # still see the pre-quota value and leave the same file claimable.
+        cooled = row_cooldown_seconds(delay, new_state.interval_seconds)
         statements.append((
             "UPDATE marketdesk_pdf_throttle SET interval_seconds=?,batch_size=?,soft_streak=0,success_credits=0,"
-            "next_attempt_at=?,quota_failures=MIN(3,quota_failures+1),last_error=? WHERE singleton=1 "
+            "recover_armed=?,recover_credits=?,next_attempt_at=?,quota_failures=MIN(3,quota_failures+1),last_error=? "
+            "WHERE singleton=1 "
             "AND EXISTS(SELECT 1 FROM marketdesk_pdf_queue WHERE article_id=? AND lease_token=?)",
-            (new_state.interval_seconds, new_state.batch_size, _stamp(current + timedelta(seconds=delay)),
-             code, work.article_id, work.token)))
+            (new_state.interval_seconds, new_state.batch_size, new_state.recover_armed, new_state.recover_credits,
+             _stamp(current + timedelta(seconds=delay)), code, work.article_id, work.token)))
         statements.append((
             "UPDATE marketdesk_pdf_queue SET status='pending',attempts=MAX(attempts-1,0),"
-            "next_attempt_at=(SELECT next_attempt_at FROM marketdesk_pdf_throttle WHERE singleton=1),"
+            "next_attempt_at=?,"
             "last_error=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE article_id=? AND lease_token=?",
-            (code, _stamp(current), work.article_id, work.token)))
+            (_stamp(current + timedelta(seconds=cooled)), code, _stamp(current), work.article_id, work.token)))
     else:
         if _soft(code):
             new_state, slowed = on_soft(state)
@@ -371,13 +408,14 @@ def release(work, *, now=None):
 
 
 def note_success(*, now=None):
-    """One additive step per clean cycle. Does not move the next admission earlier."""
+    """One clean cycle. Does not move the next admission earlier."""
     state, _jitter = _rate_row()
     new_state = on_success(state)
     hrana_execute(
-        "UPDATE marketdesk_pdf_throttle SET interval_seconds=?,batch_size=?,soft_streak=0,success_credits=? "
-        "WHERE singleton=1",
-        (new_state.interval_seconds, new_state.batch_size, new_state.success_credits))
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=?,batch_size=?,soft_streak=0,success_credits=?,"
+        "recover_armed=?,recover_credits=? WHERE singleton=1",
+        (new_state.interval_seconds, new_state.batch_size, new_state.success_credits,
+         new_state.recover_armed, new_state.recover_credits))
 
 
 def backlog_breach(*, now=None):
@@ -406,9 +444,19 @@ def backlog_breach(*, now=None):
         if seen.tzinfo is None:
             seen = seen.replace(tzinfo=timezone.utc)
         age = int((current - seen).total_seconds())
-    if (oldest and age > OLDEST_SLA_SECONDS) or growing:
-        return f"PDF archive backlog: pending={depth} oldest_h={age // 3600} growing={int(bool(growing))}"
-    return None
+    if not ((oldest and age > OLDEST_SLA_SECONDS) or growing):
+        return None
+    stalled = _admission_stalled(current)
+    message = (f"PDF archive backlog: pending={depth} oldest_h={age // 3600} "
+               f"growing={int(bool(growing))} stalled={int(stalled)}")
+    return BacklogBreach(message, paging=bool(growing) or stalled or age > PAGING_AGE_SECONDS)
+
+
+def _admission_stalled(current):
+    rows = hrana_execute(
+        "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at)>julianday(?)-?",
+        (_stamp(current), STALL_SECONDS / 86400))
+    return not (rows and int(rows[0][0] or 0))
 
 
 def attach_downloads(*, now=None, limit=25):

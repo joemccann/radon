@@ -144,7 +144,10 @@ to Turso and MarketDesk login, without model, broker or Dropbox grants.
 Migration 0103 supplies the durable queue. Migration 0113 resets the live
 admission row to 900 seconds and batch 1 so the controller ramps, with a
 rolling cap of 400 PDFs per 24 hours (`MARKETDESK_PDF_DAILY_CAP`, 0 off).
-Provider quota doubles the interval and resets the batch to 1. Deployment
+Migration 0114 adds a rolling hourly cap (`MARKETDESK_PDF_HOURLY_CAP`, default
+12, 0 off) in that same lease, a per-row cooldown after quota, and a halving
+recovery toward the floor after a quota signal. Provider quota still doubles
+the interval and resets the batch to 1. Deployment
 rollback restores the installed unit/drop-in state. See
 [archive operations](../docs/marketdesk-pdf-archive.md).
 
@@ -991,7 +994,11 @@ The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source; on
 `RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
 role-skipped because Gateway runtime surfaces are absent by design there. It
-must never read or report `.env*` contents. There is no beta carve-out: beta
+must never read or report `.env*` contents. Checkout artifacts are read
+through `_read_repo`: descriptor-relative `O_NOFOLLOW|O_NONBLOCK` opens, then
+an `fstat` gate that admits only a regular file of at most
+`MAX_REPO_ARTIFACT_BYTES` (1 MiB); anything else is a missing repo artifact
+(drift), never a blocking read. There is no beta carve-out: beta
 host artifacts were removed 2026-10-11, so a live `radon-beta*` unit or
 sudoers fragment is `config-drift` (`tests/test_beta_sunset.py`).
 

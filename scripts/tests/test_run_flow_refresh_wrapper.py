@@ -590,6 +590,43 @@ def test_discover_budget_400_sheds_without_retry_or_fallback(tmp_path: Path) -> 
     assert stub.hits.get(SCAN_PATH, 0) == 1
 
 
+def test_discover_transport_400_sheds_without_retry_or_fallback(tmp_path: Path) -> None:
+    """2026-11-16 21:01Z: discover HTTP 400 after one UW page timeout.
+
+    Scanner and flow-analysis were OK. The 400 body is the shed signal.
+    Do not retry the POST, do not launch discover.py, and do not exit 1.
+    A provider-outage 400 without that body still fails the unit.
+    """
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "scanner.py", "scanner-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "flow_analysis.py", "flow-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "discover.py", "discover-direct")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        fail_paths=frozenset({DISCOVER_PATH}),
+        fail_status=400,
+        fail_body=b'{"detail": "discover transport shed"}',
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    combined = (result.stdout + result.stderr).lower()
+    assert "shed" in combined
+    assert "transport" in combined
+    assert "indeterminate" not in combined
+    assert "fallback" not in combined
+    assert "discover-direct" not in combined
+    assert stub.hits.get(DISCOVER_PATH, 0) == 1, stub.hits
+    assert stub.hits.get(SCAN_PATH, 0) == 1
+
+
 def test_discover_provider_outage_400_still_fails_the_unit(tmp_path: Path) -> None:
     """A real provider miss stays exit 1. Only the shed body is quiet."""
     repo_dir = _repo(tmp_path)

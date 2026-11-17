@@ -215,6 +215,16 @@ def _fetch(deps, env, work, receipts):
         shutil.rmtree(temporary, ignore_errors=True)
 
 
+def _report_backlog(deps, cycle):
+    """A draining backlog is a warn row; a growing or stalled one is an error that pages."""
+    breach = getattr(deps.store, "backlog_breach", lambda **_k: None)(now=deps.now())
+    if not breach:
+        return
+    if getattr(breach, "paging", True):
+        raise DownloadDeferred(str(breach))
+    cycle.warning = str(breach)
+
+
 def run_cycle(*, env=os.environ, deps=None):
     deps = deps or default_deps()
     counts = {"seeded": 0, "attached": 0, "downloaded": 0, "throttled": 0}
@@ -230,9 +240,7 @@ def run_cycle(*, env=os.environ, deps=None):
             blocked = deps.store.blocked()
             if blocked:
                 raise DownloadDeferred("PDF archive deferred: " + blocked)
-            breach = getattr(deps.store, "backlog_breach", lambda **_k: None)(now=deps.now())
-            if breach:
-                raise DownloadDeferred(breach)
+            _report_backlog(deps, cycle)
             return counts
         root = deps.root()
         receipts = _receipts_root(root)
@@ -284,9 +292,7 @@ def run_cycle(*, env=os.environ, deps=None):
             raise DownloadDeferred("PDF archive deferred: " + fatal)
         if quiet and not verified:
             raise DownloadDeferred("PDF archive deferred: " + quiet)
-        breach = getattr(deps.store, "backlog_breach", lambda **_k: None)(now=deps.now())
-        if breach:
-            raise DownloadDeferred(breach)
+        _report_backlog(deps, cycle)
         cycle.finished_at = deps.now().isoformat()
     return counts
 
