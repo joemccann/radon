@@ -15,9 +15,9 @@
  * feedback_extended_market_state_window). all_fresh ANDs the applicable
  * checks and is null when none apply.
  *
- * journal_last_fill is additive. The Tier-3 classifier ignores unknown
- * top-level keys and rejects any extra key inside a check, so last-fill
- * age stays out of the paging decision.
+ * journal_last_fill and journal_gap_warning are additive. The Tier-3
+ * classifier ignores unknown top-level keys and rejects any extra key
+ * inside a check, so neither warning pages.
  *
  * No DB, no clock, no fetch in this module — the route supplies raw inputs
  * and `now`, so the whole matrix is unit-testable with a pinned clock.
@@ -52,6 +52,8 @@ export type ProbeFreshnessPayload = {
   database_failures: string[];
   /** Last journal fill. Informational. Does not affect all_fresh. */
   journal_last_fill: JournalLastFill;
+  /** gap-sli self-error or stale heartbeat. Informational. Does not affect all_fresh. */
+  journal_gap_warning: string | null;
 };
 
 /** One service_health row for a journal pipeline writer. */
@@ -59,6 +61,10 @@ export type JournalHealthRow = {
   state: string;
   last_error: string | null;
   updated_at: string | null;
+  /** When state is not ok: service_health_events.created_at of the transition
+   * that opened the current non-ok streak. Ok heartbeats do not write events,
+   * so this is not "last ok" while state is ok. */
+  notOkSince?: string | null;
 };
 
 export type JournalCheckInput = {
@@ -123,6 +129,12 @@ export const JOURNAL_LAST_FILL_QUIET_MS = 3 * 24 * 3_600_000;
 
 export const JOURNAL_LAST_FILL_WARNING =
   "last fill is older than 3 days; journal freshness follows pipeline liveness";
+
+export const JOURNAL_GAP_SELF_ERROR_WARNING =
+  "journal-gap-sli reported an error; journal freshness follows journal-sync";
+
+export const JOURNAL_GAP_STALE_WARNING =
+  "journal-gap-sli heartbeat is stale; journal freshness follows journal-sync";
 
 const NOT_APPLICABLE: ProbeCheck = { applicable: false, age_secs: null, fresh: null };
 
@@ -254,21 +266,37 @@ function missingExecCount(lastError: string | null): number | null {
   }
 }
 
-/** journal-sync heartbeats service_health every cycle (300s), including
- * a cycle that imports nothing. The open window is 10 minutes, with the
- * same open-bell grace isStale gives every other RTH-only writer. */
+/** journal-sync heartbeats service_health every cycle (300s), including a
+ * cycle that imports nothing. One error cycle is not a stall: get_fills
+ * returns the whole day, so the next ok recovers it. Stale only when the
+ * last ok is outside the 10-minute open window (isStale, including the
+ * open-bell grace). While state is ok, updated_at is that ok. While it is
+ * not, notOkSince is the events-row that opened the streak, which is the
+ * moment it stopped being ok. */
 function journalSyncLive(row: JournalHealthRow | null, nowMs: number): boolean {
-  if (!row || row.state !== "ok") return false;
-  return !isStale("journal-sync", row.updated_at, "open", nowMs);
+  if (!row) return false;
+  if (row.state === "ok") return !isStale("journal-sync", row.updated_at, "open", nowMs);
+  if (!row.notOkSince) return false;
+  return !isStale("journal-sync", row.notOkSince, "open", nowMs);
 }
 
-/** journal-gap-sli writes the same table every 5 minutes, 24/7, with
- * missing_exec_id_count in last_error. Healthy means state ok, inside the
- * 15-minute window, and a count of exactly 0. */
-function gapSliHealthy(row: JournalHealthRow | null, nowMs: number): boolean {
-  if (!row || row.state !== "ok") return false;
+/** A fresh gap-sli row with missing_exec_id_count>0 pages. A missing row
+ * pages. A self-error (state not ok, or no numeric count) and a stale
+ * heartbeat do not: they are warnings, and the leg still follows journal-sync. */
+function gapSliPages(row: JournalHealthRow | null, nowMs: number): boolean {
+  if (!row) return true;
   if (isStale("journal-gap-sli", row.updated_at, "open", nowMs)) return false;
-  return missingExecCount(row.last_error) === 0;
+  const count = missingExecCount(row.last_error);
+  return count !== null && count > 0;
+}
+
+export function journalGapWarning(row: JournalHealthRow | null, nowMs: number): string | null {
+  if (!row) return null;
+  if (isStale("journal-gap-sli", row.updated_at, "open", nowMs)) return JOURNAL_GAP_STALE_WARNING;
+  const count = missingExecCount(row.last_error);
+  if (count !== null && count > 0) return null;
+  if (row.state !== "ok" || count !== 0) return JOURNAL_GAP_SELF_ERROR_WARNING;
+  return null;
 }
 
 export function journalLastFill(writtenAt: string | null, nowMs: number): JournalLastFill {
@@ -278,12 +306,11 @@ export function journalLastFill(writtenAt: string | null, nowMs: number): Journa
 }
 
 /**
- * journal — applicable during RTH only. fresh follows pipeline liveness:
- * journal-sync's service_health heartbeat and journal-gap-sli reporting
- * missing_exec_id_count=0, each inside the window serviceHealthWindows
- * already registers. age_secs stays the last-fill age and does not page.
- * A missing row, a non-ok state, a stale heartbeat, or a gap count above
- * 0 is not fresh. Outside RTH the leg is inapplicable.
+ * journal — applicable during RTH only. fresh is journal-sync still ok
+ * inside its open window AND no fresh gap-sli row reporting
+ * missing_exec_id_count>0. A missing row fails the leg. A gap-sli
+ * self-error or a stale gap-sli heartbeat does not. age_secs stays the
+ * last-fill age and does not page. Outside RTH the leg is inapplicable.
  */
 export function evaluateJournalCheck(
   input: JournalCheckInput,
@@ -294,7 +321,7 @@ export function evaluateJournalCheck(
   return {
     applicable: true,
     age_secs: lastFillAgeSecs(input.writtenAt, nowMs),
-    fresh: journalSyncLive(input.journalSync, nowMs) && gapSliHealthy(input.journalGapSli, nowMs),
+    fresh: journalSyncLive(input.journalSync, nowMs) && !gapSliPages(input.journalGapSli, nowMs),
   };
 }
 
@@ -330,5 +357,6 @@ export function buildFreshnessPayload(
     database_ok: database_failures.length === 0,
     database_failures,
     journal_last_fill: journalLastFill(inputs.journalWrittenAt, nowMs),
+    journal_gap_warning: journalGapWarning(inputs.journalGapSli, nowMs),
   };
 }

@@ -718,15 +718,19 @@ class TestClassifyFreshness:
         payload = {
             **FRESHNESS_CONTRACT_FIXTURE,
             "journal_last_fill": {
-                "age_secs": 323580,
+                "age_secs": 323559,
                 "warning": (
                     "last fill is older than 3 days; "
                     "journal freshness follows pipeline liveness"
                 ),
             },
+            "journal_gap_warning": (
+                "journal-gap-sli reported an error; "
+                "journal freshness follows journal-sync"
+            ),
             "checks": {
                 **FRESHNESS_CONTRACT_FIXTURE["checks"],
-                "journal": {"applicable": True, "age_secs": 323580, "fresh": True},
+                "journal": {"applicable": True, "age_secs": 323559, "fresh": True},
             },
         }
         result = probe.classify_freshness(_freshness_raw(payload=payload))

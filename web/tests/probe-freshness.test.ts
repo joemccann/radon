@@ -12,10 +12,12 @@
  *   gex_scan   - scheduled on the 15-minute refresh driver. Fresh inside
  *                the 35-minute open window (one missed fire). Not applicable
  *                while the market is closed.
- *   journal    — RTH only. Fresh when the journal-sync service_health
- *                heartbeat is inside its open window and journal-gap-sli is
- *                inside its window with missing_exec_id_count=0. Last-fill
- *                age is informational and does not page.
+ *   journal    — RTH only. journal-sync is stale only after it has not
+ *                been ok for longer than its open window (one error cycle
+ *                does not page). journal-gap-sli pages only when a fresh
+ *                row reports missing_exec_id_count>0. A gap-sli self-error
+ *                or a stale gap-sli row is a warning. Last-fill age does
+ *                not page. A missing row is stale.
  *
  * all_fresh = AND over applicable checks; null when none are applicable.
  */
@@ -298,21 +300,31 @@ function pipelineRows(
   overrides: {
     syncAt?: string | null;
     syncState?: string;
+    /** Start of the current non-ok streak. service_health_events.created_at. */
+    notOkSince?: string | null;
     gapAt?: string | null;
     gapState?: string;
     missing?: number | null;
+    gapError?: string | null;
   } = {},
 ): { journalSync: JournalHealthRow; journalGapSli: JournalHealthRow } {
   const missing = overrides.missing === undefined ? 0 : overrides.missing;
+  const gapError = overrides.gapError;
   return {
     journalSync: {
       state: overrides.syncState ?? "ok",
       last_error: null,
       updated_at: overrides.syncAt === undefined ? iso(nowMs - 30_000) : overrides.syncAt,
+      notOkSince: overrides.notOkSince === undefined ? null : overrides.notOkSince,
     },
     journalGapSli: {
       state: overrides.gapState ?? "ok",
-      last_error: missing === null ? null : JSON.stringify({ missing_exec_id_count: missing }),
+      last_error:
+        gapError !== undefined
+          ? gapError
+          : missing === null
+            ? null
+            : JSON.stringify({ missing_exec_id_count: missing }),
       updated_at: overrides.gapAt === undefined ? iso(nowMs - 60_000) : overrides.gapAt,
     },
   };
@@ -398,11 +410,48 @@ describe("evaluateJournalCheck — pipeline liveness", () => {
     expect(result.fresh).toBe(true);
   });
 
-  it("a journal-sync error row is stale while the heartbeat is recent", () => {
+  it("one-cycle journal-sync error stays fresh", () => {
+    // The error streak just started. updated_at is the error write; notOkSince
+    // is that same transition. It was ok on the previous cycle.
     const result = evaluateJournalCheck(
       {
         writtenAt: iso(OPEN_NOW - 3_600_000),
-        ...pipelineRows(OPEN_NOW, { syncState: "error" }),
+        ...pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - 30_000),
+        }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(true);
+    expect(result.applicable).toBe(true);
+  });
+
+  it("journal-sync not ok for longer than its open window is stale", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    // Error heartbeats keep moving updated_at. The streak itself is past the window.
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - windowMs - 1_000),
+        }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(false);
+  });
+
+  it("a journal-sync error with no streak timestamp is not fresh", () => {
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, { syncState: "error", notOkSince: null }),
       },
       "open",
       OPEN_NOW,
@@ -423,17 +472,63 @@ describe("evaluateJournalCheck — pipeline liveness", () => {
     expect(result.age_secs).toBe(3_600);
   });
 
-  it("a gap-sli heartbeat past its open window is stale even with count 0", () => {
+  it("a stale gap-sli row does not page while journal-sync is live", () => {
     const windowMs = getFreshnessWindowMs("journal-gap-sli", "open");
-    const result = evaluateJournalCheck(
-      {
-        writtenAt: iso(OPEN_NOW - 3_600_000),
-        ...pipelineRows(OPEN_NOW, { gapAt: iso(OPEN_NOW - windowMs - 1_000) }),
-      },
-      "open",
-      OPEN_NOW,
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, { gapAt: iso(OPEN_NOW - windowMs - 1_000) }),
+      ),
+      new Date(OPEN_NOW),
     );
-    expect(result.fresh).toBe(false);
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli heartbeat is stale; journal freshness follows journal-sync",
+    );
+  });
+
+  it("gap-sli self-error with healthy sync is fresh and warns", () => {
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, {
+          gapState: "error",
+          gapError: "Hrana: api error 404 stream not found",
+        }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
+  });
+
+  it("gap-sli self-error does not hide a stale journal-sync", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - windowMs - 1_000),
+          gapState: "error",
+          gapError: "Hrana: api error 404 stream not found",
+        }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(false);
+    expect(payload.all_fresh).toBe(false);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
   });
 
   it("a missing pipeline row is not fresh during RTH", () => {
@@ -500,7 +595,7 @@ describe("evaluateJournalCheck — pipeline liveness", () => {
 
 describe("buildFreshnessPayload — quiet book", () => {
   const PRODUCTION_NOW = Date.parse("2026-11-17T15:00:00Z");
-  const PRODUCTION_FILL = Date.parse("2026-11-13T21:07:00Z");
+  const PRODUCTION_FILL = Date.parse("2026-11-13T21:07:21Z");
 
   it("(a) all_fresh is true in RTH when the only stale fact is last-fill age", () => {
     const payload = buildFreshnessPayload(
@@ -564,6 +659,7 @@ describe("buildFreshnessPayload — quiet book", () => {
     const age = payload.checks.journal.age_secs;
     expect(payload.market_state).toBe("open");
     expect(age).toBe(Math.round((PRODUCTION_NOW - PRODUCTION_FILL) / 1000));
+    expect(age).toBe(323559);
     expect(age).toBeGreaterThan(3 * 24 * 3_600);
     expect(payload.checks.journal.fresh).toBe(true);
     expect(payload.all_fresh).toBe(true);
@@ -591,10 +687,12 @@ describe("buildFreshnessPayload", () => {
       "database_failures",
       "database_ok",
       "generated_at",
+      "journal_gap_warning",
       "journal_last_fill",
       "market_state",
     ]);
     expect(payload.journal_last_fill).toEqual({ age_secs: 3600, warning: null });
+    expect(payload.journal_gap_warning).toBeNull();
     expect(Object.keys(payload.checks).sort()).toEqual(["gex_scan", "journal", "relay_tick", "vcg_scan"]);
     for (const check of Object.values(payload.checks)) {
       expect(Object.keys(check).sort()).toEqual(["age_secs", "applicable", "fresh"]);

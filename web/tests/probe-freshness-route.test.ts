@@ -137,6 +137,8 @@ describe("/api/probe/freshness", () => {
       (call: [{ sql: string }]) => call[0].sql,
     );
     expect(sqls.some((sql: string) => sql.includes("journal-sync") && sql.includes("journal-gap-sli"))).toBe(true);
+    expect(sqls.some((sql: string) => sql.includes("service_health_events") && sql.includes("not_ok_since"))).toBe(true);
+    expect(body.journal_gap_warning).toBeNull();
     expect(body.database_ok).toBe(true);
     expect(body.database_failures).toEqual([]);
   });
@@ -159,6 +161,61 @@ describe("/api/probe/freshness", () => {
       "last fill is older than 3 days; journal freshness follows pipeline liveness",
     );
     expect(body.database_ok).toBe(true);
+  });
+
+  it("RTH one-cycle journal-sync error stays fresh", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "error",
+          last_error: "IB connect failed",
+          updated_at: iso(OPEN_NOW - 30_000),
+          not_ok_since: iso(OPEN_NOW - 30_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "ok",
+          last_error: JSON.stringify({ missing_exec_id_count: 0 }),
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(true);
+    expect(body.all_fresh).toBe(true);
+    expect(body.journal_gap_warning).toBeNull();
+  });
+
+  it("RTH gap-sli self-error warns and stays fresh", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue(dbStub({
+      ...FRESH_DB,
+      pipeline: [
+        {
+          service: "journal-sync",
+          state: "ok",
+          last_error: null,
+          updated_at: iso(OPEN_NOW - 30_000),
+        },
+        {
+          service: "journal-gap-sli",
+          state: "error",
+          last_error: "Hrana: api error 404 stream not found",
+          updated_at: iso(OPEN_NOW - 60_000),
+        },
+      ],
+    }));
+
+    const body = await (await callRoute()).json();
+    expect(body.checks.journal.fresh).toBe(true);
+    expect(body.all_fresh).toBe(true);
+    expect(body.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
   });
 
   it("RTH stale journal-sync heartbeat: all_fresh=false", async () => {

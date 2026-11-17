@@ -61,9 +61,16 @@ async function readJournalPipeline(): Promise<{
 }> {
   const result = await dbExecute(
     {
-      sql: `SELECT service, state, last_error, updated_at
-            FROM service_health
-            WHERE service IN ('journal-sync', 'journal-gap-sli')`,
+      sql: `SELECT h.service, h.state, h.last_error, h.updated_at,
+                   (
+                     SELECT e.created_at
+                     FROM service_health_events e
+                     WHERE e.service = h.service AND e.state != 'ok'
+                     ORDER BY e.created_at DESC
+                     LIMIT 1
+                   ) AS not_ok_since
+            FROM service_health h
+            WHERE h.service IN ('journal-sync', 'journal-gap-sli')`,
       args: [],
     },
     { label: "freshness journal pipeline" },
@@ -76,11 +83,13 @@ async function readJournalPipeline(): Promise<{
       state?: unknown;
       last_error?: unknown;
       updated_at?: unknown;
+      not_ok_since?: unknown;
     };
     const health: JournalHealthRow = {
       state: String(record.state ?? ""),
       last_error: record.last_error == null ? null : String(record.last_error),
       updated_at: record.updated_at == null ? null : String(record.updated_at),
+      notOkSince: record.not_ok_since == null ? null : String(record.not_ok_since),
     };
     const service = record.service == null ? "" : String(record.service);
     if (service === "journal-sync") journalSync = health;

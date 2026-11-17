@@ -6,7 +6,7 @@
 
 ## Review
 
-Journal freshness during RTH is journal-sync state ok inside the registered open window (isStale, including open-bell grace) AND journal-gap-sli state ok, inside its 15-minute window, missing_exec_id_count exactly 0. Last-fill age stays on checks.journal.age_secs and journal_last_fill. It does not page. Production-shaped Tue 2026-11-17 15:00Z / fill Fri 2026-11-13 21:07Z is age 323580s: before fresh false, after fresh true.
+Journal freshness during RTH is journal-sync last-ok inside the registered open window (a non-ok streak pages only after that window; one error cycle does not) AND no fresh journal-gap-sli row with missing_exec_id_count>0. A gap-sli self-error or stale gap-sli row is journal_gap_warning and does not page unless journal-sync is also stale. Missing rows still page. Last-fill age stays informational. Production fill 2026-11-13T21:07:21Z at 2026-11-17T15:00Z is age 323559s.
 
 # MarketDesk PDF protected claim tier (2026-11-17)
 
