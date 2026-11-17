@@ -336,10 +336,48 @@ def test_weekend_and_overnight_still_admit(db):
 
 def test_health_flips_when_the_backlog_drains(db):
     _add(db, "Aged00001", NOW - timedelta(days=3))
-    assert store.backlog_breach(now=NOW).startswith("PDF archive backlog:")
+    assert str(store.backlog_breach(now=NOW)).startswith("PDF archive backlog:")
     batch = store.claim_batch(now=NOW, jitter_bps=0)
     _finish(db, batch, NOW)
     assert store.backlog_breach(now=NOW + timedelta(minutes=5)) is None
+
+
+def test_a_draining_backlog_breaches_without_paging(db):
+    """Live 2026-11-17: 588 eligible rows, oldest-first admission every ~48 min,
+    growing=0. That is a known drain, not an outage."""
+    for i in range(3):
+        _add(db, f"Drain{i:04d}", NOW - timedelta(days=11))
+    _finish(db, store.claim_batch(now=NOW - timedelta(hours=1), jitter_bps=0)[:1], NOW - timedelta(hours=1))
+    breach = store.backlog_breach(now=NOW)
+    assert str(breach).startswith("PDF archive backlog:")
+    assert "growing=0 stalled=0" in str(breach)
+    assert breach.paging is False
+
+
+def test_a_backlog_with_no_admission_for_six_hours_pages(db):
+    _add(db, "Stall00001", NOW - timedelta(days=3))
+    breach = store.backlog_breach(now=NOW)
+    assert "stalled=1" in str(breach)
+    assert breach.paging is True
+
+
+def test_a_backlog_past_the_age_ceiling_pages_even_while_admitting(db):
+    """Provider allowance ~74/day vs 70-100 intake: draining is not guaranteed."""
+    _add(db, "Ceiling001", NOW - timedelta(days=15))
+    db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES('x',?)", (NOW.isoformat(),))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=0 stalled=0" in str(breach)
+    assert breach.paging is True
+
+
+def test_a_growing_backlog_pages(db):
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Grow{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES('x',?)", (NOW.isoformat(),))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0" in str(breach)
+    assert breach.paging is True
 
 
 def test_fixed_1800s_pace_cannot_hide_a_week_of_intake(db):
