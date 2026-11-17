@@ -16,10 +16,17 @@ Safety reset (2026-11-14): the live row starts at 900s and batch 1, then
 ramps. It does not open at 300s and batch 6. A clean cycle subtracts 30s,
 down to the floor (300s, or MARKETDESK_PDF_MIN_INTERVAL_SECONDS when higher).
 The batch grows by one only after 8 clean cycles, up to 6. A rolling 24h cap
-defaults to 400 admissions (MARKETDESK_PDF_DAILY_CAP, 0 disables it). At that
-cap, 1,275 backlog rows plus 190 new PDFs a day clear inside 7 days. Quota
-signals, including HTTP 401/402/403 and an HTTP-date Retry-After, double the
-interval and reset the batch to 1.
+defaults to 400 admissions (MARKETDESK_PDF_DAILY_CAP, 0 disables it). A rolling
+1h cap defaults to 12 (MARKETDESK_PDF_HOURLY_CAP, 0 disables it) so a burst
+stays under the pace that drew preview_quota on 2026-11-15. That 12 is a
+hypothesis, not a published allowance. At 12 an hour, 603 backlog rows plus
+190 new PDFs a day clear in about a week. With the hourly cap off, the 400/day
+cap still clears 1,275 plus 190 a day inside 7 days. Quota signals, including
+HTTP 401/402/403 and an HTTP-date Retry-After, double the interval and reset
+the batch to 1. After that signal, every 4 clean cycles also halve the
+interval toward the floor, so 2100 seconds is back at the floor in under 6
+hours. The 900 second ramp stays additive. An interval already above 900
+seconds arms the same walk, even after last_error was cleared.
 """
 from __future__ import annotations
 
@@ -32,7 +39,8 @@ FLOOR_SECONDS = 300
 CEILING_SECONDS = 24 * 60 * 60
 # Safety reset, 2026-11-14. The live row starts here and ramps. It does not
 # open at the 300s / batch-6 ceiling. Joe raises pace by leaving this ramp
-# alone, or by setting MARKETDESK_PDF_DAILY_CAP (0 disables the cap).
+# alone, or by setting MARKETDESK_PDF_DAILY_CAP / MARKETDESK_PDF_HOURLY_CAP
+# (0 disables that cap). Neither cap is a fixed 1800s slot.
 START_INTERVAL_SECONDS = 900
 START_BATCH = 1
 MAX_BATCH = 6
@@ -43,9 +51,17 @@ SOFT_RUN = 3
 SOFT_NUMERATOR = 3
 SOFT_DENOMINATOR = 2
 BATCH_RECOVER_EVERY = 8
+# Armed only by a quota signal. Every N clean cycles, halve toward the floor.
+RECOVER_EVERY = 4
+RECOVER_NUMERATOR = 1
+RECOVER_DENOMINATOR = 2
 DEFAULT_DAILY_CAP = 400
+DEFAULT_HOURLY_CAP = 12
 DAILY_CAP_ENV = "MARKETDESK_PDF_DAILY_CAP"
+HOURLY_CAP_ENV = "MARKETDESK_PDF_HOURLY_CAP"
 FLOOR_ENV = "MARKETDESK_PDF_MIN_INTERVAL_SECONDS"
+# A quota row waits out the account delay plus at least this long.
+ROW_COOLDOWN_MIN_SECONDS = FLOOR_SECONDS
 JITTER_MAX_BPS = 1000  # 10.00% added delay. Never negative, so jitter cannot admit early.
 
 
@@ -55,6 +71,8 @@ class RateState:
     batch_size: int
     soft_streak: int
     success_credits: int
+    recover_armed: int = 0
+    recover_credits: int = 0
 
 
 def start_state() -> RateState:
@@ -74,17 +92,28 @@ def interval_floor(env=None) -> int:
     return floor
 
 
+def _cap(raw, default: int) -> int:
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return 0 if value <= 0 else min(value, 100000)
+
+
 def daily_cap(env=None) -> int:
     """Rolling 24h admission cap. 0 disables it. Unset means 400."""
     source = os.environ if env is None else env
     raw = source.get(DAILY_CAP_ENV) if hasattr(source, "get") else None
-    if raw in (None, ""):
-        return DEFAULT_DAILY_CAP
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_DAILY_CAP
-    return 0 if value <= 0 else min(value, 100000)
+    return _cap(raw, DEFAULT_DAILY_CAP)
+
+
+def hourly_cap(env=None) -> int:
+    """Rolling 1h admission cap. 0 disables it. Unset means 12."""
+    source = os.environ if env is None else env
+    raw = source.get(HOURLY_CAP_ENV) if hasattr(source, "get") else None
+    return _cap(raw, DEFAULT_HOURLY_CAP)
 
 
 def clamp_interval(seconds: int, floor: int | None = None) -> int:
@@ -96,7 +125,10 @@ def clamp_batch(size: int) -> int:
     return max(MIN_BATCH, min(MAX_BATCH, int(size)))
 
 
-def load_state(interval_seconds, batch_size, soft_streak, success_credits, floor: int | None = None) -> RateState:
+def load_state(
+    interval_seconds, batch_size, soft_streak, success_credits, floor: int | None = None, *,
+    recover_armed=0, recover_credits=0,
+) -> RateState:
     low = interval_floor() if floor is None else int(floor)
     try:
         interval = clamp_interval(int(interval_seconds), low)
@@ -114,7 +146,17 @@ def load_state(interval_seconds, batch_size, soft_streak, success_credits, floor
         credits = max(0, min(BATCH_RECOVER_EVERY, int(success_credits)))
     except (TypeError, ValueError):
         credits = 0
-    return RateState(interval, batch, soft, credits)
+    try:
+        armed = 1 if int(recover_armed) else 0
+    except (TypeError, ValueError):
+        armed = 0
+    try:
+        recover = max(0, min(RECOVER_EVERY, int(recover_credits)))
+    except (TypeError, ValueError):
+        recover = 0
+    if not armed:
+        recover = 0
+    return RateState(interval, batch, soft, credits, armed, recover)
 
 
 def on_quota(state: RateState, *, retry_after: int | None = None) -> tuple[RateState, int]:
@@ -131,8 +173,9 @@ def on_quota(state: RateState, *, retry_after: int | None = None) -> tuple[RateS
         except (TypeError, ValueError):
             pass
     delay = min(rate_ceiling(delay), CEILING_SECONDS)
-    # A quota or suspension signal drops the batch back to one file.
-    return RateState(interval, MIN_BATCH, 0, 0), delay
+    # A quota or suspension signal drops the batch back to one file and arms
+    # the fast walk back to the floor. The doubled interval is the backoff.
+    return RateState(interval, MIN_BATCH, 0, 0, 1, 0), delay
 
 
 def rate_ceiling(seconds: int) -> int:
@@ -142,14 +185,20 @@ def rate_ceiling(seconds: int) -> int:
 def on_soft(state: RateState) -> tuple[RateState, int | None]:
     """Count a 5xx or transport error. The third in a row multiplies by 1.5."""
     streak = state.soft_streak + 1
+    kept = (state.recover_armed, state.recover_credits)
     if streak < SOFT_RUN:
-        return RateState(state.interval_seconds, state.batch_size, streak, state.success_credits), None
+        return RateState(state.interval_seconds, state.batch_size, streak, state.success_credits, *kept), None
     delay = clamp_interval((state.interval_seconds * SOFT_NUMERATOR) // SOFT_DENOMINATOR, interval_floor())
-    return RateState(delay, state.batch_size, 0, state.success_credits), delay
+    return RateState(delay, state.batch_size, 0, state.success_credits, *kept), delay
 
 
 def on_success(state: RateState, floor: int | None = None) -> RateState:
-    """Subtract one step. The batch grows by one only after BATCH_RECOVER_EVERY clean cycles."""
+    """Subtract one step. After a quota signal, also halve every RECOVER_EVERY clean cycles.
+
+    The 900 second ramp is additive. An interval already above that start
+    (a quota double whose last_error was later cleared) arms the same walk.
+    Halving is the walk back to the floor, not a new steady pace.
+    """
     low = interval_floor() if floor is None else int(floor)
     interval = max(low, state.interval_seconds - ADDEND_SECONDS)
     credits = state.success_credits + 1
@@ -157,7 +206,32 @@ def on_success(state: RateState, floor: int | None = None) -> RateState:
     if credits >= BATCH_RECOVER_EVERY:
         credits = 0
         batch = min(MAX_BATCH, batch + 1)
-    return RateState(interval, batch, 0, credits)
+    armed = 1 if state.recover_armed else 0
+    # The live 2100s row has last_error NULL. The interval is the signal.
+    if not armed and state.interval_seconds > max(START_INTERVAL_SECONDS, low):
+        armed = 1
+    recover = 0
+    if armed and interval <= low:
+        armed = 0
+    elif armed:
+        recover = state.recover_credits + 1
+        if recover >= RECOVER_EVERY:
+            recover = 0
+            interval = max(low, (interval * RECOVER_NUMERATOR) // RECOVER_DENOMINATOR)
+            if interval <= low:
+                armed = 0
+    return RateState(interval, batch, 0, credits, armed, recover)
+
+
+def row_cooldown_seconds(delay: int, interval_seconds: int) -> int:
+    """The file that drew quota sits out the next account window.
+
+    The account clock waits `delay`. The row waits that plus one interval
+    (at least the floor), so the same file cannot double the clock again
+    on the next admission.
+    """
+    gap = max(int(interval_seconds), ROW_COOLDOWN_MIN_SECONDS)
+    return min(CEILING_SECONDS, max(0, int(delay)) + gap)
 
 
 def parse_retry_after(raw, *, now=None) -> tuple[int | None, bool]:
