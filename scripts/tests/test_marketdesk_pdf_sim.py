@@ -323,6 +323,53 @@ def test_expired_leases_are_reclaimed_on_the_next_claim_ahead_of_fresh_work(db):
     assert set(got[:4]) == {f"Old{i:05d}" for i in range(4)}
 
 
+def test_expired_leases_are_reclaimed_while_a_priority_cohort_holds_the_gate(db):
+    """A live priority row blocks ordinary pending work. It must not block a dead lease."""
+    _add(db, "Pri000001", NOW - timedelta(hours=1), priority=1)
+    for i in range(4):
+        _add(db, f"Old{i:05d}", NOW - timedelta(days=11))
+    _add(db, "Wait00001", NOW - timedelta(days=3))
+    db.execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading', lease_until=?, lease_token='x'||article_id "
+        "WHERE article_id LIKE 'Old%'",
+        ((NOW - timedelta(hours=2)).isoformat(),))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=5, lane=0, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    got = [item.article_id for item in store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=12, daily_cap_value=400)]
+    assert {f"Old{i:05d}" for i in range(4)} <= set(got)
+    assert "Wait00001" not in got
+
+
+def test_daily_cap_70_is_why_a_due_batch_of_5_leases_0_then_2(db, monkeypatch):
+    """Production fills a rolling day of 70, then admits only what aged out.
+
+    Unset, the code default is 400 and this same queue leases the batch of 5.
+    MARKETDESK_PDF_DAILY_CAP=70 is the host override the archive doc asks for.
+    """
+    monkeypatch.delenv("MARKETDESK_PDF_HOURLY_CAP", raising=False)
+    for i in range(8):
+        _add(db, f"Due{i:05d}", NOW - timedelta(days=4, minutes=i))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=300, batch_size=5, next_attempt_at=?, jitter_bps=0",
+        (NOW.isoformat(),))
+    inside = (NOW - timedelta(hours=1)).isoformat()
+    for i in range(70):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id, admitted_at) VALUES(?,?)", (f"A{i:07d}", inside))
+    monkeypatch.delenv("MARKETDESK_PDF_DAILY_CAP", raising=False)
+    assert len(store.claim_batch(now=NOW, jitter_bps=0)) == 5
+    db.execute("UPDATE marketdesk_pdf_queue SET status='pending', lease_token=NULL, lease_until=NULL")
+    db.execute("DELETE FROM marketdesk_pdf_admissions WHERE article_id LIKE 'Due%'")
+    db.execute("UPDATE marketdesk_pdf_throttle SET next_attempt_at=?, batch_size=5", (NOW.isoformat(),))
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    assert store.claim_batch(now=NOW, jitter_bps=0) == []
+    aged = (NOW - timedelta(hours=25)).isoformat()
+    db.execute(
+        "UPDATE marketdesk_pdf_admissions SET admitted_at=? WHERE article_id IN ('A0000000','A0000001')",
+        (aged,))
+    assert len(store.claim_batch(now=NOW, jitter_bps=0)) == 2
+
+
 def test_halving_pulls_the_next_admission_off_the_old_hourly_gap(db):
     """A halving that only rewrites interval_seconds still waits out the old hour."""
     for i in range(6):

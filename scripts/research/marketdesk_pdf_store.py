@@ -182,7 +182,10 @@ def _priority_gate():
     # A killed claim increments attempts and leaves last_error NULL. That used
     # to keep the reservation forever. Attempts alone spend it; quota errors
     # still reserve because the file itself did not fail.
-    return ("(priority=1 OR NOT EXISTS(SELECT 1 FROM marketdesk_pdf_queue pq WHERE pq.priority=1 "
+    # An expired download is already admitted. A live priority cohort must not
+    # keep that lease in 'downloading' until a later backlog turn.
+    return ("(priority=1 OR (status='downloading' AND julianday(lease_until)<=julianday(?)) "
+            "OR NOT EXISTS(SELECT 1 FROM marketdesk_pdf_queue pq WHERE pq.priority=1 "
             "AND pq.disposition='active' AND pq.status!='downloaded' AND pq.article_id IN (" + ELIGIBLE_IDS + ") "
             f"AND (pq.attempts<{PRIORITY_MAX_FAILURES} OR pq.last_error IN ({_QUOTA_SQL})) "
             "AND pq.article_id IN (" + _selected() + ")))")
@@ -260,11 +263,11 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
     order = _due_sql()
     daily_value = _cap_value(daily_cap_value)
     hourly_value = _cap_value(hourly_cap_value)
-    # Read the id list before any lease trigger runs. The trigger moves the
-    # account clock on the first row; a candidate scan that can see that write
-    # stops the rest of the batch (live claims of 2 while batch_size was 5).
-    chosen = hrana_execute(
-        "SELECT article_id FROM marketdesk_pdf_queue "
+    # One UPDATE. SQLite materializes the IN (SELECT ... LIMIT) list before any
+    # row trigger, so the admit trigger cannot shrink this batch.
+    rows = hrana_execute(
+        "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
+        "lease_until=?,updated_at=? WHERE article_id IN (SELECT article_id FROM marketdesk_pdf_queue "
         f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) AND {_priority_gate()} "
         "AND disposition='active' AND (attempts - attempts_baseline)<? "
         "AND (SELECT julianday(next_attempt_at) FROM marketdesk_pdf_throttle WHERE singleton=1)<=julianday(?) "
@@ -275,22 +278,13 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
         "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
         "WHERE julianday(admitted_at)>julianday(?)-1)) END,"
         "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
-        "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))",
-        (context_hash, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
+        "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))) "
+        "RETURNING article_id,article_url,title,published_at,lease_token",
+        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
+         context_hash, stamp, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
          stamp, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
          int(limit), daily_value, int(limit), daily_value, stamp,
          hourly_value, int(limit), hourly_value, stamp))
-    ids = [row[0] for row in chosen]
-    if not ids:
-        return []
-    placeholders = ",".join("?" for _ in ids)
-    rows = hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
-        "lease_until=?,updated_at=? WHERE article_id IN (" + placeholders + ") "
-        "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
-        "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
-        "RETURNING article_id,article_url,title,published_at,lease_token",
-        (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp, *ids, stamp, stamp))
     work = []
     for key, url, title, published, leased in rows:
         if not ID.fullmatch(key) or url != ARTICLE_BASE + key:
