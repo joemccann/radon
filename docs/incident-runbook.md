@@ -628,6 +628,21 @@ failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
   readable aggregate that is not yet serving-path-ok. A raw 502 still
   pages. A stranded journal still does not suppress. Outside the
   journal, a readable down aggregate still pages.
+- **2026-11-14 20:40Z follow-on:** page `1f7d0c4e3b198cdecc4ed6e4743f93d9`.
+  Deploy via SSH for `a5cdd5f1c6` failed 20:34:06Z-20:37:07Z
+  (https://github.com/joemccann/radon/actions/runs/43637794090). stop-clean
+  dropped `radon-health` at 20:36:34Z and recover brought it back at
+  20:37:00Z. The 20:36 off-box probe recorded `status_unreachable:caddy`
+  and exited 2 (https://github.com/joemccann/radon/actions/runs/43638399676).
+  commit-transition then removed the journal and left the previous green
+  marker (19:18:31Z, `1a4d5bd84c`) in place. The deadman at 20:40:02Z saw
+  the floor outside both artifacts and paged. The next probe (20:41:50Z,
+  https://github.com/joemccann/radon/actions/runs/43638836857) was
+  `edge_ok`. A Caddy floor whose sample overlaps both the deploy-root
+  lock and `radon-health` ActiveEnterTimestamp is that failed restart
+  when the serving path is already up. A raw 502 still pages. A lock
+  touch without a healthd restart still pages. A healthd restart without
+  a deploy-root action still pages. Serving-path down still pages.
 - **Regression:**
   `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
   `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
@@ -638,9 +653,16 @@ failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
   `test_caddy_floor_with_readable_down_aggregate_and_stranded_journal_still_pages`,
   `test_raw_502_with_healthd_down_during_deploy_still_pages`,
   `test_caddy_status_unreachable_outside_deploy_window_pages`,
+  `test_parse_systemctl_timestamp_accepts_healthd_active_enter`,
+  `test_failed_deploy_cleared_journal_caddy_floor_is_suppressed`,
+  `test_caddy_floor_without_deploy_root_lock_still_pages`,
+  `test_caddy_floor_healthd_restart_far_from_deploy_lock_still_pages`,
+  `test_raw_502_after_failed_deploy_restart_still_pages`,
+  `test_caddy_floor_failed_deploy_with_serving_path_down_still_pages`,
   `test_aggregate_invalid_inside_deploy_window_still_pages`.
 - **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
-  `scripts/watchdog/external_probe.py` (`_caddy_floor_during_fresh_transition`),
+  `scripts/watchdog/external_probe.py` (`_caddy_floor_during_fresh_transition`,
+  `_failed_deploy_restart_explains_caddy_floor`),
   `cloud/caddy/Caddyfile` (`handle_response` / `handle_errors`).
 
 ---
