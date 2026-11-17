@@ -35,6 +35,17 @@ DEPLOY_TRANSITION_JOURNAL_FILE = os.environ.get(
 )
 DEPLOY_WINDOW_LOOKBACK_SECONDS = 900
 DEPLOY_MARKER_GRACE_SECONDS = 60
+# Touched at the start of every radon-deploy-root action. Survives
+# commit-transition, which removes the journal and does not move the previous
+# green marker (2026-11-14 20:40Z, page 1f7d0c4e3b198cdecc4ed6e4743f93d9).
+DEPLOY_ROOT_LOCK_FILE = os.environ.get(
+    "RADON_DEPLOY_ROOT_LOCK", "/run/radon-deploy-root.lock"
+)
+# stop-clean to the following restart-managed or recover. The helper waits
+# up to 150s for a research unit; 180s covers that stop. A healthd crash
+# with no deploy-root action in this window still pages.
+HEALTHD_RESTART_LOOKBACK_SECONDS = 180
+HEALTHD_RESTART_GRACE_SECONDS = 60
 # R-057: an interrupted deploy leaves the transition journal on disk forever
 # (recover_pending_transition failed), a state that also blocks every later
 # deploy, so it cannot self-clear. A journal older than this is STRANDED: it
@@ -221,6 +232,85 @@ def _local_aggregate_clears_offbox_down(
     return False
 
 
+def _artifact_mtime(path: str) -> datetime | None:
+    """UTC mtime of a deploy artifact, or None when it cannot be read."""
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return None
+    return datetime.fromtimestamp(mtime, tz=timezone.utc)
+
+
+def _parse_systemctl_timestamp(raw: str) -> datetime | None:
+    """Parse `systemctl show -p ActiveEnterTimestamp --value`. Fail closed."""
+    parts = raw.split()
+    if len(parts) < 3:
+        return None
+    try:
+        parsed = datetime.strptime(f"{parts[1]} {parts[2]}", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _healthd_active_enter() -> datetime | None:
+    """When radon-health last became active. None if unreadable.
+
+    A missing timestamp must not suppress a floor page.
+    """
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            [
+                "systemctl",
+                "show",
+                "radon-health.service",
+                "-p",
+                "ActiveEnterTimestamp",
+                "--value",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_systemctl_timestamp(completed.stdout.strip())
+
+
+def _sample_overlaps_healthd_restart(sample_time: datetime, restart: datetime) -> bool:
+    """True when the off-box sample falls in this healthd stop/start."""
+    start = restart - timedelta(seconds=HEALTHD_RESTART_LOOKBACK_SECONDS)
+    end = restart + timedelta(seconds=HEALTHD_RESTART_GRACE_SECONDS)
+    return start <= sample_time <= end
+
+
+def _failed_deploy_restart_explains_caddy_floor(
+    sample_time: datetime, now: datetime
+) -> bool:
+    """True when a failed deploy's restart left this Caddy floor behind.
+
+    commit-transition removes the journal and does not move the previous
+    green marker, so the floor sample sits outside both artifacts. The root
+    lock mtime and radon-health ActiveEnterTimestamp still show that
+    restart. Both must overlap. A lock touch without a healthd restart
+    (publish-caddy) does not count. A healthd crash without a deploy-root
+    action does not count. A sample older than the deploy lookback still
+    pages.
+    """
+    age = (now - sample_time).total_seconds()
+    if age < 0 or age > DEPLOY_WINDOW_LOOKBACK_SECONDS:
+        return False
+    restart = _healthd_active_enter()
+    if restart is None or not _sample_overlaps_healthd_restart(sample_time, restart):
+        return False
+    lock_time = _artifact_mtime(DEPLOY_ROOT_LOCK_FILE)
+    if lock_time is None:
+        return False
+    return abs((lock_time - restart).total_seconds()) <= HEALTHD_RESTART_LOOKBACK_SECONDS
+
+
 def _transition_journal_age_seconds(now: datetime) -> float | None:
     """Age of the deploy transition journal, or None when absent."""
     try:
@@ -400,6 +490,9 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     # still the floor. That restart is the same stop. A raw 5xx still pages.
     # Outside the journal, healthd-down still pages. The next off-box cycle
     # still independently proves perimeter recovery.
+    # 2026-11-14 20:40Z: a failed Deploy via SSH cleared the journal without
+    # moving the previous green marker. The floor sample from that restart
+    # then sat outside both artifacts while the serving path was already up.
     if state == reader.VERDICT_DOWN:
         down_reason = str(verdict.get("reason") or "")
         age = verdict.get("age_seconds")
@@ -430,6 +523,25 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
                 severity=None,
                 fired=False,
                 message=f"off-box {down_reason} sampled inside deploy window; {detail}",
+                consecutive_failures=0,
+                now=checked_at,
+            )
+        if (
+            down_reason == "status_unreachable:caddy"
+            and sample_time is not None
+            and serving_ok
+            and _failed_deploy_restart_explains_caddy_floor(sample_time, checked_at)
+        ):
+            return CheckOutcome(
+                service=SERVICE,
+                kind="deadman",
+                status="healthy",
+                severity=None,
+                fired=False,
+                message=(
+                    "off-box status_unreachable:caddy sampled inside failed deploy "
+                    "restart; local aggregate healthy"
+                ),
                 consecutive_failures=0,
                 now=checked_at,
             )

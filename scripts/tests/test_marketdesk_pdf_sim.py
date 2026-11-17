@@ -80,6 +80,68 @@ def test_quota_storm_is_at_most_one_pdf_per_hour_within_three_cycles():
     assert state.batch_size * 3600 / state.interval_seconds <= 1
 
 
+def test_unarmed_ramp_stays_additive():
+    state = start_state()
+    state = on_success(state)
+    assert state.interval_seconds == rate.START_INTERVAL_SECONDS - rate.ADDEND_SECONDS
+    assert state.recover_armed == 0
+
+
+def test_quota_still_doubles_and_arms_recovery():
+    state, delay = on_quota(RateState(300, 6, 2, 7))
+    assert state.interval_seconds == 600 and delay == 600
+    assert state.batch_size == 1 and state.success_credits == 0
+    assert state.recover_armed == 1 and state.recover_credits == 0
+    one = on_success(state)
+    assert one.interval_seconds == 570 and one.recover_armed == 1
+
+
+def test_clean_cycles_after_quota_reach_the_floor_within_six_hours():
+    state = RateState(2100, 1, 0, 0, 1, 0)
+    elapsed = 0
+    steps = (2070, 2040, 2010)
+    for expected in steps:
+        elapsed += state.interval_seconds
+        state = on_success(state)
+        assert state.interval_seconds == expected and state.recover_armed == 1
+    elapsed += state.interval_seconds
+    state = on_success(state)
+    assert state.interval_seconds == 990
+    while state.interval_seconds > rate.FLOOR_SECONDS:
+        elapsed += state.interval_seconds
+        state = on_success(state)
+        assert elapsed < 6 * 3600
+    assert state.interval_seconds == rate.FLOOR_SECONDS
+    assert state.recover_armed == 0
+    assert elapsed < 6 * 3600
+
+
+def test_interval_above_the_ramp_arms_recovery_without_a_quota_flag():
+    state = RateState(2100, 1, 0, 2)
+    assert state.recover_armed == 0 and state.success_credits == 2
+    stepped = on_success(state)
+    assert stepped.recover_armed == 1 and stepped.success_credits == 3
+    assert stepped.interval_seconds == 2070
+    elapsed = 2100
+    state = stepped
+    while state.interval_seconds > rate.FLOOR_SECONDS:
+        elapsed += state.interval_seconds
+        state = on_success(state)
+        assert elapsed < 6 * 3600
+    assert state.interval_seconds == rate.FLOOR_SECONDS and elapsed < 6 * 3600
+
+
+def test_hourly_cap_env_defaults_and_disables(monkeypatch):
+    monkeypatch.delenv(rate.HOURLY_CAP_ENV, raising=False)
+    assert rate.hourly_cap() == 12
+    monkeypatch.setenv(rate.HOURLY_CAP_ENV, "0")
+    assert rate.hourly_cap() == 0
+    monkeypatch.setenv(rate.HOURLY_CAP_ENV, "7")
+    assert rate.hourly_cap() == 7
+    monkeypatch.setenv(rate.HOURLY_CAP_ENV, "nope")
+    assert rate.hourly_cap() == 12
+
+
 def test_batch_grows_only_after_clean_successes():
     state = start_state()
     for _ in range(rate.BATCH_RECOVER_EVERY - 1):
@@ -115,8 +177,11 @@ def test_retry_after_is_a_minimum_wait():
 
 def test_restart_keeps_the_backed_off_rate():
     state, delay = on_quota(start_state(), retry_after=1200)
-    restored = rate.load_state(state.interval_seconds, state.batch_size, state.soft_streak, state.success_credits)
+    restored = rate.load_state(
+        state.interval_seconds, state.batch_size, state.soft_streak, state.success_credits,
+        recover_armed=state.recover_armed, recover_credits=state.recover_credits)
     assert restored == state
+    assert state.recover_armed == 1
     assert state.interval_seconds == 1800
     assert state.batch_size == 1
     assert delay == 1800
@@ -160,7 +225,7 @@ def db(monkeypatch):
     conn = sqlite3.connect(":memory:", isolation_level=None)
     for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql",
                  "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql",
-                 "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql"):
+                 "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql", "0114_marketdesk_pdf_hourly_recovery.sql"):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
@@ -271,10 +336,48 @@ def test_weekend_and_overnight_still_admit(db):
 
 def test_health_flips_when_the_backlog_drains(db):
     _add(db, "Aged00001", NOW - timedelta(days=3))
-    assert store.backlog_breach(now=NOW).startswith("PDF archive backlog:")
+    assert str(store.backlog_breach(now=NOW)).startswith("PDF archive backlog:")
     batch = store.claim_batch(now=NOW, jitter_bps=0)
     _finish(db, batch, NOW)
     assert store.backlog_breach(now=NOW + timedelta(minutes=5)) is None
+
+
+def test_a_draining_backlog_breaches_without_paging(db):
+    """Live 2026-11-17: 588 eligible rows, oldest-first admission every ~48 min,
+    growing=0. That is a known drain, not an outage."""
+    for i in range(3):
+        _add(db, f"Drain{i:04d}", NOW - timedelta(days=11))
+    _finish(db, store.claim_batch(now=NOW - timedelta(hours=1), jitter_bps=0)[:1], NOW - timedelta(hours=1))
+    breach = store.backlog_breach(now=NOW)
+    assert str(breach).startswith("PDF archive backlog:")
+    assert "growing=0 stalled=0" in str(breach)
+    assert breach.paging is False
+
+
+def test_a_backlog_with_no_admission_for_six_hours_pages(db):
+    _add(db, "Stall00001", NOW - timedelta(days=3))
+    breach = store.backlog_breach(now=NOW)
+    assert "stalled=1" in str(breach)
+    assert breach.paging is True
+
+
+def test_a_backlog_past_the_age_ceiling_pages_even_while_admitting(db):
+    """Provider allowance ~74/day vs 70-100 intake: draining is not guaranteed."""
+    _add(db, "Ceiling001", NOW - timedelta(days=15))
+    db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES('x',?)", (NOW.isoformat(),))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=0 stalled=0" in str(breach)
+    assert breach.paging is True
+
+
+def test_a_growing_backlog_pages(db):
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Grow{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES('x',?)", (NOW.isoformat(),))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0" in str(breach)
+    assert breach.paging is True
 
 
 def test_fixed_1800s_pace_cannot_hide_a_week_of_intake(db):
@@ -302,11 +405,11 @@ def test_fixed_1800s_pace_cannot_hide_a_week_of_intake(db):
 
 
 def test_fourteen_day_sim_drains_1300_and_keeps_up():
-    """Full admission sim. Printed numbers are the PR evidence."""
+    """400/day proof with the hourly cap off. The default cap is the other sim."""
     conn = sqlite3.connect(":memory:", isolation_level=None)
     for name in ("0001_init.sql", "0071_research_post_sources.sql", "0102_marketdesk_articles.sql",
                  "0103_marketdesk_pdf_queue.sql", "0104_marketdesk_pdf_account_backoff.sql",
-                 "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql"):
+                 "0105_marketdesk_pdf_priority.sql", "0112_marketdesk_pdf_rate.sql", "0113_marketdesk_pdf_safety_cap.sql", "0114_marketdesk_pdf_hourly_recovery.sql"):
         conn.executescript((ROOT / name).read_text())
     ctx = store.policy.Context(frozenset(), {})
     box = type("Box", (), {"ctx_key": ctx.key, "execute": conn.execute, "close": conn.close})()
@@ -334,7 +437,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
             _add(box, f"B{i:07d}", NOW - timedelta(days=10))
         _add(box, "TodaySim1", NOW)
         assert store.backlog_breach(now=NOW)
-        first = store.claim_batch(now=NOW, jitter_bps=0)
+        first = store.claim_batch(now=NOW, jitter_bps=0, hourly_cap_value=0)
         assert [item.article_id for item in first] == ["TodaySim1"]
         _finish(conn, first, NOW)
         clock = NOW
@@ -351,7 +454,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
                 _add(box, f"N{added:07d}", clock)
                 added += 1
                 owed -= 1
-            batch = store.claim_batch(now=clock, jitter_bps=0)
+            batch = store.claim_batch(now=clock, jitter_bps=0, hourly_cap_value=0)
             _finish(conn, batch, clock)
             admitted += len(batch)
             if clock.weekday() >= 5:
@@ -384,6 +487,118 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up():
         store.hrana_transaction = previous_transaction
         store.policy.load_context = previous_context
         conn.close()
+
+
+def _recent(stamps, now):
+    cutoff = now - timedelta(hours=1)
+    return [stamp for stamp in stamps if stamp > cutoff]
+
+
+def test_hourly_cap_drains_the_backlog_under_a_15_per_hour_provider(db, monkeypatch):
+    """Real lease and controller. The provider refuses once an hour would pass 15."""
+    monkeypatch.delenv(rate.HOURLY_CAP_ENV, raising=False)
+    monkeypatch.delenv(rate.DAILY_CAP_ENV, raising=False)
+    monkeypatch.delenv(rate.FLOOR_ENV, raising=False)
+    assert rate.hourly_cap() == 12 and rate.daily_cap() == 400
+    quota_per_hour = 15
+    assert len(_recent([NOW] * quota_per_hour, NOW)) + 1 > quota_per_hour
+    assert len(_recent([NOW] * 12, NOW)) + 1 <= quota_per_hour
+    for i in range(603):
+        _add(db, f"B{i:07d}", NOW - timedelta(days=10))
+    db.execute(
+        "UPDATE marketdesk_pdf_throttle SET interval_seconds=2100,batch_size=1,recover_armed=1,"
+        "recover_credits=0,success_credits=0,next_attempt_at=?",
+        (NOW.isoformat(),))
+    clock = NOW
+    end = NOW + timedelta(days=12)
+    stamps = []
+    quota_hits = []
+    daily = {}
+    floor_at = None
+    drained_at = None
+    added = 0
+    owed = 0.0
+    last = clock
+    max_hour = 0
+
+    def accrue(now):
+        nonlocal owed, added, last
+        owed += 190 * (now - last).total_seconds() / 86400
+        while owed >= 1:
+            _add(db, f"N{added:07d}", now)
+            added += 1
+            owed -= 1
+        last = now
+
+    while clock < end and drained_at is None:
+        accrue(clock)
+        interval = db.execute("SELECT interval_seconds FROM marketdesk_pdf_throttle").fetchone()[0]
+        if floor_at is None and interval <= rate.FLOOR_SECONDS:
+            floor_at = clock
+        batch = store.claim_batch(now=clock, jitter_bps=0)
+        if not batch:
+            due = datetime.fromisoformat(db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
+            if due > clock:
+                clock = due
+                continue
+            oldest = db.execute(
+                "SELECT MIN(admitted_at) FROM marketdesk_pdf_admissions "
+                "WHERE julianday(admitted_at) > julianday(?) - (1.0/24)",
+                (clock.isoformat(),)).fetchone()[0]
+            if oldest:
+                aged = datetime.fromisoformat(oldest) + timedelta(hours=1)
+                clock = aged if aged > clock else clock + timedelta(minutes=5)
+            else:
+                clock += timedelta(minutes=5)
+            continue
+        refused = None
+        taken = 0
+        recent = _recent(stamps, clock)
+        for work in batch:
+            if len(recent) + 1 > quota_per_hour:
+                refused = work
+                break
+            recent.append(clock)
+            stamps.append(clock)
+            assert store.record_download(work, ASSET, DIGEST, now=clock, provider_success=True)
+            taken += 1
+            day = int((clock - NOW).total_seconds() // 86400)
+            daily[day] = daily.get(day, 0) + 1
+        if refused is not None:
+            store.retry(refused, "preview_quota", now=clock)
+            for pending in batch[taken + 1:]:
+                store.release(pending, now=clock)
+            quota_hits.append(clock.isoformat())
+        elif taken:
+            store.note_success(now=clock)
+        max_hour = max(max_hour, len(_recent(stamps, clock)))
+        if taken and _depth(db) == 0:
+            drained_at = clock
+            break
+        due = datetime.fromisoformat(db.execute("SELECT next_attempt_at FROM marketdesk_pdf_throttle").fetchone()[0])
+        nxt = due if due > clock else clock + timedelta(minutes=5)
+        if nxt <= clock:
+            nxt = clock + timedelta(minutes=5)
+        clock = nxt
+    days = None if drained_at is None else round((drained_at - NOW).total_seconds() / 86400, 2)
+    floor_hours = None if floor_at is None else round((floor_at - NOW).total_seconds() / 3600, 2)
+    report = {
+        "backlog": 603, "intake_per_day": 190, "hourly_cap": 12, "provider_quota_per_hour": quota_per_hour,
+        "days_to_drain": days, "hours_to_floor": floor_hours, "max_in_any_hour": max_hour,
+        "quota_hits": len(quota_hits), "daily": daily, "admitted": len(stamps), "intake": added,
+        "final_depth": _depth(db), "final_interval": db.execute(
+            "SELECT interval_seconds,batch_size,recover_armed FROM marketdesk_pdf_throttle").fetchone(),
+    }
+    path = Path("/opt/cursor/artifacts/marketdesk-pdf-hourly-sim.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2))
+    print("HOURLY_SIM", json.dumps(report))
+    assert floor_at is not None and floor_at - NOW < timedelta(hours=6)
+    assert drained_at is not None and 5 <= days <= 9
+    assert max_hour <= 12
+    assert len(quota_hits) <= 4
+    full_days = [count for day, count in daily.items() if 1 <= day < int(days)]
+    assert full_days and all(250 <= count <= 290 for count in full_days)
 
 
 def test_http_date_retry_after_is_a_suspension():

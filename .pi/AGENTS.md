@@ -66,6 +66,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - Never revert user changes. Check `git status --short --branch` before edits and ignore unrelated dirty files.
 - For architecture, module location, or imports, read `tools/codemap/architecture.json` then `tools/codemap/codemap.json`. Do not walk the tree to reconstruct imports.
 - Use `rg` / `rg --files` first for search.
+- **Remove a worktree once its work is finished.** When its PR merges or the work is abandoned, run `git -C <worktree> status --short` (commit, push or confirm disposable anything listed), then `git worktree remove <worktree>` and `git worktree prune`. Applies to `.claude/worktrees/`, swarm/agent worktrees and any other `git worktree add`. Never leave stale worktrees behind; never `--force` over changes you have not inspected.
 
 ## Pull Request Completion
 
