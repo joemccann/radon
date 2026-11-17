@@ -283,6 +283,20 @@ def _dp_ok() -> dict:
     }
 
 
+def _freeze_admission_clock(stack) -> list:
+    """Fake monotonic clock that admission sleeps advance. Returns the sleeps."""
+    clock = {"t": 0.0}
+    sleeps = []
+
+    def _sleep(seconds):
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    stack.enter_context(patch("discover.time.monotonic", lambda: clock["t"]))
+    stack.enter_context(patch("discover.time.sleep", side_effect=_sleep))
+    return sleeps
+
+
 def _discover_market_wide(darkpool, *, embargo_until=None, now=None):
     """Market-wide scan with the hourly min-alerts gate. `darkpool` is ticker -> result or exception."""
     from discover import discover
@@ -301,6 +315,7 @@ def _discover_market_wide(darkpool, *, embargo_until=None, now=None):
     mock_client.__enter__ = MagicMock(return_value=mock_client)
     mock_client.__exit__ = MagicMock(return_value=False)
     with ExitStack() as stack:
+        _freeze_admission_clock(stack)
         stack.enter_context(patch("discover.UWClient", return_value=mock_client))
         stack.enter_context(patch("discover.fetch_options_flow", return_value=alerts))
         stack.enter_context(patch("discover.get_existing_tickers", return_value=set()))
@@ -383,6 +398,71 @@ def test_every_darkpool_miss_still_sets_the_hard_error():
     assert result["candidates_found"] == 0
     assert result["degraded"] is True
     assert result["error"] == "required provider data unavailable"
+    assert "budget" not in json.dumps(result)
+
+
+def _page_timeout() -> UWAPIError:
+    """The fail-fast client's one timed-out attempt.
+
+    ``UWClient(max_retries=0)`` maps ``requests.Timeout`` to this message
+    and nothing else. The hourly discover client uses that setting.
+    """
+    return UWAPIError("UW connection failed after 1 attempts")
+
+
+def test_options_flow_page_timeout_sheds_instead_of_failing_the_oneshot():
+    """A 30s UW page timeout must not page the hourly oneshot.
+
+    2026-11-16 21:01:21Z, page 10df476c07a56f38742297bbfd70e677: scanner and
+    flow-analysis were OK. POST /discover returned HTTP 400 about 31s
+    later. service_health[discover] was error, candidates_found 0, skipped
+    1, message required provider data unavailable. The wrapper does not
+    shed that body, so the oneshot exits 1. The same shape fired at
+    15:01Z (38s) and the later hours completed. A single fail-fast page
+    timeout is an unfinished tape, not a provider outage.
+    """
+    result, calls, sleeps = _discover_after_options_flow(
+        [_page_timeout()],
+        embargo_remaining=0,
+    )
+
+    assert calls == 1
+    assert sleeps == []
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["degraded"] is True
+    assert result["error"] == "discover transport shed"
+    dumped = json.dumps(result)
+    assert "UW connection failed" not in dumped
+    assert "required provider data unavailable" not in dumped
+
+
+def test_only_darkpool_page_timeout_sheds_instead_of_failing_the_oneshot():
+    """The same timeout on the only darkpool ticker is still a shed.
+
+    Options flow can finish and the one name left to score can sit on the
+    30s page timeout. candidates_found stays 0 and skipped stays 1, which
+    is the health row from the 21:01Z page. A real provider miss stays hard.
+    """
+    result = _discover_market_wide({"AAPL": _page_timeout()})
+
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["alerts_analyzed"] == 3
+    assert result["error"] == "discover transport shed"
+    assert "UW connection failed" not in json.dumps(result)
+
+
+def test_page_timeout_mixed_with_a_provider_outage_stays_a_hard_error():
+    """One real miss still fails the oneshot, even if another ticker timed out."""
+    result = _discover_market_wide({
+        "AAPL": _page_timeout(),
+        "MSFT": UWAPIError("budget"),
+    })
+
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert "UW connection failed" not in json.dumps(result)
     assert "budget" not in json.dumps(result)
 
 
@@ -902,7 +982,8 @@ def test_unpublished_run_writes_a_discover_error_row(darkpool, expected, capsys)
     mock_client = MagicMock()
     mock_client.__enter__ = MagicMock(return_value=mock_client)
     mock_client.__exit__ = MagicMock(return_value=False)
-    with patch("discover.UWClient", return_value=mock_client), \
+    with ExitStack() as stack, \
+         patch("discover.UWClient", return_value=mock_client), \
          patch("discover.fetch_options_flow", return_value=alerts), \
          patch("discover.get_existing_tickers", return_value=set()), \
          patch("discover.fetch_darkpool_multi", side_effect=_fetch), \
@@ -912,6 +993,7 @@ def test_unpublished_run_writes_a_discover_error_row(darkpool, expected, capsys)
          patch("discover.run_alerts_for_results"), \
          patch("db.writer.record_service_health") as health, \
          patch.object(sys, "argv", ["discover.py", "--min-alerts", "3", "--dp-pages", "2"]):
+        _freeze_admission_clock(stack)
         main()
 
     json.loads(capsys.readouterr().out)
@@ -920,6 +1002,12 @@ def test_unpublished_run_writes_a_discover_error_row(darkpool, expected, capsys)
     args, kwargs = health.call_args
     assert args == ("discover", "error")
     assert kwargs["error"]["message"].startswith(expected)
+    failed_types = sorted({
+        type(o).__name__ for o in darkpool.values() if isinstance(o, Exception)
+    })
+    assert kwargs["error"]["provider_failures"] == [
+        {"operation": "darkpool", "error_type": name} for name in failed_types
+    ]
     assert "budget" not in json.dumps(kwargs["error"])
     assert "admission is busy" not in json.dumps(kwargs["error"])
 
@@ -944,3 +1032,81 @@ def test_published_run_does_not_write_an_error_row(capsys):
     json.loads(capsys.readouterr().out)
     mirror.assert_called_once()
     health.assert_not_called()
+
+
+def test_darkpool_admission_busy_waits_for_the_minute_window_then_scores():
+    """A full governor minute window must not skip a dark-pool ticker.
+
+    2026-11-16 20:01:16Z: the hourly POST /discover returned 200 with 11 of
+    25 dark-pool tickers skipped as UWRateLimitError. The governor ledger
+    held 96 standard admissions (120 RPM x 0.8) in every minute from
+    20:00 to 20:08 (vol-cone-intraday, garch, scanner, flow-analysis). Each
+    walk gave up after the 5s admission wait, so the run was degraded and
+    never published: discover_snapshots stopped at 2026-10-21T16:00:54Z
+    and the writer row stayed ERROR for 26 days.
+    """
+    frozen = 1_800_000_000.0
+    window_clears_in = 41.0
+    calls = {"AAPL": 0}
+
+    def _fetch(ticker, *_args, **_kwargs):
+        if ticker == "AAPL":
+            calls["AAPL"] += 1
+            if calls["AAPL"] == 1:
+                raise _admission_busy()
+        return _dp_ok()
+
+    alerts = [_flow_alert("AAPL") for _ in range(3)] + [_flow_alert("MSFT") for _ in range(3)]
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with ExitStack() as stack:
+        sleeps = _freeze_admission_clock(stack)
+        stack.enter_context(patch("discover.UWClient", return_value=mock_client))
+        stack.enter_context(patch("discover.fetch_options_flow", return_value=alerts))
+        stack.enter_context(patch("discover.get_existing_tickers", return_value=set()))
+        stack.enter_context(patch("discover.fetch_darkpool_multi", side_effect=_fetch))
+        stack.enter_context(patch("utils.uw_governor.snapshot", return_value={
+            "embargo_until": frozen - 3600,
+            "minute_window_clears_at": frozen + window_clears_in,
+        }))
+        stack.enter_context(patch("time.time", return_value=frozen))
+        from discover import discover
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert sleeps == [pytest.approx(window_clears_in)]
+    assert sorted(row["ticker"] for row in result["candidates"]) == ["AAPL", "MSFT"]
+    assert "degraded" not in result
+    assert "error" not in result
+
+
+def test_darkpool_admission_wait_never_sleeps_past_the_post_budget():
+    """A ticker still refused when the budget runs out stays a shed, on time."""
+    from discover import DISCOVER_POST_BUDGET_S, discover
+
+    frozen = 1_800_000_000.0
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    with ExitStack() as stack:
+        sleeps = _freeze_admission_clock(stack)
+        stack.enter_context(patch("discover.UWClient", return_value=mock_client))
+        stack.enter_context(patch(
+            "discover.fetch_options_flow",
+            return_value=[_flow_alert("AAPL") for _ in range(3)],
+        ))
+        stack.enter_context(patch("discover.get_existing_tickers", return_value=set()))
+        stack.enter_context(patch(
+            "discover.fetch_darkpool_multi", side_effect=_admission_busy(),
+        ))
+        stack.enter_context(patch(
+            "utils.uw_governor.snapshot",
+            return_value={"embargo_until": frozen + 30},
+        ))
+        stack.enter_context(patch("time.time", return_value=frozen))
+        result = discover(min_alerts=3, dp_pages=2)
+
+    assert sleeps, "a short window must be waited out before shedding"
+    assert sum(sleeps) < DISCOVER_POST_BUDGET_S
+    assert result["candidates"] == []
+    assert result["error"] == "discover rate limit shed"

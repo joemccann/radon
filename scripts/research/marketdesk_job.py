@@ -144,7 +144,6 @@ class Deps:
     research_root: Callable
     enqueue_pdf: Callable = field(default=lambda ref: None)
     clock: Callable = field(default=time.monotonic)
-    pdf_backlog: Callable | None = None
 
 
 def default_deps() -> Deps:
@@ -173,7 +172,6 @@ def default_deps() -> Deps:
         certify=certify, writer_from_env=DropboxWriter.from_env,
         marketdesk_path=marketdesk_path,
         service_cycle=service_cycle, record_health=record_health,
-        pdf_backlog=marketdesk_pdf_store.backlog_breach,
         book_tickers=book.current_tickers,
         record_outcome=publish.record_outcome, feedback_rows=feedback.fetch_rows, research_root=research_root,
         enqueue_pdf=marketdesk_pdf_store.enqueue,
@@ -644,17 +642,6 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
             finally:
                 state, error = max(outbox, key=lambda row: _HEALTH_RANK[row[0]]) if outbox else (
                     "error", {"message": "Dropbox outbox did not run"})
-                breach = None
-                if deps.pdf_backlog is not None:
-                    try:
-                        breach = deps.pdf_backlog()
-                    except Exception as exc:  # noqa: BLE001 - a gauge miss must not hide an upload result
-                        _log(f"pdf backlog gauge skipped: {type(exc).__name__}")
-                        breach = None
-                if breach and state == "ok":
-                    state, error = "error", {"message": breach}
-                elif breach and state == "paused" and error is not None:
-                    error = {"message": str(error.get("message") or "") + "; " + breach}
                 try:
                     deps.record_health(DROPBOX_SERVICE, state, started_at=started,
                                        finished_at=_iso_now(), error=error)
@@ -672,6 +659,19 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     return counts
+
+
+# db_http wraps a socket failure as DbHttpError("<ExcType>: ...") or
+# "research transaction transport failed: <ExcType>". Statement errors and
+# missing credentials carry no such prefix and still fail the unit.
+_TRANSPORT_TYPES = r"(?:TimeoutError|socket\.timeout|ConnectionResetError|ConnectionAbortedError|RemoteDisconnected|IncompleteRead)"
+_DB_TRANSPORT_RE = re.compile(rf"^(?:{_TRANSPORT_TYPES}:|research transaction transport failed: {_TRANSPORT_TYPES}$)")
+
+
+def _is_transport_blip(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    return isinstance(exc, DbHttpError) and bool(_DB_TRANSPORT_RE.match(str(exc).strip()))
 
 
 def _terminate(signum, frame):  # noqa: ARG001 - signal handler signature
@@ -692,6 +692,11 @@ def main(argv: list[str] | None = None) -> int:
         # fire a new InactiveEnterTimestamp and a P1 page.
         return 0 if exc.provider_deadline else 1
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
+        if _is_transport_blip(exc):
+            # The error row is the P2 signal and the next 5-minute fire retries. Exit 1 latched the
+            # unit failed and paged for one Hrana read timeout (2026-11-15 05:34 UTC).
+            _log(f"cycle deferred: transport {_safe_error(exc)}")
+            return 0
         _log(f"cycle failed: {_safe_error(exc)}")
         return 1
     finally:

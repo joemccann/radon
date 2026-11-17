@@ -113,6 +113,9 @@ SERVICE_NAME = "config-drift"
 SUMMARY_CAP = 1500
 DETAIL_CAP = 200
 MAX_DRIFTS_IN_ROW = 10
+# Checkout artifacts the audit compares are units, policies and configs; a
+# larger body is not one of them and must not be read into memory.
+MAX_REPO_ARTIFACT_BYTES = 1 << 20
 SUBPROCESS_TIMEOUT = 10
 # The GitHub main tip is the trusted comparison basis for git: pairs
 # (F20260913-D02); one shallow fetch per run, bounded separately.
@@ -450,6 +453,8 @@ def _read_repo(relative: str | Path) -> str | None:
     The audit runs as root against a radon-writable checkout. Descriptor-
     relative O_NOFOLLOW traversal closes both final-component and nested
     directory symlink escapes, including swaps between validation and read.
+    O_NONBLOCK keeps a planted FIFO from parking the audit until systemd
+    kills it; the fstat gate then admits only a bounded regular file.
     """
     parts = Path(relative).parts
     if not parts or Path(relative).is_absolute() or any(part in ("", ".", "..") for part in parts):
@@ -463,12 +468,15 @@ def _read_repo(relative: str | Path) -> str | None:
         for component in parts[:-1]:
             current = os.open(component, directory_flags, dir_fd=current)
             descriptors.append(current)
-        final = os.open(parts[-1], flags, dir_fd=current)
+        final = os.open(parts[-1], flags | os.O_NONBLOCK, dir_fd=current)
         descriptors.append(final)
-        if not stat.S_ISREG(os.fstat(final).st_mode):
+        meta = os.fstat(final)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_size > MAX_REPO_ARTIFACT_BYTES:
             return None
-        with os.fdopen(os.dup(final), "r", encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+        with os.fdopen(os.dup(final), "rb") as handle:
+            return handle.read(MAX_REPO_ARTIFACT_BYTES + 1)[:MAX_REPO_ARTIFACT_BYTES].decode(
+                "utf-8", errors="replace"
+            )
     except OSError:
         return None
     finally:

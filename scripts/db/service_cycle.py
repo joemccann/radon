@@ -59,17 +59,19 @@ MARKET_HOURS_CLASSES = frozenset({"intraday", "continuous", "daily", "on-demand"
 
 
 class ServiceCycle:
-    """Per-cycle handle. The only caller-writable knob is ``finished_at``
-    (the data timestamp for COALESCE-preserving upserts) — state is not
-    settable, by design."""
+    """Per-cycle handle. Caller-writable knobs: ``finished_at`` (the data
+    timestamp for COALESCE-preserving upserts) and ``warning`` (a clean exit
+    records ``warn`` with this message, which never pages). State itself is
+    not settable, and an exception always records ``error``."""
 
-    __slots__ = ("service", "market_hours_class", "started_at", "finished_at")
+    __slots__ = ("service", "market_hours_class", "started_at", "finished_at", "warning")
 
     def __init__(self, service: str, market_hours_class: str, started_at: str) -> None:
         self.service = service
         self.market_hours_class = market_hours_class
         self.started_at = started_at
         self.finished_at: Optional[str] = None
+        self.warning: Optional[str] = None
 
 
 def _now_utc() -> datetime:
@@ -138,6 +140,10 @@ def service_cycle(service: str, *, market_hours_class: str) -> Iterator[ServiceC
             error=_error_payload(exc),
         )
         raise
+    if cycle.warning:
+        _record(service, "warn", started_at=cycle.started_at, finished_at=cycle.finished_at,
+                error={"message": cycle.warning})
+        return
     _record(service, "ok", started_at=cycle.started_at, finished_at=cycle.finished_at)
 
 

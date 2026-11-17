@@ -1007,6 +1007,10 @@ Do not recreate that drop-in. After reconciling configuration, run
 publish a fresh audit verdict. The audit reads `cloud/config/drift-allowlist.conf`
 from the GitHub main-tip blob, not the host checkout, so an acknowledgment
 takes effect only once it is merged; an unreadable blob suppresses nothing.
+Checkout artifacts the audit compares are read only as regular files of at
+most 1 MiB through a non-blocking `O_NOFOLLOW` open; a checkout entry that
+is anything else is reported as a missing repo artifact (`repo-missing:*`)
+instead of stalling the audit to its 180s deadline.
 On the broker it also compares `/usr/local/sbin/radon-ib-gateway-credential`
 (the IB Gateway password writer) against `cloud/scripts/radon-ib-gateway-credential.py`
 (drift id `file-mismatch:ib-gateway-credential`); app-role hosts report it as

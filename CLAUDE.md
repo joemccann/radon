@@ -158,6 +158,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 - NEVER use `git add -A`, `git add .`, or whole-file/whole-directory staging. Stage only the specific files you edited (`git add path/to/file`), and run `git status` before every commit to confirm no untracked WIP (journals, scratch files, notebooks) was swept in.
 - Before pushing, wait for the previous deploy to finish. Do not push rapid-fire commits — cancelled in-flight deploys have corrupted the Next.js build and caused a production outage.
+- **Remove a worktree once its work is finished.** When its PR merges or the work is abandoned, run `git -C <worktree> status --short` (commit, push or confirm disposable anything listed), then `git worktree remove <worktree>` and `git worktree prune`. Applies to `.claude/worktrees/`, swarm/agent worktrees and any other `git worktree add`. Never leave stale worktrees behind; never `--force` over changes you have not inspected.
 
 ---
 

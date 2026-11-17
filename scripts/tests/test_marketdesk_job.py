@@ -15,6 +15,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
+from api.db_http import DbHttpError  # noqa: E402
 from db import writer as db_writer  # noqa: E402
 from db.service_cycle import service_cycle  # noqa: E402
 from research import marketdesk_job as job  # noqa: E402
@@ -569,6 +570,32 @@ def test_main_returns_nonzero_on_failure_and_zero_on_success(monkeypatch, capsys
     assert job.main() == 1
 
 
+@pytest.mark.parametrize("exc", [
+    TimeoutError("The read operation timed out"),
+    ConnectionResetError("Connection reset by peer"),
+    DbHttpError("TimeoutError: The read operation timed out"),
+    DbHttpError("RemoteDisconnected: Remote end closed connection without response"),
+    DbHttpError("research transaction transport failed: TimeoutError"),
+])
+def test_main_exits_zero_on_a_transport_timeout(monkeypatch, capsys, exc):
+    # 2026-11-15 05:34:52 UTC: one Hrana read timeout exited 1, latched the unit failed and paged
+    # (radon-marketdesk.service Result=exit-code). service_cycle already wrote the P2 error row;
+    # the next 5-minute fire retried cleanly. A transport blip is the error row, not a unit failure.
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(exc))
+    assert job.main() == 0
+    assert "cycle deferred: transport" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("exc", [
+    DbHttpError("no such column: lane"),
+    DbHttpError("TURSO_DB_URL / TURSO_AUTH_TOKEN not configured"),
+    ValueError("TimeoutError: looks like transport but is not"),
+])
+def test_main_still_fails_on_non_transport_errors(monkeypatch, exc):
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(exc))
+    assert job.main() == 1
+
+
 def test_main_exits_tempfail_when_sigterm_stops_the_cycle(monkeypatch, capsys):
     # A deploy's stop-clean SIGTERMs an in-flight oneshot (2026-10-27 14:14 UTC). Exit 1 latched the
     # unit failed and paged. 143 (128+SIGTERM) + SuccessExitStatus=143 keeps a stop out of `failed`; a
@@ -736,6 +763,22 @@ def test_default_deps_wire_real_modules():
     assert callable(deps.certify)
     assert deps.writer_from_env({}) is None
     assert deps.marketdesk_path is dropbox_writer.marketdesk_path
+
+
+def test_dropbox_row_does_not_report_the_pdf_archive_backlog(world, db, monkeypatch):
+    """marketdesk-pdf owns the backlog breach. A second caller also overwrote the
+    archive's observed_pending sample minutes apart, so growth compared two writers."""
+    from research import marketdesk_pdf_store
+    calls = []
+    monkeypatch.setattr(marketdesk_pdf_store, "backlog_breach",
+                        lambda **_k: calls.append(1) or "PDF archive backlog: pending=597 oldest_h=254 growing=0")
+    assert "pdf_backlog" not in job.Deps.__dataclass_fields__
+    assert not hasattr(job.default_deps(), "pdf_backlog")
+    world.refs = [make_ref("Bbbbbbbb77")]
+    preseed_stored_pdf(world, db, world.refs[0])
+    run(world)
+    assert health_for(world, "marketdesk-dropbox") == [("marketdesk-dropbox", "ok", None)]
+    assert calls == []
 
 
 def test_default_certifier_wires_private_audit_to_research_root(monkeypatch, tmp_path):
