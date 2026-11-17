@@ -21,7 +21,10 @@ defaults to 400 admissions (MARKETDESK_PDF_DAILY_CAP, 0 disables it). A rolling
 stays under the pace that drew preview_quota on 2026-11-15. That 12 is a
 hypothesis, not a published allowance. At 12 an hour, 603 backlog rows plus
 190 new PDFs a day clear in about a week. With the hourly cap off, the 400/day
-cap still clears 1,275 plus 190 a day inside 7 days. Quota signals, including
+cap still clears 1,275 plus 190 a day inside 7 days. Ordinary passing rows older than
+MARKETDESK_PDF_MAX_AGE_DAYS (default 7, 0 off) retire instead of waiting
+for that drain. Preferred-desk and book rows are claimed ahead of ordinary
+measured research and stay while an ordinary row inside the window is pending. Quota signals, including
 HTTP 401/402/403 and an HTTP-date Retry-After, double the interval and reset
 the batch to 1. After that signal, every 4 clean cycles also halve the
 interval toward the floor, so 2100 seconds is back at the floor in under 6
@@ -60,6 +63,8 @@ DEFAULT_HOURLY_CAP = 12
 DAILY_CAP_ENV = "MARKETDESK_PDF_DAILY_CAP"
 HOURLY_CAP_ENV = "MARKETDESK_PDF_HOURLY_CAP"
 FLOOR_ENV = "MARKETDESK_PDF_MIN_INTERVAL_SECONDS"
+MAX_AGE_ENV = "MARKETDESK_PDF_MAX_AGE_DAYS"
+DEFAULT_MAX_AGE_DAYS = 7
 # A quota row waits out the account delay plus at least this long.
 ROW_COOLDOWN_MIN_SECONDS = FLOOR_SECONDS
 JITTER_MAX_BPS = 1000  # 10.00% added delay. Never negative, so jitter cannot admit early.
@@ -114,6 +119,24 @@ def hourly_cap(env=None) -> int:
     source = os.environ if env is None else env
     raw = source.get(HOURLY_CAP_ENV) if hasattr(source, "get") else None
     return _cap(raw, DEFAULT_HOURLY_CAP)
+
+
+def max_age_days(env=None) -> int:
+    """How long a passing PDF stays downloadable, in days. 0 disables. Unset means 7.
+
+    A non-integer falls back to 7. The queue measures this from published_at.
+    """
+    source = os.environ if env is None else env
+    raw = source.get(MAX_AGE_ENV) if hasattr(source, "get") else None
+    if raw in (None, ""):
+        return DEFAULT_MAX_AGE_DAYS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_AGE_DAYS
+    if value <= 0:
+        return 0
+    return min(value, 3650)
 
 
 def clamp_interval(seconds: int, floor: int | None = None) -> int:

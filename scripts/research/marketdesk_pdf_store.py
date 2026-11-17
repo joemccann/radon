@@ -15,7 +15,7 @@ import uuid
 from api.db_http import hrana_execute, hrana_transaction
 from research import marketdesk_pdf_policy as policy
 from research.marketdesk_pdf_rate import (
-    FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, on_quota, on_soft, on_success,
+    FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, max_age_days, on_quota, on_soft, on_success,
     row_cooldown_seconds,
 )
 
@@ -29,7 +29,6 @@ LEASE_SECONDS = 600
 MIN_INTERVAL_SECONDS = FLOOR_SECONDS
 MAX_ITEM_ATTEMPTS = 8
 ITEM_BACKOFF_CAP = 86400
-FRESH_WINDOW_DAYS = 1.5
 OLDEST_SLA_SECONDS = 24 * 60 * 60
 GROWTH_FLOOR = 48
 STALL_SECONDS = 6 * 60 * 60
@@ -54,6 +53,9 @@ TERMINAL_ERRORS = frozenset({"file_missing"})
 # backs off exponentially and, after this many attempts, stops reserving
 # priority precedence, so one bad file cannot starve the rest of the backlog.
 PRIORITY_MAX_FAILURES = 3
+# Above ordinary measured research. Operator priority=1 still outranks both.
+PROTECTED_REASONS = ("PDF_PREFERRED_DESK", "PDF_BOOK_OR_WATCHLIST")
+_PROTECTED_SQL = ",".join("'" + code + "'" for code in PROTECTED_REASONS)
 _QUOTA_SQL = ",".join("'" + code + "'" for code in sorted(QUOTA_ERRORS))
 # Trust the article pipeline's source, duplicate, accuracy and writing gates.
 # Recheck at claim time so legacy discovery rows cannot bypass publication.
@@ -157,6 +159,7 @@ def prepare_selection(*, now=None):
         "SELECT a.article_id,a.title,p.content,a.publisher,p.updated_at FROM marketdesk_articles a "
         "JOIN posts p ON p.id=a.post_id WHERE a.article_id IN ("
         "SELECT q.article_id FROM marketdesk_pdf_queue q WHERE q.status!='downloaded' "
+        "AND q.disposition!='exhausted' "
         f"AND q.article_id IN ({ELIGIBLE_IDS}) "
         "AND NOT EXISTS(SELECT 1 FROM marketdesk_pdf_selection x JOIN marketdesk_articles a2 ON a2.article_id=x.article_id "
         "JOIN posts p2 ON p2.id=a2.post_id WHERE x.article_id=q.article_id AND x.context_hash=? "
@@ -224,21 +227,65 @@ def _sync_disposition(context_hash, now):
         "WHERE disposition='active' AND (attempts - attempts_baseline)>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
         "OR julianday(lease_until)<=julianday(?))",
         (stamp, MAX_ITEM_ATTEMPTS, stamp))
+    _retire_aged(context_hash, now)
+
+
+def _retire_aged(context_hash, now):
+    """Ordinary passing rows past the window leave the backlog.
+
+    Age is published_at. Preferred-desk and book/watchlist rows are a higher
+    claim tier. They are not retired while an ordinary passing row inside the
+    window is still pending, because that slot would otherwise go to ordinary
+    work. They do retire once no such ordinary row remains. The 0112 check
+    cannot grow in an additive migration, so the mark is exhausted/aged_out.
+    """
+    days = max_age_days()
+    if days <= 0:
+        return
+    current = _time(now)
+    stamp = _stamp(current)
+    cutoff = _stamp(current - timedelta(days=days))
+    hrana_execute(
+        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
+        "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
+        f"AND article_id IN ({_selected()}) AND article_id NOT IN ("
+        "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
+        "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
+        f"AND x.reason_code IN ({_PROTECTED_SQL}))",
+        (stamp, cutoff, context_hash, context_hash))
+    hrana_execute(
+        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
+        "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
+        "AND article_id IN (SELECT x.article_id FROM marketdesk_pdf_selection x "
+        "JOIN marketdesk_articles a ON a.article_id=x.article_id JOIN posts p ON p.id=a.post_id "
+        "WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
+        f"AND x.reason_code IN ({_PROTECTED_SQL})) "
+        "AND NOT EXISTS (SELECT 1 FROM marketdesk_pdf_queue o "
+        "JOIN marketdesk_pdf_selection xo ON xo.article_id=o.article_id "
+        "JOIN marketdesk_articles ao ON ao.article_id=o.article_id JOIN posts po ON po.id=ao.post_id "
+        "WHERE o.disposition='active' AND o.status='pending' AND julianday(o.published_at)>=julianday(?) "
+        "AND xo.eligible=1 AND xo.context_hash=? AND xo.post_updated_at IS po.updated_at "
+        f"AND xo.reason_code NOT IN ({_PROTECTED_SQL}))",
+        (stamp, cutoff, context_hash, cutoff, context_hash))
 
 
 def _due_sql():
-    # An expired download is ahead of the fresh/backlog lane. A killed batch
-    # otherwise sits out a whole fresh-lane turn, and with a long interval
-    # that is hours. Fresh lane (lane 0) then takes reports from the last 36h,
-    # newest first, then the oldest backlog. Priority still wins over both.
+    """Expired leases, operator priority, protected reasons, then newest published_at.
+
+    PDF_PREFERRED_DESK and PDF_BOOK_OR_WATCHLIST outrank ordinary measured
+    research so an afternoon protected row is not stranded behind the next
+    morning's ordinary arrivals. Within a tier, newest published_at is first.
+    Operator priority=1 still wins. The admit trigger still flips lane.
+    """
     return (
         "CASE WHEN status='downloading' AND julianday(lease_until)<=julianday(?) THEN 0 ELSE 1 END,"
         "priority DESC,"
-        "CASE WHEN (SELECT lane FROM marketdesk_pdf_throttle WHERE singleton=1)=0 "
-        "THEN CASE WHEN julianday(published_at)>=julianday(?)-? THEN 0 ELSE 1 END "
-        "ELSE CASE WHEN julianday(published_at)<julianday(?)-? THEN 0 ELSE 1 END END,"
-        "CASE WHEN julianday(published_at)>=julianday(?)-? THEN -julianday(published_at) ELSE julianday(published_at) END,"
-        "article_id")
+        "CASE (SELECT x.reason_code FROM marketdesk_pdf_selection x "
+        "JOIN marketdesk_articles a ON a.article_id=x.article_id JOIN posts p ON p.id=a.post_id "
+        "WHERE x.article_id=marketdesk_pdf_queue.article_id AND x.eligible=1 AND x.context_hash=? "
+        "AND x.post_updated_at IS p.updated_at) "
+        f"WHEN 'PDF_PREFERRED_DESK' THEN 1 WHEN 'PDF_BOOK_OR_WATCHLIST' THEN 1 ELSE 0 END DESC,"
+        "-julianday(published_at),article_id")
 
 
 def _cap_value(raw) -> int:
@@ -282,7 +329,7 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
         "RETURNING article_id,article_url,title,published_at,lease_token",
         (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
          context_hash, stamp, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
-         stamp, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS, stamp, FRESH_WINDOW_DAYS,
+         stamp, context_hash,
          int(limit), daily_value, int(limit), daily_value, stamp,
          hourly_value, int(limit), hourly_value, stamp))
     work = []
@@ -441,8 +488,9 @@ def backlog_breach(*, now=None):
         context_hash = policy.load_context().key
     except policy.SelectionUnavailable:
         return None
+    _retire_aged(context_hash, current)
     rows = hrana_execute(
-        "SELECT COUNT(*),MIN(first_seen_at) FROM marketdesk_pdf_queue q WHERE q.disposition='active' "
+        "SELECT COUNT(*),MIN(q.published_at) FROM marketdesk_pdf_queue q WHERE q.disposition='active' "
         "AND q.status IN ('pending','downloading') AND q.article_id IN (" + ELIGIBLE_IDS + ") AND ("
         f"q.article_id IN ({_selected()}) OR NOT EXISTS(SELECT 1 FROM marketdesk_pdf_selection x "
         "JOIN marketdesk_articles a ON a.article_id=x.article_id JOIN posts p ON p.id=a.post_id "
