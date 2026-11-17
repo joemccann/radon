@@ -1776,6 +1776,12 @@ def _health_state(states: Iterable[str]) -> str:
     return "ok" if all(s in HEALTHY_STATES for s in states) else "error"
 
 
+def fleet_error(provider_states: Iterable[tuple[str, str]]) -> dict:
+    """The fleet row's error detail: every provider that needs attention."""
+    unhealthy = [f"{name}={state}" for name, state in provider_states if state not in HEALTHY_STATES]
+    return {"message": ", ".join(unhealthy) or "subscription refresh failed"}
+
+
 def fleet_heartbeat_state(
     names: Iterable[str], states: Iterable[str], *, skipped: bool = False
 ) -> Optional[str]:
@@ -1912,13 +1918,7 @@ def _run_locked(
                 error=(
                     None
                     if fleet == "ok"
-                    else {
-                        "message": ", ".join(
-                            f"{r.provider}={r.state}"
-                            for r in results
-                            if r.state not in HEALTHY_STATES
-                        )
-                    }
+                    else fleet_error((r.provider, r.state) for r in results)
                 ),
             )
     except Exception as exc:  # noqa: BLE001 - a heartbeat never fails the run
