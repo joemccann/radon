@@ -47,6 +47,11 @@ When asked to replace previews with downloads, trace the actual authenticated Do
 - Successful oneshot starts count toward systemd StartLimit too. Bound an accelerated replay, stop on start-limit-hit and retain the normal service limit; do not spin on refused starts or loosen the timer's crash-loop protection.
 - Managed cancellation is control flow. Provider error handling must not convert it into a fallback request. Verify actual SIGTERM during request setup and streaming, exit 143, cleanup and the error heartbeat.
 
+# A 31s discover HTTP 400 is a page timeout, not a scored partial (2026-11-16)
+
+- `flow-refresh-discover-partial-400` is a scored walk: darkpool cache writes and `candidates` present. `flow-refresh-discover-budget-timeout` is `curl: (28)` / `http=000` / 0 bytes at 180s. Scanner OK, flow-analysis OK, then discover HTTP 400 about 31s later with `candidates_found` 0 and `skipped` 1 is `flow-refresh-discover-page-timeout`.
+- The fail-fast client (`max_retries=0`, 30s) turns one `requests.Timeout` into `UW connection failed after 1 attempts`. That used to set `required provider data unavailable`, and the wrapper exited 1. Shed it (`discover transport shed`, exit 75). A completed provider error and a mix with a real miss stay a hard 400. Read the journal at `paged_at`. A later hour can already be `success`.
+
 # Discover curl 28 is the market-wide walk, not the flow-analysis wait (2026-11-04)
 
 - `curl: (28)` / `http=000` / 0 bytes at 180s is not always `flow-refresh-analysis-admission-wait`. Read which POST timed out. Scanner OK, flow-analysis OK, then discover held for the full curl budget is `flow-refresh-discover-budget-timeout`.
