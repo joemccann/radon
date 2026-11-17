@@ -101,6 +101,10 @@ _REVIEWED_PRIVILEGED = frozenset({
     "/uw/research/events",
     "/uw/research/refresh",
     "/uw/usage",
+    # Relay tickets are a full realtime session; the demo frontend never mints
+    # one through the service lane (its ws-ticket deputy is OPERATOR-only).
+    "/ws-ticket",
+    "/ws-ticket/validate",
 })
 
 # Routes the demo frontend genuinely proxies with this credential. They must
