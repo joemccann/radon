@@ -1,3 +1,14 @@
+# MarketDesk PDF hourly cap and quota recovery (2026-11-16)
+
+- [x] T1 depends_on: [] Failing tests: hourly cap in the lease, per-row quota cooldown, recovery from 2100s to the floor in under 6h.
+- [x] T2 depends_on: [T1] Controller, lease SQL, migration 0114. Caps stay configurable. Backoff stays exponential.
+- [x] T3 depends_on: [T2] Store-driven sim: 288/day after the ramp, 0 quota hits against a 15/h provider, 603 + 190/day drains in 6.44 days. Floor in 3.77h.
+- [ ] T4 depends_on: [T3] PR against main, CI green, one Pushover. Do not merge.
+
+## Review
+
+Lease SQL is the same statement as the daily cap. Quota still doubles. Recovery halves every 4 clean cycles only while armed. Open PR #1580 does not overlap these files.
+
 # Runner crash report and resume (2026-11-14)
 
 - [x] T1 depends_on: [] Failing tests: missing phase report publishes a sanitized harness report; claude exit 1 retries once and scores 75 only after a checkpoint; 124 stays 124.

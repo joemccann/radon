@@ -33,6 +33,8 @@ def test_pdf_env_excludes_every_unneeded_credential(tmp_path):
     values = {
         "MARKETDESK_FIREBASE_REFRESH_TOKEN": "private-login",
         "MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "600",
+        "MARKETDESK_PDF_HOURLY_CAP": "9",
+        "MARKETDESK_PDF_DAILY_CAP": "400",
         "TURSO_DB_URL": "libsql://test", "TURSO_AUTH_TOKEN": "private-db",
         "THEMARKETEAR_EMAIL": "private-email", "THEMARKETEAR_PASSWORD": "private-password",
         "CLERK_SECRET_KEY": "forbidden", "TWS_PASSWORD": "forbidden",
@@ -48,7 +50,7 @@ def test_pdf_env_excludes_every_unneeded_credential(tmp_path):
     args = _run_line(result).split()
     env_file = Path(args[args.index("--env-file") + 1])
     text = env_file.read_text()
-    for key in ("MARKETDESK_FIREBASE_REFRESH_TOKEN", "MARKETDESK_PDF_MIN_INTERVAL_SECONDS", "TURSO_AUTH_TOKEN", "THEMARKETEAR_EMAIL"):
+    for key in ("MARKETDESK_FIREBASE_REFRESH_TOKEN", "MARKETDESK_PDF_MIN_INTERVAL_SECONDS", "MARKETDESK_PDF_HOURLY_CAP", "MARKETDESK_PDF_DAILY_CAP", "TURSO_AUTH_TOKEN", "THEMARKETEAR_EMAIL"):
         assert f"{key}=" in text
     assert "forbidden" not in text
 
