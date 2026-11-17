@@ -5197,6 +5197,8 @@ async def gex_share():
 
 _SHARE_CARD_TYPES = frozenset({"gex", "internals"})
 
+from utils.share_cards import SHARE_CARDS_DIR  # noqa: E402
+
 
 @app.get("/share/content", response_class=HTMLResponse)
 async def share_content(type: str, name: str):
@@ -5206,7 +5208,7 @@ async def share_content(type: str, name: str):
     pattern = re.compile(rf"^tweet-{re.escape(type)}-\d{{4}}-\d{{2}}-\d{{2}}\.html$")
     if not pattern.fullmatch(name) or Path(name).name != name:
         raise HTTPException(status_code=403, detail="Access denied")
-    path = PROJECT_ROOT / "reports" / name
+    path = SHARE_CARDS_DIR / name
     try:
         return HTMLResponse(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
