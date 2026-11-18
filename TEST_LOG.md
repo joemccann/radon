@@ -1423,8 +1423,18 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-588 | DONE | 60s mutation at `WorkspaceShell.tsx:543`: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/orders` on a 5.5-minute-old book). Restored 8-minute select. Green 2 passed ×3; delta Vitest 29 passed ×3. Product source unchanged. Closing rounds: root pytest credentials xdist flake then serial green each round; 19,716 passed / 10 skipped / 40 subtests. Vitest 11,627 passed / 21 skipped / 1,208 files each round. Cloud 58 failed / 4,275 passed / 23 skipped each round, 0 added / 0 removed against r1. |
 | T-589 | DONE | Grep-only polkit test 3 passed after `NO`→`YES`. Node-executed rules: first-rule YES 1 failed; second-rule YES 1 failed. Restored `NO`. Green 3 passed ×3; delta cloud 13 passed ×3. Product source unchanged. Closing rounds: root pytest credentials xdist flake then serial green each round; 19,716 passed / 10 skipped / 40 subtests. Vitest 11,627 passed / 21 skipped / 1,208 files each round. Cloud 58 failed / 4,275 passed / 23 skipped each round, 0 added / 0 removed against r1. |
 
+<<<<<<< HEAD
 ## 2026-11-17
 
 | ID | Status | Evidence |
 |---|---|---|
 | T-593 | DONE | Chained URLError `assert 1 == 0`; cause-less TimeoutError text `assert 0 == 1` (`/tmp/t593-red.log`). `_is_transport_blip` uses `is_transport_error` on `__cause__`. Green 10 passed; file 104 passed ×3. Closing rounds: root pytest Darwin 5-red is T-591+T-592 on #1587; r3 credentials xdist flake then serial 2 passed; 19,866/19,866/19,865 passed / 10 skipped / 40 subtests. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud 58 failed / 4,288 passed / 23 skipped each round, 0 added / 0 removed against `8aaad84e9`. |
+=======
+## 2026-11-16
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-590 | SUPERSEDED | Main removed `pdf_backlog` from the dropbox row (marketdesk-pdf owns the breach); these tests were dropped when merging main. Original: Wiring `None` + deleted health flip: 3 failed / 1 passed (`test_default_deps_wire_real_modules`, `test_pdf_backlog_breach_errors_ok_dropbox_health`, `test_pdf_backlog_appends_to_paused_dropbox_health`). Restored product source. Green 4 passed; `test_marketdesk_job.py` 96 passed. Product source unchanged. Closing rounds: root pytest r1 19,823 passed; r2/r3 credentials xdist flake then serial 2 passed. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud r2/r3 58 failed / 4,285 passed / 23 skipped, 0 added / 0 removed vs origin/main `8aaad84e9`. |
+| T-591 | DONE | Serial `PermissionError: '/opt/cursor'` after admission asserts (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green 21 passed in `test_marketdesk_pdf_sim.py`. Product source unchanged. Closing rounds: same as T-590. |
+| T-592 | DONE | Serial 2 failed ×3: empty log fence vs `"Error: CLI crashed"` (`/tmp/delta-security-1.log`). Hook stderr `bad substitution` on bash 3.2 `${//$'\x60\x60\x60'/}`. Escaped backticks. Green 2 passed; file 201 passed. Closing rounds: same as T-590. |
+>>>>>>> origin/main

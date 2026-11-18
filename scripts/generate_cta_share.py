@@ -50,8 +50,9 @@ from utils.cta_percentiles import normalize_pctile, reconcile_tables  # noqa: E4
 from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
-REPORTS_DIR = PROJECT_ROOT / "reports"
-REPORTS_DIR.mkdir(exist_ok=True)
+from utils.share_cards import ensure_share_cards_dir  # noqa: E402
+
+REPORTS_DIR = ensure_share_cards_dir()
 
 
 def _load_cta_from_db() -> Optional[dict]:

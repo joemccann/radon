@@ -81,6 +81,7 @@ EXEMPT: dict[str, str] = {
     "MARKETDESK_PDF_MIN_INTERVAL_SECONDS": "optional floor for the PDF admission interval; unset uses the 300s code floor, a higher value cannot be undercut",
     "MARKETDESK_PDF_DAILY_CAP": "optional rolling 24h PDF admission cap; unset is 400, 0 disables the cap",
     "MARKETDESK_PDF_HOURLY_CAP": "optional rolling 1h PDF admission cap; unset is 12, 0 disables the cap",
+    "MARKETDESK_PDF_MAX_AGE_DAYS": "optional max age of a passing PDF in days, measured from published_at; unset is 7, 0 disables retirement",
     "PLAYWRIGHT_CHROMIUM_SANDBOX": "escape hatch; unset launches Chromium sandbox-first and falls back only on a sandbox-start failure",
     "MARKETDESK_SUMMARY_WAIT_HOURS": "optional; unset waits 6 hours for MarketDesk's summary before failing the item",
     "MARKETDESK_ASSET_HOSTS": "optional extra chart-image hosts; unset allows the MarketDesk CDN only",

@@ -241,6 +241,7 @@ def run_cycle(*, env=os.environ, deps=None):
             if blocked:
                 raise DownloadDeferred("PDF archive deferred: " + blocked)
             _report_backlog(deps, cycle)
+            cycle.finished_at = deps.now().isoformat()
             return counts
         root = deps.root()
         receipts = _receipts_root(root)
