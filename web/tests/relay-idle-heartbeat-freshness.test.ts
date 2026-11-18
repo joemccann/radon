@@ -213,6 +213,16 @@ function freshnessInputsFor(row: RelayHealthRow | null, nowMs: number) {
     vcgScanTime: iso(nowMs - Math.floor(vcgWindowMs / 2)),
     gexScanTime: iso(nowMs - Math.floor(vcgWindowMs / 2)),
     journalWrittenAt: iso(nowMs - 3_600_000),
+    journalSync: {
+      state: "ok",
+      last_error: null,
+      updated_at: iso(nowMs - 30_000),
+    },
+    journalGapSli: {
+      state: "ok",
+      last_error: JSON.stringify({ missing_exec_id_count: 0 }),
+      updated_at: iso(nowMs - 30_000),
+    },
   };
 }
 
