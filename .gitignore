@@ -107,6 +107,7 @@ secrets/**/*.txt
 reports/*.html
 reports/*.json
 reports/*.png
+data/share_cards/
 data/*.json
 !data/flex_token_config.example.json
 # Robinhood OAuth token store + its atomic-write/lock artifacts (secrets;
