@@ -614,3 +614,20 @@ def test_bearer_escape_variants_redact_the_whole_value():
 def test_a_backslash_inside_a_bare_bearer_token_is_still_redacted():
     body = scrub_credential_text("authorization: bearer abc\\\\123def456ghi")
     assert "123def456ghi" not in body, body
+
+
+def test_bare_pass_and_auth_block_bodies_are_scrubbed():
+    """The hook's line alphabet names a bare `pass` and `auth` key, so a
+    `pass: |` header is rewritten there, but the multiline rules did not carry
+    either name and the indented body was published intact."""
+    for header in ("pass: |", "auth: >", "PASS: |", 'auth = """'):
+        if header.endswith('"""'):
+            text = f"{header}\nNOTREALOPAQUE9\n\"\"\"\nsibling: keep\n"
+        else:
+            text = f"{header}\n  NOTREALOPAQUE9\n  second line\nsibling: keep\n"
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+        assert "sibling: keep" in out, out
+    prose = ("tests pass: 3 of 3\nauthor: |\n  ordinary prose stays\n"
+             "passage: |\n  quoted paragraph\n")
+    assert scrub_credential_text(prose) == prose

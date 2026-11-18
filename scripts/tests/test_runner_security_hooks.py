@@ -753,6 +753,26 @@ def test_a_missing_agent_report_publishes_a_sanitized_failure_report(rig):
         assert leak not in comment, leak
 
 
+def test_the_log_tail_is_scrubbed_before_it_is_cut(rig):
+    """The failure report quotes the last 80 lines of the phase log. Cutting
+    first can drop a block-scalar header while keeping its indented body, and
+    without the header the scrubber has nothing to recognise the body by. The
+    scrub must see the whole log; only then is the tail taken."""
+    (rig.home / ".radon-runner-reports-key").write_text("key\n")
+    rig.scratch.mkdir(parents=True, exist_ok=True)
+    old = time.time() - 30
+    os.utime(rig.mark, (old, old))
+    body_lines = [f"  qzBodyLine{i}NOTREAL" for i in range(120)]
+    log = "\n".join(["Error: CLI crashed", "password: |", *body_lines, "session ended", ""])
+
+    out = rig.post(rc=1, output=log)
+
+    body = _published(rig)
+    assert body is not None, out
+    assert "session ended" in body
+    assert "NOTREAL" not in body, body
+
+
 def test_a_block_scalar_or_compound_named_credential_body_is_redacted(rig):
     # DS-2026-10-20-06: a line-oriented pass rewrote the block-scalar HEADER
     # and published the indented body; the compound key name was not in the

@@ -412,22 +412,24 @@ _phase_clock() {
 }
 
 # Last lines of this phase's log, secret-scrubbed, or a fixed omission line.
-# A failed scrub publishes no tail.
+# A failed scrub publishes no tail. The scrub runs over the WHOLE log and the
+# tail is cut from its output, never the other way round: a cut can drop a
+# block-scalar header or an assignment's key while keeping the opaque value,
+# and without that context no rule recognises the value as a secret.
 _sanitize_log_tail() {
-  local raw clipped cleaned
+  local cleaned clipped
   if [[ ! -f "${PHASE_LOG:-}" || -L "${PHASE_LOG:-}" ]]; then
     printf '%s\n' "(no phase log)"
     return 0
   fi
-  raw="$(tail -n 80 "$PHASE_LOG" 2>/dev/null || true)"
-  clipped="$(printf '%s\n' "$raw" | tail -c 4000)"
-  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
-  clipped="${clipped//\`\`\`/[fence]}"
-  if ! cleaned="$(printf '%s\n' "$clipped" | _redact_secret_classes | _redact_diag_lines)"; then
+  if ! cleaned="$(_redact_secret_classes <"$PHASE_LOG" | _redact_diag_lines)"; then
     printf '%s\n' "(log tail omitted: redaction failed)"
     return 0
   fi
-  printf '%s\n' "$cleaned"
+  clipped="$(printf '%s\n' "$cleaned" | tail -n 80 | tail -c 4000)"
+  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
+  clipped="${clipped//\`\`\`/[fence]}"
+  printf '%s\n' "$clipped"
 }
 
 # The agent writes latest-report-<phase>.md. A phase with no file newer than

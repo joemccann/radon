@@ -133,8 +133,14 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
 # values are the gap: a block or triple-quoted body is not on the header
 # line the hook rewrites. `[_-]key` matches `signing_key` and `webhook-key`.
 # `authorization` is here for the same reason: its single-line rule below read
-# a triple delimiter as the whole value and left the body in place.
-_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|authorization|credential|[_-]key)"
+# a triple delimiter as the whole value and left the body in place. A bare
+# `pass` / `auth` is in the hook's line alphabet too; the block and
+# triple-quote shapes that follow carry no prose risk (`tests pass: 3` has
+# no indicator), so both names belong here even though the single-line
+# rules keep the underscore form. `author` and `passage` are prose, not keys.
+_MULTILINE_KEY = (
+    rf"(?:{_SECRET_KEY}|pass(?!age|ing|ed)|auth(?!or)|authorization|credential|[_-]key)"
+)
 
 # The key alternation carries no prefix or suffix run of its own, and the
 # block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`
