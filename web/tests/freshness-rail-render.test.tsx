@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 
 import FreshnessRail from "../components/FreshnessRail";
-import { IV_RANK_REFRESH, MARGIN_DEBT_REFRESH } from "../lib/refreshSchedule";
+import { MARGIN_DEBT_REFRESH, type RefreshSchedule } from "../lib/refreshSchedule";
+
+/** A once-a-day 22:10 UTC writer: the rail fixture these cases are written against. */
+const DAILY_2210: RefreshSchedule = [{ hours: [22], minutes: [10] }];
 
 afterEach(() => {
   cleanup();
@@ -17,7 +20,7 @@ function renderAt(iso: string, asOf: string | null) {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(iso));
   const view = render(
-    <FreshnessRail schedule={IV_RANK_REFRESH} asOf={asOf} testId="rail" asOfTestId="rail-asof" />,
+    <FreshnessRail schedule={DAILY_2210} asOf={asOf} testId="rail" asOfTestId="rail-asof" />,
   );
   // The clock starts in an effect, so the first paint carries no countdown.
   act(() => { vi.advanceTimersByTime(0); });
@@ -30,7 +33,7 @@ describe("FreshnessRail", () => {
     vi.setSystemTime(new Date("2026-08-26T19:00:00Z"));
     // Render without flushing effects: this is the markup the server produces.
     const html = render(
-      <FreshnessRail schedule={IV_RANK_REFRESH} asOf="2026-08-25" testId="rail" />,
+      <FreshnessRail schedule={DAILY_2210} asOf="2026-08-25" testId="rail" />,
     );
     // After effects flush it fills in; the point is the placeholder exists at all.
     expect(html.container.textContent).toContain("As of");

@@ -1066,7 +1066,8 @@ deploy's `install-units` verb from `installed-units.sha256`.
 
 ### IV RANK (`radon-ivrank.timer`)
 
-Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
+Every 5 min 09:00-16:55 ET Mon-Fri (in-progress session bar) plus daily
+`22:10 UTC` final (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_ivrank.py`. SPY 30-day implied vol from IB
 (`OPTION_IMPLIED_VOLATILITY` daily bars, health-gated), UW iv-rank fallback,
 ranked over the trailing 252 sessions. Heartbeat `ivrank`. Installed by the
