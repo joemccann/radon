@@ -298,7 +298,12 @@ Timestamps: `scan_time` tz-aware UTC ISO with `Z`; session logic through
 
 ## E. Scheduling
 
-`OnCalendar=*-*-* 22:10:00 UTC`, every calendar day. Verified free (21:45×2,
+Two lines. `OnCalendar=Mon..Fri *-*-* 09..16:00,05,...,55 America/New_York`
+samples every 5 minutes in ET trading hours: IB serves the in-progress
+session's `OPTION_IMPLIED_VOLATILITY` daily bar intraday (verified 2026-11-18),
+`merge_history` lets each fetch restate today's row, and today's row is the
+series edge so the outlier gate never tests it (VIX P/C precedent).
+`OnCalendar=*-*-* 22:10:00 UTC`, every calendar day, writes the final bar. Verified free (21:45×2,
 21:50, 22:30, 23:30 taken; nothing at 22:10). 22:10 UTC is after the 16:00 ET
 close year-round (20:00/21:00 UTC), so the daily IV bar is final. Weekend and
 holiday runs are unchanged-data heartbeats that keep `service_health` inside
