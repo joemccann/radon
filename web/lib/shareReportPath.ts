@@ -1,9 +1,11 @@
 import { readFile } from "fs/promises";
 import { resolve, dirname, basename } from "path";
 
-// reports/ lives at the repo root; Next.js route handlers run with cwd = web/.
+// Share cards live in data/share_cards (scripts/utils/share_cards.py): data/ is the
+// bind mount the API and Next.js containers share, and the only checkout path the
+// app image lets them write. Next.js route handlers run with cwd = web/.
 const PROJECT_ROOT = resolve(process.cwd(), "..");
-export const REPORTS_DIR = resolve(PROJECT_ROOT, "reports");
+export const SHARE_CARDS_DIR = resolve(PROJECT_ROOT, "data", "share_cards");
 
 export type ShareCardType = "gex" | "vcg" | "regime" | "internals" | "cta";
 
@@ -17,7 +19,7 @@ export type ShareCardType = "gex" | "vcg" | "regime" | "internals" | "cta";
 //
 // The only files these routes may serve are the public share cards the generators
 // (scripts/generate_*_share.py) emit: tweet-<type>-YYYY-MM-DD[-card-N].html. Each
-// route is scoped to its OWN card type, the file must live DIRECTLY in reports/
+// route is scoped to its OWN card type, the file must live DIRECTLY in SHARE_CARDS_DIR
 // (no traversal, no subdirectories, no sibling-dir prefix tricks), and the
 // basename must match the card pattern exactly.
 function shareCardPattern(type: ShareCardType): RegExp {
@@ -27,10 +29,10 @@ function shareCardPattern(type: ShareCardType): RegExp {
 export function isAllowedShareCardPath(rawPath: string | null | undefined, type: ShareCardType): boolean {
   if (!rawPath) return false;
   const resolved = resolve(rawPath);
-  // Strict containment: the file must sit immediately inside reports/. Comparing
+  // Strict containment: the file must sit immediately inside SHARE_CARDS_DIR. Comparing
   // the parent directory exactly avoids the startsWith() trailing-separator class
   // of bypass and blocks any nested path.
-  if (dirname(resolved) !== REPORTS_DIR) return false;
+  if (dirname(resolved) !== SHARE_CARDS_DIR) return false;
   return shareCardPattern(type).test(basename(resolved));
 }
 
