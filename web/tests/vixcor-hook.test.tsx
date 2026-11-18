@@ -3,8 +3,8 @@
  *
  * useVixcor() — GET-only polling hook over /api/vixcor (useCor mold via
  * useSyncHook). No scan POST exists: radon-vixcor.timer owns refreshes, so
- * every request is a GET with cache: no-store, the poll cadence is hourly
- * (3_600_000 ms), and lastSync is read off the payload's scan_time via
+ * every request is a GET with cache: no-store, the poll cadence matches the
+ * timer's 5-minute intraday ticks (300_000 ms), and lastSync is read off the payload's scan_time via
  * extractTimestamp.
  *
  * Spec: docs/indicators/vixcor.md section G.3.
@@ -110,7 +110,7 @@ describe("useVixcor", () => {
     expect(result.current.lastSync).toBe(SCAN_TIME);
   });
 
-  it("polls hourly: nothing at 30 minutes, one more GET at 60", async () => {
+  it("polls on the intraday writer cadence: nothing at 2.5 minutes, one more GET at 5", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchSpy = vi.fn(async () => jsonResponse(buildVixcorPayload()));
     global.fetch = fetchSpy as typeof fetch;
@@ -121,12 +121,12 @@ describe("useVixcor", () => {
     const afterMount = fetchSpy.mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_800_000);
+      await vi.advanceTimersByTimeAsync(150_000);
     });
     expect(fetchSpy.mock.calls.length).toBe(afterMount);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_800_000);
+      await vi.advanceTimersByTimeAsync(150_000);
     });
     expect(fetchSpy.mock.calls.length).toBe(afterMount + 1);
   });
