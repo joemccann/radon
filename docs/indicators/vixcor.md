@@ -645,6 +645,22 @@ straddle 02:15, cor 02:20, nothing at 02:35. It must run **after** `radon-cor`
 so the parent row for the session exists; cor's `TimeoutStartSec=300` means the
 gap has to clear 02:25, so 02:35 is the first safe slot.
 
+**Intraday provisional session (2026-11-18).** The timer also fires every 5
+minutes 09:00-15:55 ET on weekdays. Each tick reads live VIX and COR3M through
+`scripts/utils/index_live.py` (IB pool daily bars, else Cboe 15-minute delayed
+quotes, both symbols on one session or nothing), appends that session to the
+official joined series and recomputes corr20, regime, percentile and episode
+membership into the small `vixcor:live` snapshot. The official snapshot is
+never rewritten for it: an unchanged-source tick only heartbeats once the
+official snapshot is under 12h old. A session is appended only when it is the
+very next trading session after the official `as_of`; a gap is never bridged.
+`/api/vixcor` appends the row through `lib/provisionalRow.ts`, the panel names
+the source and quote time, and the hook polls every 5 minutes. The window ends
+at 15:55 so no intraday slot is expected to carry the official close, which
+keeps the freshness rail's session model honest. Tests:
+`scripts/tests/test_vixcor.py::TestLiveProvisionalRow`,
+`web/tests/vixcor-api.test.ts` (provisional current session).
+
 `cloud/services/radon-vixcor.service`:
 
 ```ini
@@ -674,22 +690,11 @@ resolves `/usr/bin/python3.13` on the VPS
 
 `cloud/services/radon-vixcor.timer`:
 
-```ini
-[Unit]
-Description=Radon VIXCOR Indicator - daily Cboe VIX x COR3M correlation
-
-[Timer]
-# 02:35 UTC, 15 minutes behind radon-cor.timer (02:20 UTC, TimeoutStartSec=300)
-# so the COR3M row for the session is already in Turso when this child reads
-# it. Runs every calendar day: weekend and holiday runs are 304 heartbeats
-# that keep service_health fresh inside the 26h staleness window.
-OnCalendar=*-*-* 02:35:00 UTC
-Persistent=true
-RandomizedDelaySec=120
-
-[Install]
-WantedBy=timers.target
-```
+The checked-in `cloud/services/radon-vixcor.timer` is the source of truth: the
+intraday `Mon..Fri *-*-* 09..15:00,05,...,55 America/New_York` line plus the
+daily `OnCalendar=*-*-* 02:35:00 UTC` line, `Persistent=true`,
+`RandomizedDelaySec=0`. `web/lib/refreshSchedule.ts` `VIXCOR_REFRESH` mirrors
+it and `web/tests/refresh-schedule.test.ts` pins the pair.
 
 A daily oneshot does not need `StartLimitBurst=10`; that applies to sub-5-minute
 oneshots.

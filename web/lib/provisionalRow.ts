@@ -23,7 +23,9 @@ export interface LiveSnapshot<Row> {
 
 interface SeriesPayload<Row> {
   series: Row[];
-  data_date: string | null;
+  /** Official close date; payloads keyed on `as_of` alone (VIX-COR) omit it. */
+  data_date?: string | null;
+  as_of?: string | null;
   status?: string | null;
   expected_session?: string | null;
 }
@@ -63,7 +65,8 @@ export function appendProvisionalRow<Row extends { date: string }, P extends Ser
   live: LiveSnapshot<Row> | null,
 ): P & { provisional?: ProvisionalMeta } {
   const row = live?.row;
-  if (!live || !row || !live.source || !payload.data_date || row.date <= payload.data_date) return payload;
+  const closeDate = "data_date" in payload ? payload.data_date : payload.as_of;
+  if (!live || !row || !live.source || !closeDate || row.date <= closeDate) return payload;
   const series = [...payload.series, row];
   const expected = payload.expected_session;
   return {
@@ -71,7 +74,7 @@ export function appendProvisionalRow<Row extends { date: string }, P extends Ser
     series,
     count: series.length,
     current: live.current ?? row,
-    data_date: row.date,
+    ...("data_date" in payload ? { data_date: row.date } : {}),
     ...("as_of" in payload ? { as_of: row.date } : {}),
     ...(payload.status !== undefined ? { status: expected && row.date >= expected ? "ok" : payload.status } : {}),
     provisional: { source: live.source, quote_time: live.quote_time, scan_time: live.scan_time },
