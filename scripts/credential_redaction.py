@@ -311,7 +311,10 @@ _HEAD_GAP = r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)
 
 _ASSIGNMENT_HEAD = re.compile(
     # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
+    # An optional backslash before the closing quote: JSON serialized inside
+    # another string escapes the key's quote, and the key then never met its
+    # separator (DS-2026-11-18).
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}(?:\\?[\"'])?\]?"
     # A type annotation before the initializer, `NAME: str = ...`
     # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
     # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
@@ -802,9 +805,11 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\]?\s*[:=]\s*"
-    # A quoted value may open on the key line and start on the next one.
-    r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
+    # The key's closing quote may be escaped (JSON inside a string).
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}(?:\\?[\"'])?\]?\s*[:=]\s*"
+    # A quoted value may open on the key line and start on the next one; its
+    # opening quote may be escaped the same way.
+    r"(?:\\?[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
     # so only one length is ever tried) and BOUNDED. An unbounded run with a
     # lookahead that rejected punctuation made every candidate rescan the

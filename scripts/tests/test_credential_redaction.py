@@ -685,3 +685,20 @@ def test_named_key_aliases_are_redacted_on_a_single_line():
         assert "NOTREALOPAQUE9" not in out, out
     prose = 'primary_key = "id"\nauthor = "ann"\ntests pass: 3 of 3\n'
     assert scrub_credential_text(prose) == prose
+
+
+def test_a_json_serialized_inside_a_string_is_redacted_and_detected():
+    """JSON nested in another string carries a backslash before the key's
+    closing quote (`{\\"password\\": \\"<v>\\"}`), so neither the assignment head
+    nor the literal detector saw a credential key followed by its separator and
+    the prefixless value survived both."""
+    from credential_redaction import find_secret_assignments
+
+    for text in (
+        'log: "{\\"password\\": \\"NOTREALOPAQUE9ABCDEF\\"}"\n',
+        '{\\"token\\": \\"NOTREALOPAQUE9ABCDEF\\"}\n',
+        'payload = "{\\"api_key\\":\\"NOTREALOPAQUE9ABCDEF\\"}"\n',
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9ABCDEF" not in out, out
+        assert find_secret_assignments(text), text
