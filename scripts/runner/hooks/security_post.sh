@@ -175,6 +175,12 @@ deliver_urls_verified() {
     no_loop_pr_exists
     return
   fi
+  # The expectations are read from the clone's working tree, which the agent
+  # phase can edit. Bind them to the commit the PR head was verified at: any
+  # workflow file differing from that commit (or an unknown commit) verifies
+  # nothing.
+  [[ -n "${3:-}" ]] || return 1
+  git -C "$WORK" diff --quiet "$3" -- .github/workflows 2>/dev/null || return 1
   expected="$(expected_check_names)" || return 1
   [[ -n "$expected" ]] || return 1
   for tok in $1; do

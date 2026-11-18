@@ -371,6 +371,15 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
             while following < length:
                 if text[following] in " \t":
                     following += 1
+                elif text.startswith("/*", following):
+                    # A block comment between concatenated literals is not
+                    # the end of the value; an unclosed one runs to the end.
+                    closing = text.find("*/", following + 2)
+                    following = length if closing == -1 else closing + 2
+                elif text.startswith("//", following):
+                    # A line comment ends at its line; the continuation rule
+                    # below then decides whether a `+` carries on.
+                    following = _end_of_line(text, following)
                 elif text[following] == "+" and not joined:
                     # Explicit concatenation, `"" + "<v>"`; one per gap.
                     joined = True

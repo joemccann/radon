@@ -651,3 +651,19 @@ def test_repeated_unterminated_secret_values_scan_linearly():
         "assert 'NOTREAL5999' not in out and 'NOTREAL0' not in out"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)
+
+
+def test_a_comment_between_concatenated_literals_does_not_end_the_value():
+    """The gap walk between adjacent literals crossed whitespace, `+` and a
+    line break, but a JavaScript comment ended the value at the empty first
+    literal and the concatenated body survived."""
+    for text in (
+        'token = "" /* note */ + "NOTREALOPAQUE9"\n',
+        'token = "" + /* note */ "NOTREALOPAQUE9"\n',
+        'token = "" // note\n  + "NOTREALOPAQUE9"\n',
+        'token = "" + // note\n  "NOTREALOPAQUE9"\n',
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+    prose = 'token = "" // the next statement is unrelated\nname = "keep"\n'
+    assert 'name = "keep"' in scrub_credential_text(prose)

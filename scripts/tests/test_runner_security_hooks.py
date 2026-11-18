@@ -29,7 +29,6 @@ TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/
 MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "SECURITY-DEEPSEC PHASE COMPLETE:"}
 LABELS = {"security": "security-nightly", "security-deepsec": "security-deepsec"}
 PR = "https://github.com/joemccann/radon/pull/901"
-HEAD_SHA = "a" * 40
 # The hook's `pr view` stub: state, head branch, cross-repo, head SHA, the
 # conclusion tokens, then the whitespace-stripped check NAMES. The names are
 # derived from the real workflow files, which the rig seeds into its clone.
@@ -112,6 +111,10 @@ def rig(request, tmp_path):
 
     r = Rig()
     r.loop, r.work, r.state, r.home, r.calls, r.origin, r.reports = loop, work, state, home, calls, origin, reports
+    # The PR head the deliver record was verified at must be a real commit of
+    # the clone: the hook binds the workflow expectations to it.
+    r.head_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, capture_output=True,
+                                text=True, check=True).stdout.strip()
     r.scratch = state / "scratch"
     r.marker = MARKERS[loop]
     r.mark = state / f".phase-start-{loop}"
@@ -127,7 +130,7 @@ def rig(request, tmp_path):
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
                 "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
-                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS {FULL_CHECK_NAMES}",
+                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {r.head_sha} SUCCESS {FULL_CHECK_NAMES}",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
     def pre(phase="audit", cwd=None, **extra):
@@ -400,7 +403,7 @@ def _record(rig, **fields):
     record = rig.state / f".{rig.loop}-deliver" / "record.json"
     record.parent.mkdir(parents=True, exist_ok=True)
     body = {"loop": rig.loop, "branch": f"{rig.loop}/2026-09-28", "pr": 901, "url": PR,
-            "status": "green", "check": None, "head_sha": HEAD_SHA,
+            "status": "green", "check": None, "head_sha": rig.head_sha,
             "updated_at": "2099-01-01T00:00:00+00:00"}
     body.update(fields)
     record.write_text(json.dumps(body))
@@ -505,7 +508,7 @@ def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
     # "No checks reported" is PENDING, not success.
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup} {FULL_CHECK_NAMES}")
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} {rollup} {FULL_CHECK_NAMES}")
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
@@ -521,7 +524,7 @@ def test_an_all_green_rollup_missing_expected_checks_is_pending_not_ready(rig):
     _record(rig)
     only_body = "".join("PR body template".split())
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS {only_body}")
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {only_body}")
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
@@ -531,7 +534,7 @@ def test_a_rollup_with_no_check_names_is_never_ready(rig):
     # Conclusions alone, no names: there is nothing to compare the suite against.
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS,SUCCESS")
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS,SUCCESS")
 
     assert out["status"].startswith("INCOMPLETE"), out
 
@@ -548,10 +551,28 @@ def test_unreadable_workflow_expectations_fail_closed(rig):
     assert "ready to merge" not in out["status"]
 
 
+def test_workflow_expectations_edited_in_the_working_tree_verify_nothing(rig):
+    # The expected suite is read from the clone, which the agent can edit.
+    # A working-tree workflow that differs from the verified head is not the
+    # suite GitHub runs, so nothing is ready.
+    _record(rig)
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
 def test_extra_unexpected_checks_in_a_full_green_rollup_still_verify(rig):
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS,SUCCESS "
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS,SUCCESS "
                                 f"{FULL_CHECK_NAMES},codecov/patch")
 
     assert out["status"].startswith("OK: 1 PR(s) green, ready to merge"), out
@@ -566,7 +587,7 @@ def test_extra_unexpected_checks_in_a_full_green_rollup_still_verify(rig):
 def test_a_closed_cross_repo_or_off_prefix_pr_is_never_ready(rig, fields):
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA, names=FULL_CHECK_NAMES))
+                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=rig.head_sha, names=FULL_CHECK_NAMES))
 
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
 
