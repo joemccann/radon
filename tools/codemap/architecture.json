@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-16T10:00:08Z",
-  "node_count": 4354,
-  "edge_count": 8894,
+  "generated_at": "2026-11-18T10:00:08Z",
+  "node_count": 4357,
+  "edge_count": 8898,
   "areas": {
     "web": 2417,
     "site": 134,
-    "scripts": 1590,
-    "cloud": 170,
+    "scripts": 1592,
+    "cloud": 171,
     "lib": 25,
     "tests": 15,
     "tools": 3
@@ -115,7 +115,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 153
+      "count": 155
     },
     {
       "id": "scripts/backtest",
@@ -285,7 +285,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 145
+      "count": 146
     },
     {
       "id": "lib/tools",
@@ -343,17 +343,17 @@
       "test": false
     },
     {
+      "id": "scripts/api/__init__.py",
+      "area": "scripts",
+      "in": 111,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
       "in": 110,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/api/__init__.py",
-      "area": "scripts",
-      "in": 110,
-      "out": 0,
       "test": false
     },
     {
@@ -408,7 +408,7 @@
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
-      "in": 52,
+      "in": 53,
       "out": 20,
       "test": false
     },
@@ -553,6 +553,13 @@
       "test": false
     },
     {
+      "id": "web/lib/serviceHealthWindows.ts",
+      "area": "web",
+      "in": 41,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "web/components/PositionTable.tsx",
       "area": "web",
       "in": 25,
@@ -571,13 +578,6 @@
       "area": "web",
       "in": 41,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 40,
-      "out": 1,
       "test": false
     },
     {
