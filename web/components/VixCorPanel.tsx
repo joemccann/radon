@@ -13,6 +13,7 @@ import VixCorChart from "./VixCorChart";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { formatCor } from "@/lib/cor";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { provisionalNote } from "@/lib/provisionalRow";
 import { VIXCOR_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildVixcorChartRows,
@@ -275,6 +276,11 @@ export default function VixCorPanel() {
           />
         )}
 
+        {data.provisional ? (
+          <div className="section-footnote" data-testid="vixcor-provisional">
+            {provisionalNote(data.provisional)}
+          </div>
+        ) : null}
         <div className="section-footnote" data-testid="vixcor-source-footnote">
           {SOURCE_FOOTNOTE}
         </div>
