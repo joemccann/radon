@@ -7,8 +7,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ATS_VENUE_SHARE_REFRESH, IV_RANK_REFRESH, MARGIN_DEBT_REFRESH } from "@/lib/refreshSchedule";
+import { ATS_VENUE_SHARE_REFRESH, MARGIN_DEBT_REFRESH, type RefreshSchedule } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
+
+/** A once-a-day 22:10 UTC writer: the rail fixture these cases are written against. */
+const DAILY_2210: RefreshSchedule = [{ hours: [22], minutes: [10] }];
 
 // 2026-08-26 is a Wednesday. The IV RANK timer fires 22:10 UTC = 18:10 ET.
 const WED_1500_ET = new Date("2026-08-26T19:00:00Z"); // 15:00 ET, market open
@@ -17,14 +20,14 @@ const WED_1830_ET = new Date("2026-08-26T22:30:00Z"); // 18:30 ET, past the slot
 
 describe("computeFreshnessRail", () => {
   it("counts down to today's slot while it is still ahead", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1500_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1500_ET);
     expect(rail.nextSampleAt.toISOString()).toBe("2026-08-26T22:10:00.000Z");
     expect(rail.msRemaining).toBe(3 * 60 * 60 * 1000 + 10 * 60 * 1000);
     expect(rail.overdue).toBe(false);
   });
 
   it("rolls to tomorrow's slot once today's has passed", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", WED_1830_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", WED_1830_ET);
     expect(rail.nextSampleAt.toISOString()).toBe("2026-08-27T22:10:00.000Z");
     expect(rail.overdue).toBe(false);
   });
@@ -32,7 +35,7 @@ describe("computeFreshnessRail", () => {
   it("names the session the panel is still missing", () => {
     // 17:00 ET: Wednesday's close has happened, so 2026-08-26 is a completed
     // session the panel does not have.
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1700_ET);
     expect(rail.behind).toBe(true);
     expect(rail.awaitingSession).toBe("2026-08-26");
   });
@@ -41,7 +44,7 @@ describe("computeFreshnessRail", () => {
     // 15:00 ET Wednesday: the latest COMPLETED session is Tuesday, and the
     // panel has it. An EOD indicator is not stale for lacking a bar the market
     // has not printed.
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1500_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1500_ET);
     expect(rail.behind).toBe(false);
     expect(rail.awaitingSession).toBeNull();
   });
@@ -53,14 +56,14 @@ describe("computeFreshnessRail", () => {
   // nothing IS overdue — measured from past the grace.
   it("flags overdue when the run has fired, delivered nothing, and the grace is spent", () => {
     const wellPastSlot = new Date("2026-08-26T23:30:00Z"); // 19:30 ET, slot + 80m
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", wellPastSlot);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", wellPastSlot);
     expect(rail.overdue).toBe(true);
     expect(rail.behind).toBe(true);
     expect(rail.msOverdue).toBe(80 * 60 * 1000);
   });
 
   it("is BEHIND but not yet alarming inside the writer's own run window", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1830_ET);
     expect(rail.behind).toBe(true);
     expect(rail.overdue).toBe(false);
   });
@@ -70,27 +73,27 @@ describe("computeFreshnessRail", () => {
   // sweeping. Inside the grace the run is DUE, not a day away: the slot has
   // fired, the session it owes has closed, and the data is not here yet.
   it("reads DUE inside the grace: the slot fired, the session closed, nothing landed", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1830_ET);
     expect(rail.due).toBe(true);
     expect(rail.overdue).toBe(false);
     expect(rail.elapsedFraction).toBe(1);
   });
 
   it("is not DUE while the slot is still ahead, even when behind", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", WED_1700_ET);
     expect(rail.behind).toBe(true);
     expect(rail.due).toBe(false);
   });
 
   it("hands DUE over to OVERDUE once the grace is spent", () => {
     const wellPastSlot = new Date("2026-08-26T23:30:00Z");
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", wellPastSlot);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-25", wellPastSlot);
     expect(rail.due).toBe(false);
     expect(rail.overdue).toBe(true);
   });
 
   it("is not DUE when the panel already holds the session the slot carried", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", WED_1830_ET);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", WED_1830_ET);
     expect(rail.due).toBe(false);
     expect(rail.behind).toBe(false);
   });
@@ -98,22 +101,22 @@ describe("computeFreshnessRail", () => {
   it("fills the track with the elapsed share of the interval between runs", () => {
     // Six hours after the 22:10 UTC slot, a quarter of the 24h interval is gone.
     const sixHoursOn = new Date("2026-08-27T04:10:00Z");
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", sixHoursOn);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", sixHoursOn);
     expect(rail.elapsedFraction).toBeCloseTo(0.25, 6);
   });
 
   it("clamps the track to the interval at both ends", () => {
     const atSlot = new Date("2026-08-26T22:10:00Z");
-    expect(computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", atSlot).elapsedFraction).toBe(0);
+    expect(computeFreshnessRail(DAILY_2210, "2026-08-26", atSlot).elapsedFraction).toBe(0);
     // Past the R-307 writer grace, so this is a genuine late run.
     const overdue = computeFreshnessRail(
-      IV_RANK_REFRESH, "2026-08-25", new Date("2026-08-26T23:30:00Z"),
+      DAILY_2210, "2026-08-25", new Date("2026-08-26T23:30:00Z"),
     );
     expect(overdue.elapsedFraction).toBe(1);
   });
 
   it("survives a missing data date", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, null, WED_1700_ET);
+    const rail = computeFreshnessRail(DAILY_2210, null, WED_1700_ET);
     expect(rail.behind).toBe(false);
     expect(rail.awaitingSession).toBeNull();
     expect(rail.msRemaining).toBeGreaterThan(0);
