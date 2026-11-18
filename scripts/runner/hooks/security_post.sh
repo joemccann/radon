@@ -175,13 +175,11 @@ deliver_urls_verified() {
     no_loop_pr_exists
     return
   fi
-  # The expectations are read from the clone's working tree, which the agent
-  # phase can edit. Bind them to the commit the PR head was verified at: any
-  # workflow file differing from that commit (or an unknown commit) verifies
-  # nothing.
+  # The expectations come from the workflow blobs committed at the head the
+  # PR was verified at, never from the clone's working tree or index, both of
+  # which the agent phase controls. An unknown commit verifies nothing.
   [[ -n "${3:-}" ]] || return 1
-  git -C "$WORK" diff --quiet "$3" -- .github/workflows 2>/dev/null || return 1
-  expected="$(expected_check_names)" || return 1
+  expected="$(expected_check_names "$3")" || return 1
   [[ -n "$expected" ]] || return 1
   for tok in $1; do
     case "$tok" in
@@ -211,13 +209,13 @@ deliver_urls_verified() {
   [[ "$count" -gt 0 && "$count" == "$2" ]]
 }
 
-# The check names the clone's workflow files promise on every PR head, one
-# whitespace-stripped token per line (names carry spaces; the rollup side is
-# stripped the same way). Non-zero when the workflows cannot be read.
+# The check names the workflow files committed at $1 promise on every PR
+# head, one whitespace-stripped token per line (names carry spaces; the
+# rollup side is stripped the same way). Non-zero when they cannot be read.
 expected_check_names() {
   local out line
   out="$("$TIMEOUT_BIN" 30 "$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py" \
-    expected-checks --root "$WORK" 2>/dev/null)" || return 1
+    expected-checks --root "$WORK" --rev "$1" 2>/dev/null)" || return 1
   while IFS= read -r line; do
     line="${line//[[:space:]]/}"
     [[ -n "$line" ]] && printf '%s\n' "$line"

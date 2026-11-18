@@ -540,12 +540,16 @@ def test_a_rollup_with_no_check_names_is_never_ready(rig):
 
 
 def test_unreadable_workflow_expectations_fail_closed(rig):
-    # The expected suite comes from the clone's workflow files. Without them
-    # the hook cannot know what "every check" means, so nothing is ready.
-    _record(rig)
-    for wf in ("ci.yml", "pr-body.yml"):
-        (rig.work / ".github" / "workflows" / wf).unlink()
-    out = rig.post(phase="deliver", output=_stamp(rig))
+    # The expected suite comes from the workflow files committed at the
+    # verified head. A head without them cannot say what "every check"
+    # means, so nothing is ready.
+    _git("rm", "-q", "-r", ".github/workflows", cwd=rig.work)
+    _git("commit", "-qm", "drop workflows", cwd=rig.work)
+    bare = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rig.work, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _record(rig, head_sha=bare)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {bare} SUCCESS {FULL_CHECK_NAMES}")
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
@@ -560,6 +564,27 @@ def test_workflow_expectations_edited_in_the_working_tree_verify_nothing(rig):
     ci = rig.work / ".github" / "workflows" / "ci.yml"
     text = ci.read_text()
     assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_an_index_flag_cannot_hide_a_working_tree_workflow_edit(rig):
+    # `git diff` against the verified commit honours assume-unchanged and
+    # skip-worktree, so a flagged file reads as clean while its content on
+    # disk differs. The expectations must come from the commit's blobs, not
+    # from anything the clone's index can suppress.
+    _record(rig)
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    subprocess.run(["git", "update-index", "--assume-unchanged", ".github/workflows/ci.yml"],
+                   cwd=rig.work, check=True, capture_output=True)
     ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
     shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
     out = rig.post(phase="deliver", output=_stamp(rig),

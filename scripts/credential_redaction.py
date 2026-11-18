@@ -10,6 +10,10 @@ from typing import Any, Optional
 _SECRET_KEY = (
     r"(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
     r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd"
+    # Named key aliases the structural rules already knew; a plain quoted or
+    # bare assignment under them survived (DS-2026-11-18). A generic `_key`
+    # stays off the single-line rules so `primary_key = "id"` is prose.
+    r"|credential|(?:signing|webhook|private|encryption|service)[_-]?key"
     # `cookie` belongs in the KEY alternation, not only in the line-oriented
     # header rule below: a serialized header (`{"Cookie": "..."}`) has no colon
     # directly after the name, so the header rule missed it and no generic

@@ -667,3 +667,21 @@ def test_a_comment_between_concatenated_literals_does_not_end_the_value():
         assert "NOTREALOPAQUE9" not in out, out
     prose = 'token = "" // the next statement is unrelated\nname = "keep"\n'
     assert 'name = "keep"' in scrub_credential_text(prose)
+
+
+def test_named_key_aliases_are_redacted_on_a_single_line():
+    """`signing_key`, `webhook-key`, `private_key` and `credential` were known
+    only to the block-scalar and triple-quoted rules; an ordinary quoted or
+    bare assignment under those names survived the scrubber and the literal
+    detector. Generic `*_key` names stay prose (`primary_key = "id"`)."""
+    for text in (
+        'signing_key = "NOTREALOPAQUE9"\n',
+        'credential: "NOTREALOPAQUE9"\n',
+        "webhook-key=NOTREALOPAQUE9\n",
+        'PRIVATE_KEY = "NOTREALOPAQUE9"\n',
+        "access_key: NOTREALOPAQUE9\n",
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+    prose = 'primary_key = "id"\nauthor = "ann"\ntests pass: 3 of 3\n'
+    assert scrub_credential_text(prose) == prose

@@ -331,6 +331,17 @@ class TestCli:
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == nd.expected_pull_request_check_names()
 
+    def test_expected_checks_at_a_revision_reads_the_committed_blobs(self):
+        proc = self._run("expected-checks", "--root", str(REPO), "--rev", "HEAD")
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == nd.expected_pull_request_check_names(REPO, rev="HEAD")
+        assert "PR body template" in proc.stdout
+
+    def test_expected_checks_at_an_unknown_revision_is_a_failure(self):
+        proc = self._run("expected-checks", "--root", str(REPO), "--rev", "0" * 40)
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+
     def test_expected_checks_without_readable_workflows_is_a_failure(self, tmp_path):
         proc = self._run("expected-checks", "--root", str(tmp_path))
         assert proc.returncode == 1
