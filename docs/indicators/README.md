@@ -13,7 +13,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
 | msr | `/regime/msr` | `msr` | [msr.md](msr.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
-| vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
+| vixcor | `/regime/vixcor` | `vixcor`, `vixcor:live` | [vixcor.md](vixcor.md) (provisional current session every 5 min 09:00-15:55 ET + 02:35 UTC official) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) (every 5 min in ET trading hours + 22:10 UTC final) |
 | iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`; timer every 5 min 09:00-16:55 ET Mon-Fri for the in-progress session, final 22:15 UTC between ivrank 22:10 and dispersion 22:20, recovery 23:15 UTC; gateway blips re-probed via `GATEWAY_RECHECK_DELAYS_S`) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
