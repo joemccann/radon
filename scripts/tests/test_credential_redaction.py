@@ -631,3 +631,23 @@ def test_bare_pass_and_auth_block_bodies_are_scrubbed():
     prose = ("tests pass: 3 of 3\nauthor: |\n  ordinary prose stays\n"
              "passage: |\n  quoted paragraph\n")
     assert scrub_credential_text(prose) == prose
+
+
+def test_repeated_unterminated_secret_values_scan_linearly():
+    """A secret-named assignment whose quote is escaped (`token = \\"v`) has no
+    close under the escaping grammar, so the close search walked to the end of
+    the input; one such line per assignment repeated that walk for every later
+    assignment: 0.3s at 1,000 lines, 5.5s at 4,000. A failed whole-suffix search
+    must not be repeated from a later start."""
+    import subprocess
+
+    probe = (
+        "import sys, time;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import scrub_credential_text as s;"
+        "t = ''.join(f'token{i} = \\\\\"NOTREAL{i}\\n' for i in range(6000));"
+        "t0 = time.perf_counter(); out = s(t);"
+        "assert time.perf_counter() - t0 < 2.0;"
+        "assert 'NOTREAL5999' not in out and 'NOTREAL0' not in out"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)

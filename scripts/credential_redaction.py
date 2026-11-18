@@ -481,8 +481,27 @@ def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
     return body, length, delimiter
 
 
+# The start positions from which a close search over the CURRENT text already
+# failed, per (delimiter, grammar). ``body`` always follows an opening
+# delimiter, so every search is aligned the same way and a failure from one
+# start is a failure from every later one. Without this, one unterminated
+# secret value per line (`token = \\"v`) walked to the end of the input for
+# every later assignment: quadratic, 5.5s at 4,000 lines. The one shape the
+# memo reads differently is an empty literal (`""`) after such a failure,
+# which then runs to the end of its line: more redaction, never less.
+_NO_CLOSE_MEMO: dict = {"text": None, "fails": {}}
+
+
 def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
     """Index of the delimiter that closes a quoted value opened at ``body``."""
+    memo = _NO_CLOSE_MEMO
+    if memo["text"] is not text:
+        memo["text"] = text
+        memo["fails"] = {}
+    key = (delimiter, backslash_escapes)
+    failed_from = memo["fails"].get(key)
+    if failed_from is not None and body >= failed_from:
+        return None
     quote = delimiter[0]
     cursor = body
     length = len(text)
@@ -497,6 +516,7 @@ def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool
         if text.startswith(delimiter, cursor):
             return cursor
         cursor += 1
+    memo["fails"][key] = body if failed_from is None else min(failed_from, body)
     return None
 
 
