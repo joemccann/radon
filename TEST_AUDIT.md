@@ -12482,3 +12482,13 @@ Audited through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c on 2026-11-18 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-594 | DONE | Mutation `if False and` at `server.py:5173`: 1 failed / 1 passed (`/tmp/t594-red.log`). Restored product source. Green: 2 passed (`/tmp/t594-green.log`); `test_index_options_chain.py` + budget 9 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-18
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1/r2/r3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; r3 also had `test_many_assignment_lines_stay_linear` under load. Each isolated serial retry passed. Vitest EXIT 0 each round. Cloud EXIT 1 each round. FAILED list matches the origin/main audit run at `6d1e5541a` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 2 passed; 19,900 passed / 10 skipped / 40 subtests (160.65s) | 11,651 passed / 21 skipped / 1,209 files (98.08s) | 58 failed / 4,292 passed / 23 skipped (975.72s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 1 passed ×3; 19,900 passed / 10 skipped / 40 subtests (165.15s) | 11,651 passed / 21 skipped / 1,209 files (101.85s) | 58 failed / 4,292 passed / 23 skipped (975.74s) | 0 added / 0 removed |
+| 3 | credentials xdist flake + linear load flake then serial 1 passed each; 19,899 passed / 10 skipped / 40 subtests (189.01s) | 11,651 passed / 21 skipped / 1,209 files (105.65s) | 58 failed / 4,292 passed / 23 skipped (1143.87s) | 0 added / 0 removed |
