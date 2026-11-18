@@ -502,8 +502,9 @@ requires an advanced product-cookie expiry and real premium content; see
 `next-clerk-guard`, which requires the runtime Clerk publishable key to match
 an entire key token in the baked client bundle before starting Next.js.
 
-Pre-pull compares registry and local image digests before reusing cached
-release tags. Which tags a prune may delete is the
+Pre-pull skips the second layer fetch when the exact SHA set (python, node,
+gateway) is already local unless a registry digest confirms a rebuilt tag.
+An unreachable registry is not a rebuild. Which tags a prune may delete is the
 [app image prune](#app-image-prune) procedure.
 
 There is no escrow, and `secrets.db` is
@@ -1314,7 +1315,7 @@ Every `pull` holds the pull lock (`/run/radon-app-runtime/image-pull.lock`, shar
 
 The no-argument `prune` protects green-marker line 1 and line 2, or both journal SHAs while a journal exists. It skips when line 2 is missing. `deploy.sh` calls it after the supervisor closes the lock fd, after a green deploy and after a failed one (a failed deploy leaves the green marker alone, so its target set goes), and not when `RADON_DEPLOY_STAGE=1` (prestage runs beside prepull). A skipped or failed prune does not fail the deploy.
 
-- **Symptom:** the app disk fills with `ghcr.io/joemccann/radon-python` and `radon-node` SHA tags, or prepull reports `exact release image pair is incomplete after pull`.
+- **Symptom:** the app disk fills with `ghcr.io/joemccann/radon-python` and `radon-node` SHA tags, or prepull reports `exact release image set is incomplete after pull`.
 - **Prerequisites:** the deploy lock is a regular file, rollback state parses, and a running app container is present. Otherwise the verb skips.
 - **Blast radius:** `rmi` of SHA tags outside the keep-set above. Gateway images are outside this sweep. A skip leaves the extra tags on disk.
 - **Safe diagnosis:** name the verb before deleting anything. `pull <sha>`, `prune-locked` and no-argument `prune` do not protect the same lines.
