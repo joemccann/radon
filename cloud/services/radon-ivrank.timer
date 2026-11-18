@@ -1,7 +1,12 @@
 [Unit]
-Description=Radon IV RANK Indicator - daily SPY 1M implied volatility rank
+Description=Radon IV RANK Indicator - SPY 1M implied volatility rank, every 5 minutes in ET trading hours plus daily final
 
 [Timer]
+# IB serves the in-progress session's OPTION_IMPLIED_VOLATILITY daily bar
+# intraday, so the 5-minute ET line keeps today's rank live (09:00-16:55 ET,
+# Mon-Fri, VIX P/C precedent). merge_history lets each fetch restate today's
+# row; the 22:10 UTC run below writes the final bar.
+OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
 # 22:10 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
 # 21:00 UTC winter), so the daily SPY OPTION_IMPLIED_VOLATILITY bar is
 # final when the job reads it. Runs every calendar day: weekend and
