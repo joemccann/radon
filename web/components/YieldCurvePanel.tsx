@@ -38,6 +38,28 @@ interface CurveChartRow {
   spread: number | null;
 }
 
+// Module-level so every render hands CriHistoryChart the same reference: its
+// d3 effect rebuilds the whole SVG on a new `series` identity, and with the
+// 36-year default window that rebuild starved route transitions off /regime/curve.
+const CHART_SERIES: [ChartSeries<CurveChartRow>, ChartSeries<CurveChartRow>] = [
+  {
+    key: "spx",
+    label: "S&P 500",
+    color: chartSeriesColor("primary"),
+    axis: "left",
+    scaleType: "log",
+    format: (v: number) => v.toFixed(0),
+  },
+  {
+    key: "spread",
+    label: "SPREAD %",
+    color: chartSeriesColor("fault"),
+    axis: "right",
+    scaleType: "linear",
+    format: formatSpreadPct,
+  },
+];
+
 function spreadTone(v: number | null | undefined): "neg" | "warn" | "mut" | undefined {
   const color = spreadColor(v);
   if (color === "var(--negative)") return "neg";
@@ -79,6 +101,15 @@ export default function YieldCurvePanel() {
     return presetRange(activeRange === "custom" ? "all" : activeRange, total);
   }, [activeRange, customRange, total]);
 
+  // Stable across parent re-renders (price ticks): a new array identity makes
+  // CriHistoryChart tear down and redraw every dot.
+  const rows = useMemo<CurveChartRow[]>(
+    () => series.map((p) => ({ date: p.date, spx: p.spx_close, spread: p.spread })),
+    [series],
+  );
+  const slice = useMemo(() => rows.slice(chartRange[0], chartRange[1] + 1), [rows, chartRange]);
+  const brushValues = useMemo(() => series.map((p) => p.spread ?? 0), [series]);
+
   if ((loading || syncing) && !data) {
     return <SpectralLoader label="Loading Treasury yield curve series" />;
   }
@@ -98,33 +129,6 @@ export default function YieldCurvePanel() {
   // live cell tracks the 10Y-3M spread flavor (same-source ^TNX and ^IRX);
   // the official EOD 10Y-2Y stays the headline.
   const liveSpread = live && !live.missing ? live.spread_10y_3m : null;
-
-  const rows: CurveChartRow[] = series.map((p) => ({
-    date: p.date,
-    spx: p.spx_close,
-    spread: p.spread,
-  }));
-  const [start, end] = chartRange;
-  const slice = rows.slice(start, end + 1);
-
-  const chartSeries: [ChartSeries<CurveChartRow>, ChartSeries<CurveChartRow>] = [
-    {
-      key: "spx",
-      label: "S&P 500",
-      color: chartSeriesColor("primary"),
-      axis: "left",
-      scaleType: "log",
-      format: (v: number) => v.toFixed(0),
-    },
-    {
-      key: "spread",
-      label: "SPREAD %",
-      color: chartSeriesColor("fault"),
-      axis: "right",
-      scaleType: "linear",
-      format: formatSpreadPct,
-    },
-  ];
 
   return (
     <>
@@ -227,13 +231,13 @@ export default function YieldCurvePanel() {
         />
         <CriHistoryChart
           history={slice}
-          series={chartSeries}
+          series={CHART_SERIES}
           title="S&P 500 VS 10Y-2Y TREASURY SPREAD"
           xTickFormat={formatDateTick}
         />
         {total >= 2 && (
           <BrushMinimap
-            values={series.map((p) => p.spread ?? 0)}
+            values={brushValues}
             range={chartRange}
             onRangeChange={(r) => setCustomRange(r)}
             onCustom={() => {
