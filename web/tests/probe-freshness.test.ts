@@ -12,22 +12,28 @@
  *   gex_scan   - scheduled on the 15-minute refresh driver. Fresh inside
  *                the 35-minute open window (one missed fire). Not applicable
  *                while the market is closed.
- *   journal    — fills are only expected during RTH; the newest journal
- *                row must be within the weekend-covering window.
+ *   journal    — RTH only. journal-sync is stale only after it has not
+ *                been ok for longer than its open window (one error cycle
+ *                does not page). journal-gap-sli pages only when a fresh
+ *                row reports missing_exec_id_count>0. A gap-sli self-error
+ *                or a stale gap-sli row is a warning. Last-fill age does
+ *                not page. A missing row is stale.
  *
  * all_fresh = AND over applicable checks; null when none are applicable.
  */
 import { describe, expect, it } from "vitest";
+
+import { getFreshnessWindowMs } from "../lib/serviceHealthWindows";
 
 import {
   buildFreshnessPayload,
   evaluateJournalCheck,
   evaluateRelayTick,
   evaluateScanCheck,
-  JOURNAL_FRESH_WINDOW_MS,
   RELAY_HEARTBEAT_STALE_MS,
   RELAY_IDLE_HEARTBEAT_STALE_MS,
   RELAY_TICK_FRESH_SECS,
+  type JournalHealthRow,
   type RelayHealthRow,
 } from "../lib/probeFreshness";
 
@@ -289,27 +295,377 @@ describe("evaluateScanCheck — gex-scan (scheduled writer)", () => {
   });
 });
 
-describe("evaluateJournalCheck", () => {
-  it("is not applicable outside RTH (fills only expected while the market trades)", () => {
-    expect(evaluateJournalCheck(iso(CLOSED_NOW - 60_000), "closed", CLOSED_NOW)).toEqual(NOT_APPLICABLE);
-    expect(evaluateJournalCheck(iso(EXTENDED_NOW - 60_000), "extended", EXTENDED_NOW)).toEqual(NOT_APPLICABLE);
+function pipelineRows(
+  nowMs: number,
+  overrides: {
+    syncAt?: string | null;
+    syncState?: string;
+    /** Start of the current non-ok streak. service_health_events.created_at. */
+    notOkSince?: string | null;
+    gapAt?: string | null;
+    gapState?: string;
+    missing?: number | null;
+    gapError?: string | null;
+  } = {},
+): { journalSync: JournalHealthRow; journalGapSli: JournalHealthRow } {
+  const missing = overrides.missing === undefined ? 0 : overrides.missing;
+  const gapError = overrides.gapError;
+  return {
+    journalSync: {
+      state: overrides.syncState ?? "ok",
+      last_error: null,
+      updated_at: overrides.syncAt === undefined ? iso(nowMs - 30_000) : overrides.syncAt,
+      notOkSince: overrides.notOkSince === undefined ? null : overrides.notOkSince,
+    },
+    journalGapSli: {
+      state: overrides.gapState ?? "ok",
+      last_error:
+        gapError !== undefined
+          ? gapError
+          : missing === null
+            ? null
+            : JSON.stringify({ missing_exec_id_count: missing }),
+      updated_at: overrides.gapAt === undefined ? iso(nowMs - 60_000) : overrides.gapAt,
+    },
+  };
+}
+
+function freshnessAt(
+  nowMs: number,
+  journalWrittenAt: string | null,
+  pipe: { journalSync: JournalHealthRow | null; journalGapSli: JournalHealthRow | null } = pipelineRows(nowMs),
+) {
+  return {
+    relayRow: relayRow(
+      { updated_at: iso(nowMs - 30_000) },
+      {
+        heartbeat: "tick",
+        last_tick_at: iso(nowMs - 10_000),
+        tick_age_secs: 10,
+        active_subscriptions: 12,
+        subscribed_symbols: 12,
+      },
+    ),
+    vcgScanTime: iso(nowMs - 5 * 60_000),
+    gexScanTime: iso(nowMs - 5 * 60_000),
+    journalWrittenAt,
+    journalSync: pipe.journalSync,
+    journalGapSli: pipe.journalGapSli,
+  };
+}
+
+describe("evaluateJournalCheck — pipeline liveness", () => {
+  const QUIET_FILL_MS = 5 * 24 * 3_600_000;
+
+  it("(d) is not applicable outside RTH", () => {
+    const input = {
+      writtenAt: iso(OPEN_NOW - QUIET_FILL_MS),
+      ...pipelineRows(OPEN_NOW),
+    };
+    expect(evaluateJournalCheck(input, "closed", CLOSED_NOW)).toEqual(NOT_APPLICABLE);
+    expect(evaluateJournalCheck(input, "extended", EXTENDED_NOW)).toEqual(NOT_APPLICABLE);
   });
 
-  it("fresh when the newest row is inside the weekend-covering window", () => {
-    const result = evaluateJournalCheck(iso(OPEN_NOW - 3_600_000), "open", OPEN_NOW);
-    expect(result).toEqual({ applicable: true, age_secs: 3600, fresh: true });
-  });
-
-  it("not fresh when the newest row is older than the window", () => {
-    const tooOld = iso(OPEN_NOW - JOURNAL_FRESH_WINDOW_MS - 3_600_000);
-    expect(evaluateJournalCheck(tooOld, "open", OPEN_NOW).fresh).toBe(false);
-  });
-
-  it("an empty journal during RTH proves nothing — not fresh", () => {
-    expect(evaluateJournalCheck(null, "open", OPEN_NOW)).toEqual({
+  it("(a) no fills for 5+ days is fresh when sync and gap-sli are healthy", () => {
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - QUIET_FILL_MS),
+        ...pipelineRows(OPEN_NOW),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result).toEqual({
       applicable: true,
-      age_secs: null,
-      fresh: false,
+      age_secs: QUIET_FILL_MS / 1000,
+      fresh: true,
+    });
+  });
+
+  it("(b) a journal-sync heartbeat past its open window is stale", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, { syncAt: iso(OPEN_NOW - windowMs - 1_000) }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(false);
+    expect(result.applicable).toBe(true);
+    expect(result.age_secs).toBe(3_600);
+  });
+
+  it("journal-sync still inside its open window stays fresh", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - QUIET_FILL_MS),
+        ...pipelineRows(OPEN_NOW, { syncAt: iso(OPEN_NOW - windowMs + 1_000) }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(true);
+  });
+
+  it("one-cycle journal-sync error stays fresh", () => {
+    // The error streak just started. updated_at is the error write; notOkSince
+    // is that same transition. It was ok on the previous cycle.
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - 30_000),
+        }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(true);
+    expect(result.applicable).toBe(true);
+  });
+
+  it("journal-sync not ok for longer than its open window is stale", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    // Error heartbeats keep moving updated_at. The streak itself is past the window.
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - windowMs - 1_000),
+        }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(false);
+  });
+
+  it("a journal-sync error with no streak timestamp is not fresh", () => {
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, { syncState: "error", notOkSince: null }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(false);
+  });
+
+  it("(c) gap-sli missing_exec_id_count>0 is stale while journal-sync is live", () => {
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        ...pipelineRows(OPEN_NOW, { missing: 2, gapState: "ok" }),
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result.fresh).toBe(false);
+    expect(result.age_secs).toBe(3_600);
+  });
+
+  it("a stale gap-sli row does not page while journal-sync is live", () => {
+    const windowMs = getFreshnessWindowMs("journal-gap-sli", "open");
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, { gapAt: iso(OPEN_NOW - windowMs - 1_000) }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli heartbeat is stale; journal freshness follows journal-sync",
+    );
+  });
+
+  it("gap-sli self-error with healthy sync is fresh and warns", () => {
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, {
+          gapState: "error",
+          gapError: "Hrana: api error 404 stream not found",
+        }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
+  });
+
+  it("gap-sli self-error does not hide a stale journal-sync", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, {
+          syncState: "error",
+          syncAt: iso(OPEN_NOW - 30_000),
+          notOkSince: iso(OPEN_NOW - windowMs - 1_000),
+          gapState: "error",
+          gapError: "Hrana: api error 404 stream not found",
+        }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(false);
+    expect(payload.all_fresh).toBe(false);
+    expect(payload.journal_gap_warning).toBe(
+      "journal-gap-sli reported an error; journal freshness follows journal-sync",
+    );
+  });
+
+  it("a missing pipeline row is not fresh during RTH", () => {
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(OPEN_NOW - 3_600_000),
+        journalSync: null,
+        journalGapSli: pipelineRows(OPEN_NOW).journalGapSli,
+      },
+      "open",
+      OPEN_NOW,
+    );
+    expect(result).toEqual({ applicable: true, age_secs: 3_600, fresh: false });
+    expect(
+      evaluateJournalCheck(
+        {
+          writtenAt: iso(OPEN_NOW - 3_600_000),
+          journalSync: pipelineRows(OPEN_NOW).journalSync,
+          journalGapSli: null,
+        },
+        "open",
+        OPEN_NOW,
+      ).fresh,
+    ).toBe(false);
+  });
+
+  it("an empty journal is fresh when the pipeline is live", () => {
+    expect(
+      evaluateJournalCheck(
+        { writtenAt: null, ...pipelineRows(OPEN_NOW) },
+        "open",
+        OPEN_NOW,
+      ),
+    ).toEqual({ applicable: true, age_secs: null, fresh: true });
+  });
+
+  it("open-bell grace: a pre-open journal-sync row is live for the open window", () => {
+    // Mon 2026-11-16 09:35 ET. Last sync write is Fri 16:00 ET, before today's open.
+    const at = Date.parse("2026-11-16T14:35:00Z");
+    const fridayClose = Date.parse("2026-11-13T21:00:00Z");
+    const result = evaluateJournalCheck(
+      {
+        writtenAt: iso(at - QUIET_FILL_MS),
+        ...pipelineRows(at, { syncAt: iso(fridayClose) }),
+      },
+      "open",
+      at,
+    );
+    expect(result.fresh).toBe(true);
+
+    const pastGrace = Date.parse("2026-11-16T14:45:00Z");
+    expect(
+      evaluateJournalCheck(
+        {
+          writtenAt: iso(pastGrace - QUIET_FILL_MS),
+          ...pipelineRows(pastGrace, { syncAt: iso(fridayClose) }),
+        },
+        "open",
+        pastGrace,
+      ).fresh,
+    ).toBe(false);
+  });
+});
+
+describe("buildFreshnessPayload — quiet book", () => {
+  const PRODUCTION_NOW = Date.parse("2026-11-17T15:00:00Z");
+  const PRODUCTION_FILL = Date.parse("2026-11-13T21:07:21Z");
+
+  it("(a) all_fresh is true in RTH when the only stale fact is last-fill age", () => {
+    const payload = buildFreshnessPayload(
+      freshnessAt(OPEN_NOW, iso(OPEN_NOW - 5 * 24 * 3_600_000)),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.market_state).toBe("open");
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.checks.relay_tick.fresh).toBe(true);
+    expect(payload.checks.vcg_scan.fresh).toBe(true);
+    expect(payload.checks.gex_scan.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_last_fill.age_secs).toBe(5 * 24 * 3_600);
+    expect(payload.journal_last_fill.warning).toBe(
+      "last fill is older than 3 days; journal freshness follows pipeline liveness",
+    );
+  });
+
+  it("(b) all_fresh is false when journal-sync is stale", () => {
+    const windowMs = getFreshnessWindowMs("journal-sync", "open");
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, { syncAt: iso(OPEN_NOW - windowMs - 1_000) }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(false);
+    expect(payload.all_fresh).toBe(false);
+    expect(payload.journal_last_fill.warning).toBeNull();
+  });
+
+  it("(c) all_fresh is false when gap-sli reports missing executions", () => {
+    const payload = buildFreshnessPayload(
+      freshnessAt(
+        OPEN_NOW,
+        iso(OPEN_NOW - 3_600_000),
+        pipelineRows(OPEN_NOW, { missing: 1 }),
+      ),
+      new Date(OPEN_NOW),
+    );
+    expect(payload.checks.journal.fresh).toBe(false);
+    expect(payload.all_fresh).toBe(false);
+  });
+
+  it("(d) outside RTH a quiet book does not page", () => {
+    const quiet = freshnessAt(OPEN_NOW, iso(OPEN_NOW - 5 * 24 * 3_600_000));
+    for (const now of [EXTENDED_NOW, CLOSED_NOW]) {
+      const payload = buildFreshnessPayload(quiet, new Date(now));
+      expect(payload.checks.journal).toEqual(NOT_APPLICABLE);
+      expect(payload.all_fresh).toBeNull();
+    }
+  });
+
+  it("production 2026-11-17 quiet book flips from stale to fresh", () => {
+    const payload = buildFreshnessPayload(
+      freshnessAt(PRODUCTION_NOW, new Date(PRODUCTION_FILL).toISOString()),
+      new Date(PRODUCTION_NOW),
+    );
+    const age = payload.checks.journal.age_secs;
+    expect(payload.market_state).toBe("open");
+    expect(age).toBe(Math.round((PRODUCTION_NOW - PRODUCTION_FILL) / 1000));
+    expect(age).toBe(323559);
+    expect(age).toBeGreaterThan(3 * 24 * 3_600);
+    expect(payload.checks.journal.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+    expect(payload.journal_last_fill).toEqual({
+      age_secs: age,
+      warning: "last fill is older than 3 days; journal freshness follows pipeline liveness",
     });
   });
 });
@@ -320,6 +676,7 @@ describe("buildFreshnessPayload", () => {
     vcgScanTime: iso(OPEN_NOW - 5 * 60_000),
     gexScanTime: iso(OPEN_NOW - 5 * 60_000),
     journalWrittenAt: iso(OPEN_NOW - 3_600_000),
+    ...pipelineRows(OPEN_NOW),
   };
 
   it("matches the fixed contract shape", () => {
@@ -330,8 +687,12 @@ describe("buildFreshnessPayload", () => {
       "database_failures",
       "database_ok",
       "generated_at",
+      "journal_gap_warning",
+      "journal_last_fill",
       "market_state",
     ]);
+    expect(payload.journal_last_fill).toEqual({ age_secs: 3600, warning: null });
+    expect(payload.journal_gap_warning).toBeNull();
     expect(Object.keys(payload.checks).sort()).toEqual(["gex_scan", "journal", "relay_tick", "vcg_scan"]);
     for (const check of Object.values(payload.checks)) {
       expect(Object.keys(check).sort()).toEqual(["age_secs", "applicable", "fresh"]);

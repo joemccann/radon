@@ -273,28 +273,47 @@ image_in_local_store() {
   "$DOCKER" image inspect "$1" >/dev/null 2>&1
 }
 
-# The deploy pre-pull must detect a rebuilt tag even when its old image is local.
-# Runtime starts retain image_available's offline fallback.
+# Compare the local exact-SHA image to the registry. 0 = same digest, 1 =
+# confirmed rebuilt tag, 2 = registry unreachable or metadata unreadable.
+# Podman has no `buildx imagetools`; `manifest inspect` is the engine-native
+# probe. CIP-030: an unknown result is not a rebuild — cmd_pull skips the
+# second layer fetch when the SHA set is already local (the gated prepull
+# job just fetched it). Runtime starts keep image_available's offline fallback.
 image_matches_registry() {
-  # `buildx imagetools` is docker-only; podman re-pulls, which is layer-incremental.
-  [[ "$ENGINE" == podman ]] && return 1
-  "$PYTHON" -I - "$DOCKER" "$1" <<'PYCODE'
+  "$PYTHON" -I - "$DOCKER" "$1" "$ENGINE" <<'PYCODE'
 import json, re, subprocess, sys
-docker, image = sys.argv[1:]
+docker, image, engine = sys.argv[1:]
+digest_re = re.compile(r"sha256:[0-9a-f]{64}")
 def read(args):
     result = subprocess.run([docker, *args], capture_output=True, text=True,
                             check=True, timeout=20)
     return json.loads(result.stdout)
+def remote_digest(payload):
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("digest")
+    if isinstance(value, str) and digest_re.fullmatch(value):
+        return value
+    descriptor = payload.get("Descriptor") or payload.get("descriptor")
+    if isinstance(descriptor, dict):
+        value = descriptor.get("digest")
+        if isinstance(value, str) and digest_re.fullmatch(value):
+            return value
+    return None
 try:
-    remote = read(["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"])
+    if engine == "podman":
+        remote = read(["manifest", "inspect", image])
+    else:
+        remote = read(["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"])
     local = read(["image", "inspect", image, "--format", "{{json .RepoDigests}}"])
 except (OSError, ValueError, subprocess.SubprocessError):
-    sys.exit(1)
-digest = remote.get("digest") if isinstance(remote, dict) else None
-if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-    sys.exit(1)
-expected = image.rsplit(":", 1)[0] + "@" + digest
-sys.exit(0 if isinstance(local, list) and expected in local else 1)
+    sys.exit(2)
+digest = remote_digest(remote)
+if digest is None or not isinstance(local, list):
+    sys.exit(2)
+suffix = "@" + digest
+# Podman records RepoDigests as localhost/ghcr.io/... after a pull (CIP-023).
+sys.exit(0 if any(isinstance(item, str) and item.endswith(suffix) for item in local) else 1)
 PYCODE
 }
 
@@ -482,15 +501,27 @@ cmd_pull() {
   acquire_pull_lock || return $?
 
   # The gated prepull job and the deploy both call this exact verb. When the
-  # pair is local and matches registry digests, no layers need pulling.
-  # Missing, changed, or unverified metadata requires a fresh parallel pull.
+  # SHA set is already local, skip the second layer fetch unless a registry
+  # digest confirms a rebuilt tag (CIP-030). A GHCR miss is not a rebuild:
+  # production podman used to treat "no buildx" as a miss and re-pulled
+  # the gateway for 38-102s after Prepull had already fetched the SHA tags.
+  skip_pull=0
   if [[ -n "$target" ]] \
     && image_in_local_store "$python_ref" \
     && image_in_local_store "$node_ref" \
-    && image_in_local_store "$gateway_ref" \
-    && image_matches_registry "$python_ref" \
-    && image_matches_registry "$node_ref" \
-    && image_matches_registry "$gateway_ref"; then
+    && image_in_local_store "$gateway_ref"; then
+    skip_pull=1
+    for _ref in "$python_ref" "$node_ref" "$gateway_ref"; do
+      _match_rc=0
+      image_matches_registry "$_ref" || _match_rc=$?
+      if (( _match_rc == 1 )); then
+        skip_pull=0
+        break
+      fi
+    done
+    unset _ref _match_rc
+  fi
+  if (( skip_pull == 1 )); then
     printf 'exact release image set already local: %s\n' "$tag" >&2
   else
     "$DOCKER" pull "$python_ref" 9>&- &
@@ -873,7 +904,7 @@ render_env_file() {
     # The independent PDF archive needs only Turso and its provider login.
     # No model grants, Dropbox credentials, broker or secret-store master key.
     if [[ "$unit" == "radon-marketdesk-pdf.service" ]]; then
-      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS|MARKETDESK_PDF_DAILY_CAP|MARKETDESK_PDF_HOURLY_CAP)=)' \
+      grep -E '^(#|$|(TURSO_DB_URL|TURSO_AUTH_TOKEN|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD|MARKETDESK_FIREBASE_REFRESH_TOKEN|MARKETDESK_PDF_MIN_INTERVAL_SECONDS|MARKETDESK_PDF_DAILY_CAP|MARKETDESK_PDF_HOURLY_CAP|MARKETDESK_PDF_MAX_AGE_DAYS)=)' \
         "$temporary" > "${temporary}.filtered"
       status=$?
       [[ "$status" -le 1 ]] || exit 71

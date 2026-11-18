@@ -84,7 +84,7 @@ def test_receipt_success_does_not_clear_a_quota_embargo(db):
     held = db.execute("SELECT interval_seconds,quota_failures,last_error FROM marketdesk_pdf_throttle").fetchone()
     url = store.ASSET_BASE + "a" * 64 + ".pdf"
     # Re-lease so the receipt write has a token, then record it as a local recovery.
-    again = store.claim_next(now=NOW + timedelta(seconds=held[0] if False else 10**6))
+    again = store.claim_next(now=NOW + timedelta(days=2))
     assert again is not None
     assert store.record_download(again, url, "a" * 64, now=NOW, provider_success=False)
     store.note_success(now=NOW)
@@ -808,7 +808,7 @@ def test_file_missing_retires_the_row_at_once_and_leaves_the_account_clock_alone
     assert after[:4] == before[:4] and after[4] == clock
     assert store.blocked() is None
     # Never offered again; the other report takes the next window.
-    nxt = store.claim_next(now=NOW + timedelta(days=30))
+    nxt = store.claim_next(now=NOW + timedelta(days=6))
     assert nxt is not None and nxt.article_id == "XYZabc12345"
 
 

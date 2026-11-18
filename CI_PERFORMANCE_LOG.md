@@ -2854,6 +2854,60 @@ cloud image/bounds tests 36 passed; scripts CIP-026 11 passed. YAML
 parses. Full suites, Vitest, Docker builds, and workflow lint are left
 to PR CI.
 
+## CIP-030 - skip a second podman pull when the SHA set is already local (2026-11-16) - VALIDATING
+
+Production `ENGINE` is podman. `image_matches_registry` returned 1
+immediately because `docker buildx imagetools` does not exist there, so
+every deploy's `prepull_app_images` re-pulled python, node, and gateway
+after the gated Prepull job had already fetched the SHA tags.
+
+Evidence, attempt-1 main deploys (`gh run view --json jobs` plus job
+logs). Queue 2s is excluded from the gain:
+
+| Run | Class | Clock | Deploy | Gateway re-pull after Prepull |
+|---|---|---|---|---|
+| [43675533211](https://github.com/joemccann/radon/actions/runs/43675533211) | mixed, warm | 349s | 153s (job 132695469001) | 38s (`Trying to pull` 04:13:24Z, local-store fallback 04:14:02Z) |
+| [43671158271](https://github.com/joemccann/radon/actions/runs/43671158271) | mixed, warm | 633s | 237s (job 132682814703) | 102s (+21.3s to Turso probe +123.5s) |
+| [43630752169](https://github.com/joemccann/radon/actions/runs/43630752169) | python-only | 428s | 226s (job 132557498370) | 96s (+18.9s to +115.4s) |
+
+Newest clean mixed clocks are 349s and 369s (43675009863). Mixed
+successful excluding the 22751s lock-queued run 43639529262: clock p50
+453s / p95 749s (n=28). 10% of 349s is 35s; 10% of 453s is 45s. Skipping
+the second layer fetch is expected to cut 38-102s of Deploy wall, which
+clears 15s and 10% of the clean clock. A confirmed digest mismatch still
+pulls. An unreachable registry with the SHA set already local does not.
+No `latest` fallback. Runner minutes fall with the skipped pull.
+
+**Change.** `image_matches_registry` uses `manifest inspect` on podman
+and `buildx imagetools` on docker. Return 0 for a matching digest
+(including a `localhost/` RepoDigests prefix), 1 for a confirmed rebuilt
+tag, and 2 when the registry is unreachable. `cmd_pull <sha>` skips the
+second layer fetch when all three SHA images are local unless any probe
+returns 1. Missing images still pull. Exact SHA tags, 40-second
+stability window, health, recovery, rollback, and fail-closed admission
+stay. Do not retry CIP-022/023/024 client-reuse.
+
+**Safety and revert trigger.** Revert if a deploy skips the pull when
+any of the three SHA images is missing, if a confirmed registry digest
+mismatch keeps a stale local image, or if runtime starts lose the
+offline `image_available` fallback.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS | 153s | pending | TBD until 5 samples |
+
+Before is the Deploy to VPS job wall on run 43675533211 (job
+132695469001). Acceptance remains five comparable mixed warm deploys
+before and after: same-class p50 at least 10% and 15s faster; p95 no
+worse than 5% or 15s; cold p50 no worse than 10%; runner minutes no more
+than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip030_podman_pull_skip.py` was red
+(3 failed: matching/localhost/unreachable still issued `pull`) then
+green (4 passed). Related prune/runtime pull contracts 62 passed / 135
+deselected. `bash -n` on the runtime script. Full suites, Vitest, Docker
+builds, and workflow lint are left to PR CI.
+
 ## CIP-031 - rest shard distributes per test, not per module (2026-11-17) - VALIDATING
 
 Warm mixed deploys still wait on `pytest (rest)` before coverage and

@@ -65,6 +65,11 @@ line here whenever you ship a security fix.**
 - **AUTH_EXEMPT_PATHS** — must NOT contain `/docs` or `/openapi.json` (trusted-local
   only); pinned by `test_health_payload.py` + `test_route_authz_matrix.py`.
   (`feedback_auth_exempt_paths_double_pin`)
+- **Auth-exempt internal endpoints self-gate** — an exempt path whose only
+  legitimate caller is a same-host daemon (the relay's `/ws-ticket/validate`)
+  must apply `is_trusted_local_request()` inside the handler, before any
+  side effect, because Caddy's `/api/ib/*` mount makes every exempt path
+  world-reachable. Pinned by `test_ws_ticket_validate_local_only.py`.
 - **Middleware perimeter** — default-deny (`if(!isPublicRoute)`), ALLOWED_USER_IDS
   operator gate, the `/api` matcher always running, `PUBLIC_SHARE_API_ROUTES` a
   FIXED explicit list (no `/api/**/share` regex).
