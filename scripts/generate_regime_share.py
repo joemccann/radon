@@ -36,8 +36,9 @@ from utils.cta_percentiles import normalize_pctile, reconcile_tables  # noqa: E4
 DATA_DIR = PROJECT_ROOT / "data"
 SCHEDULED_DIR = DATA_DIR / "cri_scheduled"
 CACHE_PATH = DATA_DIR / "cri.json"
-REPORTS_DIR = PROJECT_ROOT / "reports"
-REPORTS_DIR.mkdir(exist_ok=True)
+from utils.share_cards import ensure_share_cards_dir  # noqa: E402
+
+REPORTS_DIR = ensure_share_cards_dir()
 
 FONTS = '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">'
 
