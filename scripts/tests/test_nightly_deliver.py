@@ -326,6 +326,16 @@ class TestCli:
         shown = self._run("show", "--loop", "security", env=env)
         assert json.loads(shown.stdout)["head_sha"] == "b" * 40
 
+    def test_expected_checks_lists_every_workflow_check_name(self):
+        proc = self._run("expected-checks", "--root", str(REPO))
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == nd.expected_pull_request_check_names()
+
+    def test_expected_checks_without_readable_workflows_is_a_failure(self, tmp_path):
+        proc = self._run("expected-checks", "--root", str(tmp_path))
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+
     def test_show_without_a_record_is_empty_json(self, tmp_path):
         env = {"PATH": "/usr/bin:/bin", "RADON_WEEKEND_ROOT": str(tmp_path)}
         shown = self._run("show", "--loop", "security", env=env)

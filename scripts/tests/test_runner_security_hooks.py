@@ -30,6 +30,13 @@ MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "
 LABELS = {"security": "security-nightly", "security-deepsec": "security-deepsec"}
 PR = "https://github.com/joemccann/radon/pull/901"
 HEAD_SHA = "a" * 40
+# The hook's `pr view` stub: state, head branch, cross-repo, head SHA, the
+# conclusion tokens, then the whitespace-stripped check NAMES. The names are
+# derived from the real workflow files, which the rig seeds into its clone.
+sys.path.insert(0, str(REPO / "scripts"))
+import nightly_deliver as _nd  # noqa: E402
+FULL_CHECK_NAMES = ",".join(
+    "".join(name.split()) for name in _nd.expected_pull_request_check_names())
 CANARY_TOKEN = "ghp_" + "A" * 36
 CANARY_FINDING = "web/lib/secret.ts:12 lets an anonymous caller read /api/admin/keys"
 UNSET = (REPO / "scripts" / "runner" / "loops" / "security.env").read_text().split('AGENT_UNSET="')[1].split('"')[0]
@@ -60,6 +67,9 @@ def rig(request, tmp_path):
     src = tmp_path / "origin-src"
     src.mkdir()
     (src / "README.md").write_text("radon\n")
+    (src / ".github" / "workflows").mkdir(parents=True)
+    for wf in ("ci.yml", "pr-body.yml"):
+        shutil.copy2(REPO / ".github" / "workflows" / wf, src / ".github" / "workflows" / wf)
     _git("init", "-q", "-b", "main", cwd=src)
     _git("add", ".", cwd=src)
     _git("commit", "-qm", "init", cwd=src)
@@ -117,7 +127,7 @@ def rig(request, tmp_path):
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
                 "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
-                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS",
+                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS {FULL_CHECK_NAMES}",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
     def pre(phase="audit", cwd=None, **extra):
@@ -495,22 +505,68 @@ def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
     # "No checks reported" is PENDING, not success.
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup}")
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup} {FULL_CHECK_NAMES}")
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
 
 
+# A rollup can be all-green and still be a SUBSET of the suite: the PR-body
+# check finishes in seconds, long before the pytest and Vitest shards register
+# on the head. `nightly_deliver.classify_checks` already refuses that partial
+# set; the hook's own re-verification must refuse it too.
+
+
+def test_an_all_green_rollup_missing_expected_checks_is_pending_not_ready(rig):
+    _record(rig)
+    only_body = "".join("PR body template".split())
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS {only_body}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_a_rollup_with_no_check_names_is_never_ready(rig):
+    # Conclusions alone, no names: there is nothing to compare the suite against.
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS,SUCCESS")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+
+
+def test_unreadable_workflow_expectations_fail_closed(rig):
+    # The expected suite comes from the clone's workflow files. Without them
+    # the hook cannot know what "every check" means, so nothing is ready.
+    _record(rig)
+    for wf in ("ci.yml", "pr-body.yml"):
+        (rig.work / ".github" / "workflows" / wf).unlink()
+    out = rig.post(phase="deliver", output=_stamp(rig))
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_extra_unexpected_checks_in_a_full_green_rollup_still_verify(rig):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} SUCCESS,SUCCESS "
+                                f"{FULL_CHECK_NAMES},codecov/patch")
+
+    assert out["status"].startswith("OK: 1 PR(s) green, ready to merge"), out
+
+
 @pytest.mark.parametrize("fields", [
-    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS",
-    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS",
-    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS",
-    "OPEN main false {sha} SUCCESS",
+    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS {names}",
+    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS {names}",
+    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS {names}",
+    "OPEN main false {sha} SUCCESS {names}",
 ])
 def test_a_closed_cross_repo_or_off_prefix_pr_is_never_ready(rig, fields):
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA))
+                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA, names=FULL_CHECK_NAMES))
 
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
 

@@ -503,6 +503,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_dstatus.add_argument("--loop", required=True, choices=LOOPS)
 
+    p_expected = sub.add_parser(
+        "expected-checks",
+        help="the check names CI must report on a PR head, one per line (rc 1 when unreadable)",
+    )
+    p_expected.add_argument("--root", required=True, help="repository root holding .github/workflows")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "verdict":
@@ -529,6 +535,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "deliver-status":
         print(status_from_record(args.loop))
+        return 0
+    if args.cmd == "expected-checks":
+        names = expected_pull_request_check_names(Path(args.root))
+        if not names:
+            return 1
+        sys.stdout.write("".join(f"{name}\n" for name in names))
         return 0
     if args.cmd == "show":
         record = read_record(args.loop) or {}
