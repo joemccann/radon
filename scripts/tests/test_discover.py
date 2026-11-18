@@ -14,7 +14,7 @@ from discover import (
     is_market_open,
     WEIGHTS,
 )
-from clients.uw_client import UWAPIError, UWRateLimitError
+from clients.uw_client import UWAPIError, UWRateLimitError, UWServerError
 
 
 # ── is_market_open ──────────────────────────────────────────────────
@@ -451,6 +451,68 @@ def test_only_darkpool_page_timeout_sheds_instead_of_failing_the_oneshot():
     assert result["alerts_analyzed"] == 3
     assert result["error"] == "discover transport shed"
     assert "UW connection failed" not in json.dumps(result)
+
+
+def _server_error() -> UWServerError:
+    """One completed UW 5xx from the fail-fast client.
+
+    ``UWClient(max_retries=0)`` maps status >= 500 to ``UWServerError`` and
+    does not retry. The hourly discover client uses that setting.
+    """
+    return UWServerError("Internal Server Error", status_code=500)
+
+
+def test_options_flow_server_error_sheds_instead_of_failing_the_oneshot():
+    """A lone UW 5xx on options flow must not page the hourly oneshot.
+
+    2026-11-18 15:01:10Z, page c7372befae094ca3f8540413238e81ab: scanner and
+    flow-analysis were OK. The unit ran about 70s and exited 1.
+    service_health discover was error, candidates_found 0, skipped 1,
+    error_type UWServerError on options_flow, message required provider
+    data unavailable. One fail-fast 5xx is an unfinished tape. Auth,
+    quota, and a generic provider miss stay hard.
+    """
+    result, calls, sleeps = _discover_after_options_flow(
+        [_server_error()],
+        embargo_remaining=0,
+    )
+
+    assert calls == 1
+    assert sleeps == []
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["degraded"] is True
+    assert result["error"] == "discover server shed"
+    assert result["provider_failures"][0]["operation"] == "options_flow"
+    assert result["provider_failures"][0]["error_type"] == "UWServerError"
+    dumped = json.dumps(result)
+    assert "Internal Server Error" not in dumped
+    assert "required provider data unavailable" not in dumped
+
+
+def test_only_darkpool_server_error_sheds_instead_of_failing_the_oneshot():
+    """The same 5xx on the only darkpool ticker is still a shed."""
+    result = _discover_market_wide({"AAPL": _server_error()})
+
+    assert result["candidates"] == []
+    assert result["candidates_found"] == 0
+    assert result["alerts_analyzed"] == 3
+    assert result["error"] == "discover server shed"
+    assert result["provider_failures"][0]["error_type"] == "UWServerError"
+    assert "Internal Server Error" not in json.dumps(result)
+
+
+def test_server_error_mixed_with_a_provider_outage_stays_a_hard_error():
+    """One real miss still fails the oneshot, even if another ticker got a 5xx."""
+    result = _discover_market_wide({
+        "AAPL": _server_error(),
+        "MSFT": UWAPIError("budget"),
+    })
+
+    assert result["candidates"] == []
+    assert result["error"] == "required provider data unavailable"
+    assert "Internal Server Error" not in json.dumps(result)
+    assert "budget" not in json.dumps(result)
 
 
 def test_page_timeout_mixed_with_a_provider_outage_stays_a_hard_error():
