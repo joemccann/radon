@@ -527,6 +527,7 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mod, "_persist_snapshot", _record_snapshot)
     monkeypatch.setattr(mod, "gateway_auth_state", lambda: "authenticated")
     monkeypatch.setattr(mod, "load_history", lambda: [])
+    monkeypatch.setattr(mod, "_sleep", lambda _seconds: None)
     return mod, fake, tmp_path
 
 
@@ -631,6 +632,96 @@ class TestSourceLadder:
             mod.run(ib_fetch=_StubIb(_sample_legs()), now=NOW_RUN, backfill=True)
 
 
+class TestGatewayBlipRecheck:
+    """2026-11-17 22:16:54Z: the gateway's upstream died 22:16:06-22:18:xx.
+    The one daily fire probed /health once, read auth_state=unreachable,
+    re-served 2026-11-16 as stale_source and exited 0. Nothing retried, so
+    the 2026-11-17 session never landed until the next night."""
+
+    def _states(self, mod, monkeypatch, states):
+        probes = iter(states)
+        monkeypatch.setattr(mod, "gateway_auth_state", lambda: next(probes))
+
+    def test_transient_unreachable_gate_rechecks_and_lands_the_session(self, job, monkeypatch):
+        mod, fake, _tmp = job
+        self._states(mod, monkeypatch, ["unreachable", "unreachable", "authenticated"])
+        slept: list[float] = []
+        monkeypatch.setattr(mod, "_sleep", slept.append)
+        ib = _StubIb(_sample_legs())
+        payload = mod.run(ib_fetch=ib, now=NOW_RUN)
+        assert ib.calls == [mod.INCREMENTAL_DURATION]
+        assert payload["status"] == "ok"
+        assert payload["as_of"] == PIN_5Y_LAST
+        assert slept == list(mod.GATEWAY_RECHECK_DELAYS_S[:2])
+        assert fake.health == [("iv-spread", "ok", None)]
+
+    def test_persistent_outage_gives_up_after_the_recheck_window(self, job, monkeypatch):
+        mod, fake, tmp_path = job
+        monkeypatch.setattr(mod, "gateway_auth_state", lambda: "unreachable")
+        slept: list[float] = []
+        monkeypatch.setattr(mod, "_sleep", slept.append)
+        (tmp_path / "iv_spread.json").write_text(json.dumps({
+            "scan_time": "2026-09-01T22:15:00Z", "status": "ok", "source": "ib",
+            "as_of": "2026-09-01", "series": [], "current": None, "stats": None,
+        }))
+        ib = _StubIb(_sample_legs())
+        payload = mod.run(ib_fetch=ib, now=NOW_RUN)
+        assert ib.calls == []
+        assert payload["status"] == "stale_source"
+        assert slept == list(mod.GATEWAY_RECHECK_DELAYS_S)
+        assert fake.health[0][1] == "error"
+
+    def test_recheck_window_fits_inside_the_unit_start_timeout(self):
+        mod = _mod()
+        service = (
+            Path(__file__).resolve().parents[2] / "cloud" / "services" / "radon-iv-spread.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        worst_fetch_s = 2 * 30 + 10   # two historical legs + connect
+        assert sum(mod.GATEWAY_RECHECK_DELAYS_S) + worst_fetch_s + mod.PERSIST_BUDGET_S < unit_timeout
+
+
+class TestIntradayPartialSession:
+    """The 5-minute ET line stores today's in-progress bar; the post-close
+    run must restate it, and the partial edge must never be gated out."""
+
+    TODAY = "2026-09-03"
+
+    def _with_today(self, spx: float, ndx: float) -> dict[str, list[dict[str, Any]]]:
+        legs = _sample_legs()
+        legs["SPX"].append({"date": self.TODAY, "iv": spx})
+        legs["NDX"].append({"date": self.TODAY, "iv": ndx})
+        return legs
+
+    def test_partial_today_is_the_current_row_and_never_excluded(self, job):
+        mod, _fake, _tmp = job
+        intraday = datetime(2026, 9, 3, 15, 0, tzinfo=timezone.utc)
+        payload = mod.run(ib_fetch=_StubIb(self._with_today(0.2, 0.31)), now=intraday)
+        assert payload["as_of"] == self.TODAY
+        assert payload["excluded"] == []
+        assert payload["current"]["spread"] == pytest.approx(11.0, abs=1e-9)
+
+    def test_post_close_run_restates_the_partial_row(self, job, monkeypatch):
+        mod, fake, _tmp = job
+        intraday = datetime(2026, 9, 3, 15, 0, tzinfo=timezone.utc)
+        mod.run(ib_fetch=_StubIb(self._with_today(0.2, 0.31)), now=intraday)
+        stored = [
+            {"date": r["date"], "spx_iv": r["spx_iv"], "ndx_iv": r["ndx_iv"]}
+            for r in fake.rows[-1][0]
+        ]
+        monkeypatch.setattr(mod, "load_history", lambda: stored)
+        final = datetime(2026, 9, 3, 22, 15, tzinfo=timezone.utc)
+        payload = mod.run(ib_fetch=_StubIb(self._with_today(0.13, 0.18)), now=final)
+        assert payload["as_of"] == self.TODAY
+        assert payload["current"]["spread"] == pytest.approx(5.0, abs=1e-9)
+        today_rows = [r for r in fake.rows[-1][0] if r["date"] == self.TODAY]
+        assert today_rows and today_rows[0]["spx_iv"] == 0.13 and today_rows[0]["ndx_iv"] == 0.18
+
+
 class TestIbDown:
     def test_cached_payload_is_reserved_with_stale_source_and_error_heartbeat(self, job):
         mod, fake, tmp_path = job
@@ -707,6 +798,7 @@ class TestSnapshotPersistBudget:
         mod = _mod()
         monkeypatch.setattr(mod, "IV_SPREAD_JSON", tmp_path / "iv_spread.json")
         monkeypatch.setattr(mod, "gateway_auth_state", lambda: "unreachable")
+        monkeypatch.setattr(mod, "_sleep", lambda _seconds: None)
         (tmp_path / "iv_spread.json").write_text(json.dumps({
             "scan_time": "2026-09-25T22:15:58Z",
             "status": "ok",

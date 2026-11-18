@@ -1075,8 +1075,11 @@ deploy's `install-units` verb from `installed-units.sha256`. Spec:
 
 ### IV SPREAD (`radon-iv-spread.timer`)
 
-Daily `22:15 UTC` (`RandomizedDelaySec=120`), oneshot
-`scripts/fetch_iv_spread.py`. NDX and SPX 30-day implied vol from IB
+Every 5 minutes 09:00-16:55 ET Mon-Fri (the in-progress session bar), plus
+daily `22:15 UTC` (final restatement) and a `23:15 UTC` recovery slot
+(`RandomizedDelaySec=120`), oneshot `scripts/fetch_iv_spread.py`. A gateway
+that is not authenticated is re-probed for up to 180s before the cache
+fallback (`GATEWAY_RECHECK_DELAYS_S`). NDX and SPX 30-day implied vol from IB
 (`OPTION_IMPLIED_VOLATILITY` daily bars on both index legs, health-gated),
 spread in volatility points against its full stored history. IB is the only
 feed: an IB outage re-serves the cached payload as `stale_source` with an
