@@ -21,6 +21,12 @@ describe("appendProvisionalRow", () => {
       live({ date: "2026-10-19", value: 2 }, { current: { card: true } }));
     expect(merged).toMatchObject({ current: { card: true }, as_of: "2026-10-19", status: "ok" });
   });
+  it("carries the writer's held legs into the provisional meta", () => {
+    const merged = appendProvisionalRow(official, live({ date: "2026-10-19", value: 2 }, { carried: ["SKEW"] }));
+    expect(merged.provisional).toEqual({
+      source: "cboe_delayed", quote_time: "2026-10-19T14:45:00", scan_time: "2026-10-19T19:00:00Z", carried: ["SKEW"],
+    });
+  });
   it("leaves the payload untouched without a newer row", () => {
     expect(appendProvisionalRow(official, null)).toBe(official);
     expect(appendProvisionalRow(official, live(null))).toBe(official);
@@ -36,5 +42,9 @@ describe("provisionalNote", () => {
   it("names IB bars at the scan time in ET when there is no quote time", () => {
     expect(provisionalNote({ source: "ib", quote_time: null, scan_time: "2026-10-19T19:05:00Z" }))
       .toBe("Current session is provisional: IB index bars as of 15:05 ET, until the official close posts.");
+  });
+  it("names a leg held at its last official close", () => {
+    expect(provisionalNote({ source: "cboe_delayed", quote_time: "2026-10-19T14:45:00", scan_time: "x", carried: ["SKEW"] }))
+      .toBe("Current session is provisional: Cboe 15-minute delayed quotes as of 14:45 ET, SKEW held at its last official close, until the official close posts.");
   });
 });
