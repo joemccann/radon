@@ -1,4 +1,5 @@
-import { readFile } from "fs/promises";
+import { open } from "fs/promises";
+import { constants } from "fs";
 import { resolve, dirname, basename } from "path";
 
 // Share cards live in data/share_cards (scripts/utils/share_cards.py): data/ is the
@@ -36,15 +37,35 @@ export function isAllowedShareCardPath(rawPath: string | null | undefined, type:
   return shareCardPattern(type).test(basename(resolved));
 }
 
+/**
+ * Reads a card as a REGULAR FILE only. SHARE_CARDS_DIR sits in the shared read-write
+ * data/ mount, so a name that passes the lexical allowlist may still be a link some
+ * other writer planted. The final component is opened with O_NOFOLLOW and the open
+ * descriptor must be a regular file; anything else is treated as absent.
+ */
+export async function readRegularShareCardFile(path: string): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) return null;
+    return await handle.readFile("utf-8");
+  } catch {
+    return null;
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
 /** Returns the share-card HTML, or null if the path is not an allowed card or is missing. */
 export async function readShareCard(
   rawPath: string | null | undefined,
   type: ShareCardType,
 ): Promise<string | null> {
   if (!isAllowedShareCardPath(rawPath, type)) return null;
-  try {
-    return await readFile(resolve(rawPath as string), "utf-8");
-  } catch {
-    return null;
-  }
+  return readRegularShareCardFile(resolve(rawPath as string));
 }
