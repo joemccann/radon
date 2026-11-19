@@ -6,6 +6,10 @@ row built from one of these sources, never a mix: IB pool daily bars first
 (today's partial bar), then Cboe 15-minute delayed quotes. Every symbol must
 resolve on the same session date or the whole read is None. Callers treat
 None as "no live row" and never fail their official run on it.
+
+A caller may name ``carry`` symbols that post only after the close (Cboe
+SKEW). One not yet on the session is left out of ``values`` and listed in
+``carried``; the caller holds it at its last official close.
 """
 from __future__ import annotations
 
@@ -92,25 +96,40 @@ def pool_daily_bars(symbol: str, duration: str) -> Any:
     return response.json().get("bars")
 
 
-def live_from_ib(symbols: Iterable[str], now: datetime) -> Optional[dict[str, Any]]:
-    """Today's partial daily bar for every symbol, or None."""
+def _with_carried(live: dict[str, Any], carried: list[str]) -> dict[str, Any]:
+    return {**live, "carried": carried} if carried else live
+
+
+def live_from_ib(
+    symbols: Iterable[str], now: datetime, carry: Iterable[str] = ()
+) -> Optional[dict[str, Any]]:
+    """Today's partial daily bar for every symbol (carry symbols may lag), or None."""
     today = et_today(now)
+    carry = frozenset(carry)
     values: dict[str, float] = {}
+    carried: list[str] = []
     for symbol in symbols:
         bars = pool_daily_bars(symbol, "1 D")
         last = bars[-1] if isinstance(bars, list) and bars and isinstance(bars[-1], dict) else {}
         value = _positive(last.get("close"))
-        if _iso_date(last.get("date")) != today or value is None:
+        on_session = _iso_date(last.get("date")) == today and value is not None
+        if on_session:
+            values[symbol] = value  # type: ignore[assignment]
+        elif symbol in carry:
+            carried.append(symbol)
+        else:
             return None
-        values[symbol] = value
-    return {"date": today, "values": values, "source": "ib", "quote_time": None}
+    return _with_carried({"date": today, "values": values, "source": "ib", "quote_time": None}, carried)
 
 
-def live_from_cboe(symbols: Iterable[str]) -> Optional[dict[str, Any]]:
-    """Cboe 15-minute delayed quotes for every symbol, all on one session, or None."""
-    values: dict[str, float] = {}
-    dates: set[str] = set()
-    times: list[str] = []
+def live_from_cboe(symbols: Iterable[str], carry: Iterable[str] = ()) -> Optional[dict[str, Any]]:
+    """Cboe 15-minute delayed quotes for every symbol, all on one session, or None.
+
+    The session is set by the symbols outside ``carry``; a carry symbol
+    stamped before it is listed in ``carried`` instead of ``values``.
+    """
+    carry = frozenset(carry)
+    quotes: dict[str, tuple[float, str, str]] = {}
     session = _http_session()
     for symbol in symbols:
         response = session.get(
@@ -123,12 +142,21 @@ def live_from_cboe(symbols: Iterable[str]) -> Optional[dict[str, Any]]:
         day = _iso_date(stamp)
         if value is None or day is None:
             return None
-        values[symbol] = value
-        dates.add(day)
-        times.append(str(stamp))
+        quotes[symbol] = (value, day, str(stamp))
+    dates = {day for symbol, (_v, day, _t) in quotes.items() if symbol not in carry}
     if len(dates) != 1:
         return None
-    return {"date": dates.pop(), "values": values, "source": "cboe_delayed", "quote_time": max(times)}
+    session_date = dates.pop()
+    on_session = {symbol: quote for symbol, quote in quotes.items() if quote[1] == session_date}
+    carried = [symbol for symbol in quotes if symbol not in on_session]
+    if any(quotes[symbol][1] > session_date for symbol in carried):
+        return None
+    return _with_carried({
+        "date": session_date,
+        "values": {symbol: value for symbol, (value, _d, _t) in on_session.items()},
+        "source": "cboe_delayed",
+        "quote_time": max(stamp for _v, _d, stamp in on_session.values()),
+    }, carried)
 
 
 def fetch_live(
@@ -137,22 +165,25 @@ def fetch_live(
     *,
     try_ib: bool,
     label: str,
+    carry: Iterable[str] = (),
     ib: Callable[[Iterable[str], datetime], Optional[dict[str, Any]]] = None,  # type: ignore[assignment]
     cboe: Callable[[Iterable[str]], Optional[dict[str, Any]]] = None,  # type: ignore[assignment]
 ) -> Optional[dict[str, Any]]:
     """IB first when the caller's gate allows it, then Cboe. Advisory: errors return None."""
     symbols = tuple(symbols)
+    carry = tuple(carry)
+    carried_kwargs = {"carry": carry} if carry else {}
     ib = ib or live_from_ib
     cboe = cboe or live_from_cboe
     if try_ib:
         try:
-            live = ib(symbols, now)
+            live = ib(symbols, now, **carried_kwargs)
             if live:
                 return live
         except Exception as exc:  # noqa: BLE001 - fall through to Cboe
             print(f"[{label}] IB live bars unavailable: {type(exc).__name__}", file=sys.stderr)
     try:
-        return cboe(symbols)
+        return cboe(symbols, **carried_kwargs)
     except Exception as exc:  # noqa: BLE001 - live row is advisory
         print(f"[{label}] Cboe delayed quotes unavailable: {type(exc).__name__}", file=sys.stderr)
         return None
