@@ -17,8 +17,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/routeAccess", () => ({ requireRouteAccess: mocks.requireRouteAccess }));
 vi.mock("@/lib/db", () => ({
-  getDb: () => ({ execute: mocks.execute }),
+  getDb: () => ({
+    execute: mocks.execute,
+    batch: (stmts: unknown[]) => Promise.all(stmts.map((stmt) => mocks.execute(stmt))),
+  }),
   resetDb: vi.fn(),
+  getPoolStats: () => null,
 }));
 
 const HOUR = 60 * 60_000;
