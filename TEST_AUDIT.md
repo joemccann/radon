@@ -12458,3 +12458,34 @@ Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node 
 | 1 | 19,823 passed / 10 skipped / 40 subtests (101.54s) | 11,631 passed / 21 skipped / 1,209 files (49.96s) | 59 failed / 4,284 passed / 23 skipped (964.70s) | 1 added (`test_a_severed_post_is_not_replayed`) |
 | 2 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (156.49s) | 11,631 passed / 21 skipped / 1,209 files (101.16s) | 58 failed / 4,285 passed / 23 skipped (981.70s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (152.75s) | 11,631 passed / 21 skipped / 1,209 files (102.79s) | 58 failed / 4,285 passed / 23 skipped (972.75s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-19
+
+Range `6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c..45660cd1c9e352ee799ea4f721e3c7933ee4f6a3`: 22 commits / 45 paths. Newest trusted checkpoint on issue #83 is `audited-through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c` (2026-11-18). It carried no open verified finding. Open `testing/` PRs: #1606 (T-594, all checks green) and #1598 (T-593, all checks green). Highest id in ledgers T-592; PRs hold T-593/T-594. Next id T-595.
+
+Codemap has no node for `scripts/utils/share_cards.py` or the timer units. `rg` confirmed importers: `scripts/tests/test_share_cards_dir.py` and `scripts/tests/test_vixcor.py` / `web/tests/vixcor-*.ts*` for the live row; `web/tests/refresh-schedule.test.ts` for the 5-minute OnCalendar pin. Inverse: `web/lib/refreshSchedule.ts` IV_RANK_REFRESH grew the 09:00-16:55 ET line, but `web/tests/freshness-rail.test.ts` switched to a `DAILY_2210` fixture and `web/e2e/ivrank-tab.spec.ts:191-226` still asserted the daily behind/95.14 fill at 17:00 ET. `web/lib/useIvRank.ts:12` dropped to `interval: 300_000` with no hook test (`ivrank-panel.test.tsx` mocks the hook); `web/tests/vixcor-hook.test.tsx:113` already pins the vixcor sibling.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-588 / T-589 / T-591 / T-592 remain DONE; T-590 SUPERSEDED; T-493 / T-495 / T-488 have later DONE evidence.
+
+Not filed: ivrank/vixcor `SERVICE_FRESHNESS_WINDOWS` stay 26h (`serviceHealthWindows.ts:222-228`), matching the vix-pc / vixts 5-minute-plus-daily pattern; `_expected_live_corr` in `test_vixcor.py` mirrors `compute_corr_series` beside date/gap/write assertions; `web/app/api/ivrank/route.ts:30` comment still says daily (the 48h max-age still holds).
+
+### T-595 — P1 — IV RANK freshness rail still asserted the daily 24h fill after the timer went 5-minute
+
+`web/lib/refreshSchedule.ts:60-63` is 09:00-16:55 ET every 5 minutes plus 22:10 UTC. `web/e2e/ivrank-tab.spec.ts:212-226` (T-221) pinned 17:00 ET Wednesday / asOf Tuesday as `data-state="behind"`, countdown `1h 10m`, fill `95.14`. `computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", 2026-08-26T21:00Z)` is now `due=true`, `elapsedFraction=1`, last sample 20:55 UTC. The vitest rail cases no longer import `IV_RANK_REFRESH`, so a wrong-schedule regression of the live constant is untested in CI. Spec is not in the Playwright CI job.
+
+Acceptance: `computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET)` is due, not overdue, awaiting 2026-08-26, fill `100.00`, last sample 20:55 UTC, next 22:10 UTC. Reasserting `due=false` / `95.14` fails. The e2e at the same clock reads `Due` / `data-state="due"` / fill `100.00`.
+
+### T-596 — P2 — useIvRank 5-minute poll is untested, so an hourly revert stays green
+
+`web/lib/useIvRank.ts:12` is `interval: 300_000`. Codemap lists no test importer; `web/tests/ivrank-panel.test.tsx:132` mocks the hook. `web/tests/vixcor-hook.test.tsx:113-131` pins the sibling. Mutation `300_000` → `3_600_000`: GET case stayed green, poll case 1 failed (`expected 1 to be 2` at 5 minutes, `/tmp/t596-red.log`).
+
+Acceptance: render `useIvRank`, one GET at mount, none at 2.5 minutes, one more GET at 5. Restoring `3_600_000` fails the 5-minute GET.
+
+Audited through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3 on 2026-11-19 — 2 new findings
+
+## Remediation 2026-11-19
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-595 | DONE | Old daily fill: 1 failed / 21 passed (`/tmp/t595-red.log`, `due` true vs false). Corrected pin: 22 passed (`/tmp/t595-green.log`); delta Vitest 106 passed ×2. Product source unchanged. Playwright e2e left to CI (no browser here). |
+| T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3 (`/tmp/t596-green.log`). Product source unchanged. |

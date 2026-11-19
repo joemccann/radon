@@ -1430,3 +1430,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-590 | SUPERSEDED | Main removed `pdf_backlog` from the dropbox row (marketdesk-pdf owns the breach); these tests were dropped when merging main. Original: Wiring `None` + deleted health flip: 3 failed / 1 passed (`test_default_deps_wire_real_modules`, `test_pdf_backlog_breach_errors_ok_dropbox_health`, `test_pdf_backlog_appends_to_paused_dropbox_health`). Restored product source. Green 4 passed; `test_marketdesk_job.py` 96 passed. Product source unchanged. Closing rounds: root pytest r1 19,823 passed; r2/r3 credentials xdist flake then serial 2 passed. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud r2/r3 58 failed / 4,285 passed / 23 skipped, 0 added / 0 removed vs origin/main `8aaad84e9`. |
 | T-591 | DONE | Serial `PermissionError: '/opt/cursor'` after admission asserts (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green 21 passed in `test_marketdesk_pdf_sim.py`. Product source unchanged. Closing rounds: same as T-590. |
 | T-592 | DONE | Serial 2 failed ×3: empty log fence vs `"Error: CLI crashed"` (`/tmp/delta-security-1.log`). Hook stderr `bad substitution` on bash 3.2 `${//$'\x60\x60\x60'/}`. Escaped backticks. Green 2 passed; file 201 passed. Closing rounds: same as T-590. |
+
+## 2026-11-19
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-595 | DONE | Old daily fill at 17:00 ET: 1 failed / 21 passed (`due` true vs false, `/tmp/t595-red.log`). Green: 22 passed; related rail files 106 passed ×2. e2e countdown `Due`, `data-state="due"`, fill `100.00`. Product source unchanged. Playwright left to CI. |
+| T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`expected 1 to be 2` at 5 minutes, `/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3. Product source unchanged. |
