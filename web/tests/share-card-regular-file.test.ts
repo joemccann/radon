@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { readShareCard, readRegularShareCardFile, SHARE_CARDS_DIR } from "@/lib/shareReportPath";
 
@@ -18,6 +19,7 @@ beforeAll(() => {
   writeFileSync(join(tmp, "tweet-gex-2026-11-19.html"), "<p>card</p>", "utf-8");
   symlinkSync(outside, join(tmp, "tweet-gex-2026-11-18.html"));
   mkdirSync(join(tmp, "tweet-gex-2026-11-17.html"));
+  execFileSync("mkfifo", [join(tmp, "tweet-gex-2026-11-15.html")]);
 });
 
 afterAll(() => {
@@ -31,6 +33,11 @@ describe("readRegularShareCardFile", () => {
 
   it("refuses a link even when its target is readable", async () => {
     await expect(readRegularShareCardFile(join(tmp, "tweet-gex-2026-11-18.html"))).resolves.toBeNull();
+  });
+
+  it("returns promptly instead of waiting on a fifo planted under a card name", async () => {
+    const timer = new Promise<string>((r) => setTimeout(() => r("timed out"), 5000));
+    await expect(Promise.race([readRegularShareCardFile(join(tmp, "tweet-gex-2026-11-15.html")), timer])).resolves.toBeNull();
   });
 
   it("refuses a non-regular entry and a missing file", async () => {

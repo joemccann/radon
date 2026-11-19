@@ -40,13 +40,14 @@ export function isAllowedShareCardPath(rawPath: string | null | undefined, type:
 /**
  * Reads a card as a REGULAR FILE only. SHARE_CARDS_DIR sits in the shared read-write
  * data/ mount, so a name that passes the lexical allowlist may still be a link some
- * other writer planted. The final component is opened with O_NOFOLLOW and the open
- * descriptor must be a regular file; anything else is treated as absent.
+ * other writer planted. The final component is opened with O_NOFOLLOW, without
+ * blocking on a fifo, and the open descriptor must be a regular file; anything else
+ * is treated as absent.
  */
 export async function readRegularShareCardFile(path: string): Promise<string | null> {
   let handle;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch {
     return null;
   }

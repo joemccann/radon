@@ -77,3 +77,25 @@ def test_api_share_content_refuses_a_link_planted_under_a_card_name(tmp_path, mo
         with pytest.raises(HTTPException) as excinfo:
             asyncio.run(server.share_content(type="gex", name=name))
         assert excinfo.value.status_code == 404
+
+
+def test_api_share_content_does_not_block_on_a_fifo_planted_under_a_card_name(tmp_path, monkeypatch):
+    import asyncio
+    import os
+
+    from fastapi import HTTPException
+
+    from api import server
+
+    monkeypatch.setattr(server, "SHARE_CARDS_DIR", tmp_path)
+    os.mkfifo(tmp_path / "tweet-gex-2026-11-19.html")
+
+    async def bounded():
+        return await asyncio.wait_for(
+            asyncio.to_thread(asyncio.run, server.share_content(type="gex", name="tweet-gex-2026-11-19.html")),
+            timeout=5,
+        )
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(bounded())
+    assert excinfo.value.status_code == 404

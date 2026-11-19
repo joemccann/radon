@@ -5299,9 +5299,10 @@ async def share_content(type: str, name: str):
         raise HTTPException(status_code=403, detail="Access denied")
     path = SHARE_CARDS_DIR / name
     # SHARE_CARDS_DIR is a shared read-write mount: open the final component without
-    # following links and serve only a regular file, never whatever a link points at.
+    # following links or blocking on a fifo, and serve only a regular file, never
+    # whatever a link points at.
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="File not found") from exc
     try:
