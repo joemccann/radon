@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
@@ -33,6 +33,7 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 import RegimeRail from "./RegimeRail";
+import { buildRegimeShareReading, type RegimeShareReading } from "@/lib/regimeShareReading";
 import { buildRailStatuses, REGIME_TABS, REGIME_TAB_LABEL, type RegimeTab } from "@/lib/regimeRail";
 
 function RegimeTabSkeleton() {
@@ -211,6 +212,8 @@ export default function RegimePanel({
   const { data: railVcgData } = useVcg(marketState);
   const { data: railGexData } = useGex(marketState, { passive: true });
   const { data: railDispersionData } = useDispersion();
+  const shareReadingRef = useRef<RegimeShareReading | null>(null);
+  const readShareReading = useCallback(() => shareReadingRef.current, []);
   const shareModal = shareEndpoint ? (
     <ShareReportModal
       modalTitle={shareModalTitle}
@@ -219,6 +222,7 @@ export default function RegimePanel({
       buttonTitle={shareButtonTitle}
       iconSize={11}
       shareContentTitle={shareContentTitle}
+      shareBody={readShareReading}
     />
   ) : (
     <ShareReportModal
@@ -228,6 +232,7 @@ export default function RegimePanel({
       buttonTitle={shareButtonTitle}
       iconSize={11}
       shareContentTitle={shareContentTitle}
+      shareBody={readShareReading}
     />
   );
 
@@ -363,6 +368,23 @@ export default function RegimePanel({
     cachedCorrelationMet: data?.crash_trigger?.conditions.cor1m_gt_60 ?? false,
     spxBelowMa: Boolean(spxBelowMa),
     realizedVolMet: realizedVolTriggerMet,
+  });
+
+  const shareReading = buildRegimeShareReading({
+    liveCri,
+    vix: vixVal,
+    vvix: vvixVal,
+    spy: spyVal,
+    cor1m: activeCorr,
+    cor1m5dChange: corr5dChange,
+    vvixVixRatio,
+    spxDistancePct: spxDistPct,
+    realizedVol: activeRvol,
+    spxBelowMa: Boolean(spxBelowMa),
+    cor1mAboveThreshold: crashTrigger.correlationMet,
+  });
+  useEffect(() => {
+    shareReadingRef.current = shareReading;
   });
 
   const railStatuses = useMemo(

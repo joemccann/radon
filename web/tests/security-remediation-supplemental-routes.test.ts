@@ -48,7 +48,9 @@ describe("supplemental route remediations", () => {
     const gex = await readFile(path.join(ROOT, "web/app/api/gex/share/content/route.ts"), "utf8");
     const server = await readFile(path.join(ROOT, "scripts/api/server.py"), "utf8");
     expect(gex).toContain("radonFetchText(`/share/content?type=gex");
-    expect(server).toContain('"--card-type", "internals"');
+    const regimeShare = await readFile(path.join(ROOT, "scripts/api/regime_share.py"), "utf8");
+    expect(server).toContain('regime_share_gen.generate(live, card_type="internals")');
+    expect(regimeShare).toContain('args += ["--card-type", card_type]');
     expect(server).toContain('@app.get("/share/content"');
   });
 
