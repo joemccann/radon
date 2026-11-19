@@ -59,9 +59,16 @@ line here whenever you ship a security fix.**
   loopback, so peer address alone is untrustworthy). The relay must call it.
   (`feedback_ws_relay_trust_forwarding_headers`)
 - **Share-content allowlist** — the 5 `*/share/content` routes serve ONLY
-  `tweet-<type>-<date>[-card-N].html` from directly inside `reports/`, scoped per
-  type. Never widen to arbitrary `reports/` paths.
+  `tweet-<type>-<date>[-card-N].html` from directly inside `data/share_cards/`, scoped per
+  type. Never widen to arbitrary paths.
   (`feedback_share_content_allowlist_not_arbitrary_reports`, `web/lib/shareReportPath.ts`)
+- **Anonymous readers rooted in a shared writable mount serve regular files only** —
+  `data/` is a multi-writer read-write bind mount, so a lexical allowlist on the name
+  does not bound what a name resolves to. Both `*/share/content` readers open the final
+  component with `O_NOFOLLOW` and serve only when the descriptor is a regular file
+  (`web/lib/shareReportPath.ts:readRegularShareCardFile`, `scripts/api/server.py:share_content`).
+  When a served directory moves, ask who else can write the new location.
+  (`web/tests/share-card-regular-file.test.ts`, `scripts/tests/test_share_cards_dir.py`)
 - **AUTH_EXEMPT_PATHS** — must NOT contain `/docs` or `/openapi.json` (trusted-local
   only); pinned by `test_health_payload.py` + `test_route_authz_matrix.py`.
   (`feedback_auth_exempt_paths_double_pin`)
