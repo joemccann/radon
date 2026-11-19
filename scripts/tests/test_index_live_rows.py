@@ -249,3 +249,76 @@ def test_panic_live_tick_skips_the_official_snapshot_and_never_alerts(panic, mon
     assert panic.snapshots[0][2]["row"]["date"] == day
     alert.assert_not_called()
     assert [h[0] for h in panic.health] == ["panic-index"]
+
+
+# ── carried slow symbols (Cboe SKEW posts once, after the close) ──
+
+
+def test_cboe_live_carries_a_slow_symbol_that_has_not_posted_today(monkeypatch):
+    import requests
+
+    quotes = {"VIX": _quote(27.71, "2026-11-19T14:59:31"), "SKEW": _quote(142.84, "2026-11-18T17:00:19")}
+    monkeypatch.setattr(
+        requests.Session, "get",
+        lambda self, url, **k: quotes[url.rsplit("_", 1)[1].removesuffix(".json")],
+    )
+    assert index_live.live_from_cboe(("VIX", "SKEW"), carry=("SKEW",)) == {
+        "date": "2026-11-19", "values": {"VIX": 27.71}, "carried": ["SKEW"],
+        "source": "cboe_delayed", "quote_time": "2026-11-19T14:59:31",
+    }
+    quotes["SKEW"] = _quote(143.5, "2026-11-19T14:59:00")
+    assert index_live.live_from_cboe(("VIX", "SKEW"), carry=("SKEW",))["values"] == {"VIX": 27.71, "SKEW": 143.5}
+    quotes["VIX"] = _quote(27.71, "2026-11-18T16:15:00")
+    quotes["SKEW"] = _quote(142.84, "2026-11-19T10:00:00")
+    assert index_live.live_from_cboe(("VIX", "SKEW"), carry=("SKEW",)) is None
+    index_live.close_http_session()
+
+
+def test_ib_live_carries_a_slow_symbol_without_todays_bar(monkeypatch):
+    import requests
+
+    bars = {"VIX": [{"date": "2026-10-19", "close": 20.0}], "SKEW": [{"date": "2026-10-16", "close": 150.0}]}
+
+    def post(self, url, **kwargs):
+        response = Mock()
+        response.json = Mock(return_value={"bars": bars[kwargs["json"]["contract"]["symbol"]]})
+        return response
+
+    monkeypatch.setattr(requests.Session, "post", post)
+    live = index_live.live_from_ib(("VIX", "SKEW"), NOW, carry=("SKEW",))
+    assert live["values"] == {"VIX": 20.0} and live["carried"] == ["SKEW"]
+    assert index_live.live_from_ib(("VIX", "SKEW"), NOW) is None
+    index_live.close_http_session()
+
+
+def test_fetch_live_hands_the_carry_set_to_both_sources():
+    ib = Mock(return_value=None)
+    cboe = Mock(return_value=_live({"VIX": 2.0}))
+    index_live.fetch_live(("VIX", "SKEW"), NOW, try_ib=True, label="t", ib=ib, cboe=cboe, carry=("SKEW",))
+    assert ib.call_args.kwargs == {"carry": ("SKEW",)}
+    assert cboe.call_args.kwargs == {"carry": ("SKEW",)}
+
+
+_REAL_PANIC_FETCH_LIVE = fetch_panic_index._fetch_live  # before conftest stubs it
+
+
+def test_panic_fetches_with_skew_carried(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(index_live, "ib_allowed", lambda: False)
+    monkeypatch.setattr(index_live, "fetch_live", lambda symbols, now, **k: seen.update(k))
+    _REAL_PANIC_FETCH_LIVE(NOW)
+    assert seen["carry"] == ("SKEW",)
+
+
+def test_panic_live_row_holds_skew_at_the_official_close():
+    series = _panic_official()
+    official_day = series[-1]["date"]
+    day = datetime.fromordinal(datetime.fromisoformat(official_day).toordinal() + 1).date().isoformat()
+    now = datetime.fromisoformat(day + "T19:00:00+00:00")
+    fetched = {**_live({"VIX": 30.0, "VIX3M": 22.0, "VVIX": 120.0}, day=day), "carried": ["SKEW"]}
+    live = fetch_panic_index._live_payload(
+        {"data_date": official_day, "series": series}, scan_time="t", now=now, fetched=fetched)
+    assert live["row"]["date"] == day
+    assert live["row"]["skew"] == series[-1]["skew"]
+    assert live["row"]["delta_1d"] is not None
+    assert live["carried"] == ["SKEW"]
