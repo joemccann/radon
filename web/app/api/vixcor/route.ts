@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
+import { dbBatch } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
-import { appendProvisionalRow, readLiveSnapshot } from "@/lib/provisionalRow";
+import { appendProvisionalRow, liveSnapshotArgs, LIVE_SNAPSHOT_SQL, parseLiveSnapshot } from "@/lib/provisionalRow";
 import { isVixcorEntry, type VixcorData } from "@/lib/vixcor";
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
@@ -37,12 +37,18 @@ const MISSING_VIXCOR = {
 const VIXCOR_MAX_AGE_MS = 48 * 60 * 60_000;
 
 async function readVixcorFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT scan_time, payload FROM scan_snapshots
-          WHERE service = 'vixcor' ORDER BY scan_time DESC LIMIT 1`,
-    args: [],
-  });
+  // One /v2/pipeline for the official snapshot plus vixcor:live (PERF-062).
+  const [result, liveResult] = await dbBatch(
+    [
+      {
+        sql: `SELECT scan_time, payload FROM scan_snapshots
+              WHERE service = 'vixcor' ORDER BY scan_time DESC LIMIT 1`,
+        args: [],
+      },
+      { sql: LIVE_SNAPSHOT_SQL, args: liveSnapshotArgs("vixcor") },
+    ],
+    { label: "vixcor snapshots", mode: "read" },
+  );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   const data = JSON.parse(row.payload) as Record<string, unknown>;
@@ -51,7 +57,7 @@ async function readVixcorFromDb(): Promise<TimestampedRead<Record<string, unknow
     ? data
     : appendProvisionalRow(
         data as unknown as VixcorData,
-        await readLiveSnapshot((statement) => db.execute(statement), "vixcor", isVixcorEntry),
+        parseLiveSnapshot(liveResult, isVixcorEntry),
       );
   return {
     data: merged as unknown as Record<string, unknown>,
