@@ -317,8 +317,19 @@ def _run_cycle(
     return payload
 
 
+# Cboe disseminates SKEW once, after the close: intraday it is held at its
+# last official close so the other three legs still move the live row.
+_CARRIED_INTRADAY = ("SKEW",)
+
+
 def _fetch_live(now: datetime) -> Optional[dict[str, Any]]:
-    return index_live.fetch_live(_SYMBOLS, now, try_ib=index_live.ib_allowed(), label=SERVICE)
+    return index_live.fetch_live(
+        _SYMBOLS, now, try_ib=index_live.ib_allowed(), label=SERVICE, carry=_CARRIED_INTRADAY
+    )
+
+
+def _live_value(live: dict[str, Any], symbol: str, field: str, official_last: dict[str, Any]) -> Any:
+    return live["values"].get(symbol, official_last[field])
 
 
 _LIVE_FIELDS = {"VIX": "vix", "VIX3M": "vix3m", "VVIX": "vvix", "SKEW": "skew"}
@@ -336,7 +347,8 @@ def _live_payload(
     Rebuilt with the same join / z / level / delta math over the last
     Z_WINDOW + 8 official sessions plus the live inputs, then carded against
     the full official series so the 10-year delta ranks stay exact. The UW
-    25d overlay is not available live and stays None.
+    25d overlay is not available live and stays None. A carried leg (SKEW
+    before it posts) takes the last official close.
     """
     live = fetched if fetched is not None else _fetch_live(now)
     series = payload.get("series") or []
@@ -345,7 +357,7 @@ def _live_payload(
     if series and index_live.is_newer(live, payload.get("data_date"), now):
         tail = series[-(Z_WINDOW + 8):]
         raw = {symbol: [{"date": r["date"], "value": r[field]} for r in tail]
-               + [{"date": live["date"], "value": live["values"][symbol]}]  # type: ignore[index]
+               + [{"date": live["date"], "value": _live_value(live, symbol, field, series[-1])}]  # type: ignore[arg-type]
                for symbol, field in _LIVE_FIELDS.items()}
         rebuilt, _dropped, _base = join_series(raw["VIX"], raw["VIX3M"], raw["VVIX"], raw["SKEW"])
         attach_z_scores(rebuilt)
@@ -362,6 +374,7 @@ def _live_payload(
         "current": current,
         "source": live["source"] if row else None,  # type: ignore[index]
         "quote_time": live["quote_time"] if row else None,  # type: ignore[index]
+        "carried": list(live.get("carried") or []) if row else [],  # type: ignore[union-attr]
     }
 
 
