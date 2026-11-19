@@ -113,6 +113,40 @@ def load_cri(target_date: Optional[str] = None) -> dict:
     return max(candidates, key=lambda d: d.get("scan_time") or "")
 
 
+# What the /regime page recomputes from live ticks. The cards must show the
+# page's reading, not the last scan snapshot underneath it.
+LIVE_OVERLAY_FIELDS = (
+    "vix", "vvix", "spy", "cor1m", "cor1m_5d_change", "vvix_vix_ratio",
+    "spx_distance_pct", "realized_vol", "cri",
+)
+
+
+def apply_live_overlay(data: dict, overlay: Optional[dict]) -> dict:
+    """Snapshot with the page's live reading laid over it. Never mutates `data`."""
+    if not overlay:
+        return data
+    merged = {**data, **{k: overlay[k] for k in LIVE_OVERLAY_FIELDS if k in overlay}}
+    live_conditions = (overlay.get("crash_trigger") or {}).get("conditions") or {}
+    if live_conditions:
+        snapshot_trigger = data.get("crash_trigger") or {}
+        conditions = {**(snapshot_trigger.get("conditions") or {}), **live_conditions}
+        merged["crash_trigger"] = {
+            **snapshot_trigger,
+            "conditions": conditions,
+            "triggered": all(conditions.get(k, False) for k in
+                             ("spx_below_100d_ma", "realized_vol_gt_25", "cor1m_gt_60")),
+        }
+    return merged
+
+
+def load_live_overlay(path: Optional[str]) -> Optional[dict]:
+    if not path:
+        return None
+    with open(path) as f:
+        overlay = json.load(f)
+    return overlay if isinstance(overlay, dict) else None
+
+
 def pctile_label(p) -> str:
     """Ordinal label, or `---` when there is no percentile.
 
@@ -659,9 +693,10 @@ def main():
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-open", action="store_true", help="Don't open browser")
     parser.add_argument("--card-type", choices=("regime", "internals"), default="regime")
+    parser.add_argument("--live-overlay", help="JSON file with the page's live CRI reading")
     args = parser.parse_args()
 
-    data = load_cri(args.date)
+    data = apply_live_overlay(load_cri(args.date), load_live_overlay(args.live_overlay))
     ds = data.get("date") or args.date or date.today().strftime("%Y-%m-%d")
 
     generators = [card1_cri, card2_crash_trigger, card3_vol_credit, card4_cta_squeeze]
