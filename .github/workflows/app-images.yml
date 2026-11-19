@@ -207,7 +207,12 @@ jobs:
           context: .
           file: docker/app/Dockerfile.python
           platforms: linux/amd64
-          load: true
+          # CIP-033: main already pushes the exact SHA. load:true exported a
+          # docker-image tarball (10.8s on run 44357745454, 16.6s on
+          # 44386917407) so the next step could `docker run --pull=never`.
+          # The Dockerfile already smokes playwright as USER radon. Pull
+          # requests cannot push, so they still load.
+          load: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
           push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           tags: |
             ghcr.io/joemccann/radon-python:${{ github.sha }}
@@ -218,10 +223,16 @@ jobs:
       - name: Smoke hardened Python browser runtime
         if: steps.reuse.outputs.hit != 'true'
         run: |
+          set -euo pipefail
+          image="ghcr.io/joemccann/radon-python:${{ github.sha }}"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ] && [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            echo "main publish already smoked playwright in the image build"
+            exit 0
+          fi
           docker run --rm --pull=never --init --user 1000:1000 --network none \
             --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint python \
-            ghcr.io/joemccann/radon-python:${{ github.sha }} \
+            "$image" \
             -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
       - name: Record python image input hash
         if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.reuse.outputs.hit != 'true'

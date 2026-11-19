@@ -2957,3 +2957,50 @@ no more than 20% higher. Status `VALIDATING`.
 (1 failed: unconditional `apt-get update`) then green (3 passed). Related
 CIP-027/029/disk tests 16 passed. YAML parses. Full suites, Vitest, Docker
 builds, and workflow lint are left to PR CI.
+
+## CIP-033 - skip the python docker-load tarball on main publish (2026-11-19) - VALIDATING
+
+Main python rebuilds still set `load: true` so the next step can
+`docker run --pull=never`. That export is the job tail after the image
+build's own playwright smoke. CIP-032 skipped the sshd apt no-op; it does
+not remove the tarball. Dockerfile.python already smokes playwright as
+`USER radon`.
+
+Evidence, attempt-1 mixed python-rebuild steps (`gh run view --json jobs`
+plus job logs). Queue 2s is excluded from the gain:
+
+| Run | Clock | Python image | Load tarball | Post-build docker run |
+|---|---|---|---|---|
+| [44357745454](https://github.com/joemccann/radon/actions/runs/44357745454) | 410s | 135s (job 134990848552) | 10.8s (`exporting to docker image format` 17:24:00Z–17:24:11Z) | ~9s |
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | 591s | 79s (job 135094530994) | 16.6s | ~8s |
+
+Load plus the duplicate smoke is 20-25s of the python rebuild. Skipping
+that export on main is expected to cut the python job by about 20s, which
+clears 15s. Pull requests still `load: true` (they cannot push). Exact SHA
+tags, Darwin-before-publish, CIP-032 sshd skip, ihash receipts, and
+fail-closed reuse stay. No `needs` edge, test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+
+**Change.** Python `load:` is true only when the run is not a main push.
+Main smoke prints that the image build already ran the playwright
+assertions and exits 0. PR smoke keeps `docker run --pull=never`.
+
+**Safety and revert trigger.** Revert if a main rebuild publishes a python
+SHA that fails `docker run --pull=never` of that tag, if a PR rebuild
+skips the local docker-run smoke, or if deploy no longer waits for Exact
+app images.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 135s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 44357745454 (job
+134990848552). Acceptance remains five comparable mixed python-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip033_python_skip_load.py` was red
+(2 failed: unconditional `load: true`) then green (3 passed). Related
+CIP-027/029/032/disk tests 19 passed. YAML parses. Full suites, Vitest,
+Docker builds, and workflow lint are left to PR CI.
