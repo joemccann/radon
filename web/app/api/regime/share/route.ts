@@ -20,9 +20,14 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const live = await readLiveReading(request);
+  if (live === INVALID_BODY) {
+    return NextResponse.json({ error: "Invalid share request" }, { status: 400 });
+  }
+
   try {
     const token = access.principal.token;
-    const data = await radonFetch("/regime/share", { method: "POST", token });
+    const data = await radonFetch("/regime/share", { method: "POST", token, ...jsonBody(live) });
     return NextResponse.json(withoutAbsoluteReportPaths(data));
   } catch (err) {
     if (err instanceof RadonApiError) {
@@ -33,4 +38,23 @@ export async function POST(request: Request): Promise<Response> {
       { status: 500 },
     );
   }
+}
+
+const INVALID_BODY = Symbol("invalid-body");
+
+/** The page's live CRI reading (`{ live }`), validated by FastAPI. Absent = snapshot only. */
+async function readLiveReading(request: Request): Promise<unknown | null | typeof INVALID_BODY> {
+  const text = await request.text();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as { live?: unknown };
+    return parsed?.live ?? null;
+  } catch {
+    return INVALID_BODY;
+  }
+}
+
+function jsonBody(live: unknown | null) {
+  if (live == null) return {};
+  return { headers: { "Content-Type": "application/json" }, body: JSON.stringify(live) };
 }
