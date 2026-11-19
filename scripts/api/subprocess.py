@@ -56,6 +56,15 @@ SUBPROCESS_ADMISSION_WAIT_S = max(
 )
 _ADMISSION_POLL_S = 0.1
 
+# A share card is a user click with no cache and no scan-gate backoff. Its
+# 120s budget covers four Chromium screenshots; it is not batch work.
+_INTERACTIVE_LANE_SCRIPTS = frozenset({
+    "generate_regime_share.py",
+    "generate_gex_share.py",
+    "generate_vcg_share.py",
+    "generate_cta_share.py",
+})
+
 _active_subprocesses = 0
 
 
@@ -63,7 +72,9 @@ def _is_order_lane(script: str) -> bool:
     return Path(script).name in _ORDER_LANE_SCRIPTS
 
 
-def _is_long_running(timeout: float) -> bool:
+def _is_long_running(script: str, timeout: float) -> bool:
+    if Path(script).name in _INTERACTIVE_LANE_SCRIPTS:
+        return False
     return timeout > LONG_RUNNING_TIMEOUT_S
 
 
@@ -80,13 +91,13 @@ def _long_running_lane_capacity() -> int:
 def _lane_capacity(script: str, timeout: float) -> int:
     if _is_order_lane(script):
         return MAX_CONCURRENT_SUBPROCESSES
-    if _is_long_running(timeout):
+    if _is_long_running(script, timeout):
         return _long_running_lane_capacity()
     return _general_lane_capacity()
 
 
 def _admission_wait_s(script: str, timeout: float) -> float:
-    if _is_long_running(timeout):
+    if _is_long_running(script, timeout):
         return 0.0
     return min(SUBPROCESS_ADMISSION_WAIT_S, float(timeout))
 
