@@ -24,6 +24,11 @@ function buildStaleNotice(data: ShareResponse): string | null {
   return `STALE DATA: this report reflects ${dataDate}; the latest closed session is ${expected}. Wait for the data sync to land before posting.`;
 }
 
+function liveReadingBody(live: unknown | null): RequestInit {
+  if (live == null) return {};
+  return { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ live }) };
+}
+
 type ShareReportModalProps = {
   modalTitle: string;
   shareEndpoint: string;
@@ -33,6 +38,8 @@ type ShareReportModalProps = {
   enabled?: boolean;
   shareContentTitle?: string;
   iconSize?: number;
+  /** Read at click time: the live reading the page is showing, or null for the snapshot. */
+  shareBody?: () => unknown | null;
 };
 
 export default function ShareReportModal({
@@ -44,6 +51,7 @@ export default function ShareReportModal({
   enabled = true,
   shareContentTitle = "Share Preview",
   iconSize = 11,
+  shareBody,
 }: ShareReportModalProps) {
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -85,7 +93,11 @@ export default function ShareReportModal({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SHARE_TIMEOUT_MS);
     try {
-      const res = await fetch(shareEndpoint, { method: "POST", signal: controller.signal });
+      const res = await fetch(shareEndpoint, {
+        method: "POST",
+        signal: controller.signal,
+        ...liveReadingBody(shareBody?.() ?? null),
+      });
       if (!res.ok) {
         setShareError(await readErrorResponse(res, "The share image could not be prepared. Try again."));
         return;
