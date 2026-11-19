@@ -1435,5 +1435,5 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 
 | ID | Status | Evidence |
 |---|---|---|
-| T-595 | DONE | Old daily fill at 17:00 ET: 1 failed / 21 passed (`due` true vs false, `/tmp/t595-red.log`). Green: 22 passed; related rail files 106 passed ×2. e2e countdown `Due`, `data-state="due"`, fill `100.00`. Product source unchanged. Playwright left to CI. |
-| T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`expected 1 to be 2` at 5 minutes, `/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3. Product source unchanged. |
+| T-595 | DONE | Old daily fill at 17:00 ET: 1 failed / 21 passed (`due` true vs false, `/tmp/t595-red.log`). Green: 22 passed; related rail files 106 passed ×2. e2e countdown `Due`, `data-state="due"`, fill `100.00`. Product source unchanged. Playwright left to CI. Closing rounds: root pytest credentials xdist flake then serial 2 passed each round; 19,920 passed / 10 skipped / 40 subtests. Vitest 11,664 passed / 21 skipped / 1,211 files each round. Cloud 58 failed / 4,292 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `45660cd1c`. |
+| T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`expected 1 to be 2` at 5 minutes, `/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3. Product source unchanged. Closing rounds: same as T-595. |

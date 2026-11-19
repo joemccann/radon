@@ -12489,3 +12489,13 @@ Audited through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3 on 2026-11-19 — 2 ne
 |---|---|---|
 | T-595 | DONE | Old daily fill: 1 failed / 21 passed (`/tmp/t595-red.log`, `due` true vs false). Corrected pin: 22 passed (`/tmp/t595-green.log`); delta Vitest 106 passed ×2. Product source unchanged. Playwright e2e left to CI (no browser here). |
 | T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3 (`/tmp/t596-green.log`). Product source unchanged. |
+
+### Closing gates 2026-11-19
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest EXIT 1 each round on the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (2 passed each). Vitest EXIT 0 each round. Cloud EXIT 1 each round. FAILED node list matches origin/main standing at `45660cd1c` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (174.75s) | 11,664 passed / 21 skipped / 1,211 files (81.71s) | 58 failed / 4,292 passed / 23 skipped (952.83s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (145.46s) | 11,664 passed / 21 skipped / 1,211 files (94.66s) | 58 failed / 4,292 passed / 23 skipped (1017.59s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (240.35s) | 11,664 passed / 21 skipped / 1,211 files (153.77s) | 58 failed / 4,292 passed / 23 skipped (1184.43s) | 0 added / 0 removed |
