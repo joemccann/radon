@@ -33,8 +33,12 @@ jobs:
       - name: Verify model-only SSH and read-only export boundary
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends openssh-server
+          # CIP-032: ubuntu-24.04 already has sshd (43.6s apt no-op on
+          # 44386917407, 66.6s on 44357745454). Install only on a miss.
+          if [ ! -f /usr/sbin/sshd ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends openssh-server
+          fi
           sudo env GITHUB_ACTIONS=true python3 -I cloud/scripts/check_model_transport.py
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
@@ -247,8 +251,12 @@ jobs:
       - name: Verify model-only SSH and read-only export boundary
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends openssh-server
+          # CIP-032: ubuntu-24.04 already has sshd (43.6s apt no-op on
+          # 44386917407, 66.6s on 44357745454). Install only on a miss.
+          if [ ! -f /usr/sbin/sshd ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends openssh-server
+          fi
           sudo env GITHUB_ACTIONS=true python3 -I cloud/scripts/check_model_transport.py
       - name: Prepare build context
         run: cp docker/app/.dockerignore .dockerignore
