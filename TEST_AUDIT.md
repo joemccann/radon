@@ -12458,3 +12458,29 @@ Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node 
 | 1 | 19,823 passed / 10 skipped / 40 subtests (101.54s) | 11,631 passed / 21 skipped / 1,209 files (49.96s) | 59 failed / 4,284 passed / 23 skipped (964.70s) | 1 added (`test_a_severed_post_is_not_replayed`) |
 | 2 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (156.49s) | 11,631 passed / 21 skipped / 1,209 files (101.16s) | 58 failed / 4,285 passed / 23 skipped (981.70s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (152.75s) | 11,631 passed / 21 skipped / 1,209 files (102.79s) | 58 failed / 4,285 passed / 23 skipped (972.75s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-20
+
+Range `45660cd1c9e352ee799ea4f721e3c7933ee4f6a3..1ef4fdff5dc2cabcf092756b4ad710e383502c52`: 15 commits / 37 paths. Newest trusted checkpoint on issue #83 is `audited-through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3` (2026-11-19). It carried no open verified finding. Open `testing/` PRs: #1618 T-595 T-596, #1606 T-594, #1598 T-591 T-592 T-593 — skipped, not reallocated. Highest id T-596. Next id T-597.
+
+`rg` confirmed importers for the delta sources: `scripts/api/tests/test_ib_pool_connect_loop.py` for the connect-loop pool call; `scripts/tests/test_index_live_rows.py` for SKEW `carry`; `scripts/api/tests/test_regime_share_route.py` and `scripts/tests/test_regime_share_live_overlay.py` for the overlay generator; `web/tests/share-report-live-reading.test.tsx` for the modal POST; `web/tests/regime-share-live-reading-route.test.ts` for the Next proxy; `scripts/api/tests/test_subprocess_interactive_lane.py` for the share-generator lane; `scripts/tests/test_share_cards_dir.py` and `web/tests/share-card-regular-file.test.ts` for `O_NOFOLLOW`. Inverse: `web/components/RegimePanel.tsx:225` and `:235` now pass `shareBody={readShareReading}`, but `web/tests/regime-share.test.ts:107-143` greps `ShareReportModal` / `shareEndpoint` and never `shareBody`, and `web/tests/regime-cri-chart-layout.test.tsx:45` mocks the modal to `null`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. One new `@unittest.skipUnless(_chromium_available())` on the real-render screenshot case (`scripts/tests/test_card_screenshot.py:115`); the fake-browser cases always run. No `.only` / `xfail`. Re-triaged `TEST_LOG.md`: T-591 / T-592 remain DONE on main. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta-touched files 3×: Python 69 passed / 1 skipped; Vitest 76 passed / 9 files.
+
+Not filed: remaining source-greps in `regime-share.test.ts` (pre-existing; the new API has executing siblings except the owner wiring, which is T-597); Chromium skipUnless (environment-conditional real render); overlay `triggered` recompute keeps snapshot `realized_vol_gt_25` (`test_regime_share_live_overlay.py:66`).
+
+### T-597 — P1 — RegimePanel share wiring is untested, so dropping the live reading stays green
+
+`web/components/RegimePanel.tsx:225` and `:235` pass `shareBody={readShareReading}` so Share to X posts the live CRI the hero shows (`web/lib/regimeShareReading.ts:28`, `web/components/ShareReportModal.tsx:99`). The modal, Next route, FastAPI overlay, and generator each have executing tests. The owner does not. Mutation: delete both `shareBody={readShareReading}` props. Existing four files 26 passed (`/tmp/t597-existing-mut.log`). New wire test: 1 failed / 1 passed (`/tmp/t597-red.log`, POST `/api/regime/share` with no body while the hero is live 43.9).
+
+Acceptance: render `RegimePanel` with real `ShareReportModal` and live VIX/VVIX/SPY ticks. Share to X must POST `{live}` whose `cri.score` is `computeCri` of those ticks, not the scan snapshot 48. Empty `prices` posts no body. Reverting the panel to omit `shareBody` fails the live case.
+
+Audited through: 1ef4fdff5dc2cabcf092756b4ad710e383502c52 on 2026-11-20 — 1 new finding
+
+## Remediation 2026-11-20
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-597 | DONE | shareBody mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t597-red.log`). Restored both props. Green: 2 passed (`/tmp/t597-green.log`) ×3. Product source unchanged. |
