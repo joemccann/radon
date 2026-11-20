@@ -46,7 +46,9 @@ Descriptive only. No forward-return claim anywhere in copy.
 
 - **Cboe official delayed-quotes historical JSON**:
   `https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json`
-  (no auth, ~1.7 MB, honest UA `radon/2.0`). Shape:
+  (no auth, ~1.7 MB, honest UA `radon/2.0`, `Referer: https://www.cboe.com/`).
+  Cloudflare returns HTTP 403 for this path when Referer is absent. A browser
+  User-Agent is not a substitute. Shape:
   `{"timestamp": "2026-09-15 13:01:45", "symbol": "_SPX", "data": [{"date": "YYYY-MM-DD", "open": "…", "high": "…", "low": "…", "close": "…", "volume": "0.0"}]}`,
   strings, ascending, 13,033 rows 1975-01-02..latest. Same CDN path family already
   used for `_COR1M` in `scripts/cri_scan.py`.
