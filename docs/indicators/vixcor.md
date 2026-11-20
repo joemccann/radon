@@ -855,9 +855,10 @@ const MISSING_VIXCOR = {
   forward_stats: null,
 };
 
-// radon-vixcor.timer fires daily at 02:35 UTC including weekends (Cboe
-// re-touch days heartbeat via conditional GET), so a snapshot older than
-// two days means the writer is down.
+// radon-vixcor.timer fires every 5 minutes 09:00-15:55 ET on weekdays (each tick
+// refreshes the vixcor:live provisional row) and daily at 02:35 UTC including
+// weekends (Cboe re-touch days heartbeat via conditional GET), so a snapshot
+// older than two days means the writer is down.
 const VIXCOR_MAX_AGE_MS = 48 * 60 * 60_000;
 ```
 
@@ -1017,7 +1018,7 @@ import type { VixcorData } from "./vixcor";
 
 const VIXCOR_SYNC_CONFIG = {
   endpoint: "/api/vixcor",
-  interval: 3_600_000,
+  interval: 300_000,
   hasPost: false,
   extractTimestamp: (d: VixcorData) => d.scan_time,
 };
@@ -1428,7 +1429,7 @@ with a real in-memory `@libsql/client` seeded from the migration):
     anywhere in the component.
 
 **`web/tests/vixcor-hook.test.tsx`:** endpoint `/api/vixcor`, interval
-`3_600_000`, `hasPost: false`, `extractTimestamp` reads `scan_time`.
+`300_000`, `hasPost: false`, `extractTimestamp` reads `scan_time`.
 
 **Lockstep pins:**
 
