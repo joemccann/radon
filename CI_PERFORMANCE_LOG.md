@@ -3026,3 +3026,55 @@ was red (2 failed: holiday COPY missing) then green (2 passed).
 Related `test_app_images.py` + `test_app_plane_cutover_safety.py` 109
 passed / 2 skipped. Full suites, Vitest, Docker builds, and workflow
 lint are left to PR CI.
+
+## CIP-036 - cache-from the previous node SHA on rebuilds (2026-11-20) - VALIDATING
+
+The node job already reads `radon-node:buildcache` plus GHA scope.
+Scripts-only mixed run 44594349045 still missed earlier layers:
+buildcache imported in 0.8s, then playwright install ran 16.9s and
+`bun run build` ran 24.7s. Actions cache listing is uv/bun only.
+
+Evidence, attempt-1 mixed run
+[44594349045](https://github.com/joemccann/radon/actions/runs/44594349045)
+job 135808679573. Queue is excluded from the gain. CIP-035 moves
+`COPY scripts/` after the Next build so those layers can hit; this
+experiment supplies the previous 40-hex SHA image as cache-from so
+they actually do. A missing, all-zero, or non-40-hex
+`github.event.before` keeps buildcache only. `:latest` is not a cache
+donor. Ihash retags are a different class.
+
+Expected: playwright 16.9s plus the CIP-035 Next layer reuse when
+holidays and `web/` are unchanged, about 40s of the 171s node job.
+After CIP-034 the node job is more often the image authorizer.
+Runner minutes fall with the skipped install and compile.
+
+**Change.** Node `Select image cache` prepends
+`ghcr.io/joemccann/radon-node:${{ github.event.before }}` when that
+value is a real 40-hex SHA, then the existing buildcache inspect and
+GHA scope. Exact SHA tags, health, recovery, rollback, and the
+40-second stability window stay. No `needs` edge, test inventory,
+coverage, or exact-SHA image admission change. Python cache selection
+is unchanged.
+
+**Safety and revert trigger.** Fail closed to build. Revert if a
+scripts-only main rebuild with unchanged bun.lock / playwright still
+runs `playwright install chromium`, if a pull request or first-push
+empty before SHA is used as a registry ref, if `:latest` becomes a
+cache or deploy donor, or if deploy no longer waits for the node
+image.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build node image | 171s | pending | TBD until 5 samples |
+
+Before is the node-image job wall on run 44594349045 (job
+135808679573). Acceptance remains five comparable mixed scripts-only
+deploys, before and after: same-class p50 at least 10% and 15s
+faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher. The first after-run still
+measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip036_node_image_cache_from.py`
+was red (1 failed: missing BEFORE_SHA) then green (3 passed). Related
+image workflow contracts 115 passed / 2 skipped. YAML parses. Full
+suites, Vitest, Docker builds, and workflow lint are left to PR CI.

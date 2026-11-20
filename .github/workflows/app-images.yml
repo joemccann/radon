@@ -543,17 +543,31 @@ jobs:
         env:
           IMAGE_REPO: ghcr.io/joemccann/radon-node
           GHA_SCOPE: radon-node
+          # CIP-036: scripts-only rebuild 44594349045 imported buildcache
+          # in 0.8s then still ran playwright (16.9s) and bun run build
+          # (24.7s). The previous main SHA image already has those layers.
+          # A missing, all-zero, or non-40-hex before SHA omits that line
+          # (PR / first push) and keeps buildcache. :latest is not a cache donor.
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           # Same boundary as the python image: do not hold the exact-SHA
           # publish on a GHA cache upload, and PRs export no cache at all.
           # buildcache is not a deploy tag.
+          sha_from=""
+          if printf '%s' "${BEFORE_SHA:-}" | grep -Eq '^[0-9a-f]{40}$' \
+              && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            sha_from="type=registry,ref=${IMAGE_REPO}:${BEFORE_SHA}"
+          fi
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
             cache_from="type=gha,scope=${GHA_SCOPE}"
             if docker buildx imagetools inspect "${IMAGE_REPO}:buildcache" >/dev/null 2>&1; then
               cache_from="type=registry,ref=${IMAGE_REPO}:buildcache"$'\n'"type=gha,scope=${GHA_SCOPE}"
+            fi
+            if [ -n "$sha_from" ]; then
+              cache_from="${sha_from}"$'\n'"${cache_from}"
             fi
             {
               echo "cache_from<<EOF"
@@ -564,6 +578,9 @@ jobs:
           else
             {
               echo "cache_from<<EOF"
+              if [ -n "$sha_from" ]; then
+                printf '%s\n' "$sha_from"
+              fi
               echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
