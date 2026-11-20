@@ -26,7 +26,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.card_screenshot import screenshot_card, shared_browser  # noqa: E402
 
 DATA_DIR = PROJECT_ROOT / "data"
 CACHE_PATH = DATA_DIR / "vcg.json"
@@ -533,18 +533,19 @@ def main():
     card_html_paths = []
     png_paths = []
 
-    for i, gen in enumerate(generators, 1):
-        html_content = gen(data, ds)
-        html_path = str(REPORTS_DIR / f"tweet-vcg-{ds}-card-{i}.html")
-        with open(html_path, "w") as f:
-            f.write(html_content)
-        card_html_paths.append(html_path)
+    with shared_browser():
+        for i, gen in enumerate(generators, 1):
+            html_content = gen(data, ds)
+            html_path = str(REPORTS_DIR / f"tweet-vcg-{ds}-card-{i}.html")
+            with open(html_path, "w") as f:
+                f.write(html_content)
+            card_html_paths.append(html_path)
 
-        png_path = str(REPORTS_DIR / f"tweet-vcg-{ds}-card-{i}.png")
-        ok = screenshot_card(html_path, png_path)
-        if not ok:
-            print(f"Warning: Screenshot failed for card {i}", file=sys.stderr)
-        png_paths.append(png_path if ok else "")
+            png_path = str(REPORTS_DIR / f"tweet-vcg-{ds}-card-{i}.png")
+            ok = screenshot_card(html_path, png_path)
+            if not ok:
+                print(f"Warning: Screenshot failed for card {i}", file=sys.stderr)
+            png_paths.append(png_path if ok else "")
 
     cards_b64 = []
     for p in png_paths:
