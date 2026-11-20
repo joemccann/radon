@@ -1435,4 +1435,4 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 
 | ID | Status | Evidence |
 |---|---|---|
-| T-597 | DONE | shareBody mutation: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/regime/share` with no body while the hero is live). Restored both props. Green 2 passed ×3. Product source unchanged. |
+| T-597 | DONE | shareBody mutation: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/regime/share` with no body while the hero is live). Restored both props. Green 2 passed ×3. Product source unchanged. Closing rounds: root pytest r1 19,956 passed / 11 skipped; r2 credentials xdist flake then serial 2 passed; r3 19,956 passed / 11 skipped. Vitest 11,678 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,292 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `1ef4fdff5`. |

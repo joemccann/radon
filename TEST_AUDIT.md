@@ -12484,3 +12484,13 @@ Audited through: 1ef4fdff5dc2cabcf092756b4ad710e383502c52 on 2026-11-20 — 1 ne
 | Finding | Status | Red / green evidence |
 |---|---|---|
 | T-597 | DONE | shareBody mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t597-red.log`). Restored both props. Green: 2 passed (`/tmp/t597-green.log`) ×3. Product source unchanged. |
+
+### Closing gates 2026-11-20
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1 and r3 EXIT 0. r2 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after an isolated retry (2 passed, `/tmp/pytest-2-serial.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round. Sorted FAILED lists match the origin/main worktree at `1ef4fdff5` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 19,956 passed / 11 skipped / 40 subtests (108.77s) | 11,678 passed / 21 skipped / 1,215 files (48.56s) | 58 failed / 4,292 passed / 23 skipped (938.08s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 2 passed; 19,955 passed / 11 skipped / 40 subtests (158.54s) | 11,678 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,292 passed / 23 skipped (965.27s) | 0 added / 0 removed |
+| 3 | 19,956 passed / 11 skipped / 40 subtests (153.02s) | 11,678 passed / 21 skipped / 1,215 files (96.36s) | 58 failed / 4,292 passed / 23 skipped (1,162.88s) | 0 added / 0 removed |
