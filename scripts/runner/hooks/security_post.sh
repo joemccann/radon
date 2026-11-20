@@ -159,40 +159,67 @@ pr_number_in_repo() {
 # `//` only falls through on null, so reading the conclusion directly left an
 # EMPTY token that bash word splitting then dropped -- `SUCCESS,` verified as
 # wholly green while a check was still running. Every entry yields a
-# non-empty token now. A claim of ZERO PRs is accepted only by
+# non-empty token now. An all-green rollup is still PENDING when it is a
+# SUBSET of the suite: the PR-body check lands in seconds, long before the
+# pytest and Vitest shards register on the head, so every name the clone's
+# workflow files promise must be present (the same rule nightly_deliver's
+# classify_checks applies in the watch step). Unreadable expectations are not
+# a license: nothing verifies. A claim of ZERO PRs is accepted only by
 # no_loop_pr_exists: the listing ran, came back short of the page limit, and
 # held no same-repo PR on this prefix. A failed query or a full page is not
 # absence.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
-  local tok n fields state branch cross head rollup conclusion count=0
+  local tok n fields state branch cross head rollup names conclusion expected count=0
   if [[ "${2:-}" == 0 ]]; then
     no_loop_pr_exists
     return
   fi
+  # The expectations come from the workflow blobs committed at the head the
+  # PR was verified at, never from the clone's working tree or index, both of
+  # which the agent phase controls. An unknown commit verifies nothing.
+  [[ -n "${3:-}" ]] || return 1
+  expected="$(expected_check_names "$3")" || return 1
+  [[ -n "$expected" ]] || return 1
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
         n="$(pr_number_in_repo "$tok")" || return 1
         fields="$(net_bounded "$GH" pr view "$n" -R "$GH_REPO" \
           --json state,headRefName,isCrossRepository,headRefOid,statusCheckRollup \
-          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | ((.status // "") | ascii_upcase) as $st | ((.conclusion // "") | ascii_upcase) as $cc | ((.state // "") | ascii_upcase) as $se | if $st != "" and $st != "COMPLETED" then "PENDING" elif $cc != "" then $cc elif $se != "" then $se else "PENDING" end] | join(","))] | join(" ")' \
+          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | ((.status // "") | ascii_upcase) as $st | ((.conclusion // "") | ascii_upcase) as $cc | ((.state // "") | ascii_upcase) as $se | if $st != "" and $st != "COMPLETED" then "PENDING" elif $cc != "" then $cc elif $se != "" then $se else "PENDING" end] | join(",")), ([.statusCheckRollup[]? | ((.name // .context // "") | gsub("\\s+"; ""))] | join(","))] | join(" ")' \
           2>/dev/null || true)"
-        read -r state branch cross head rollup <<< "$fields"
+        read -r state branch cross head rollup names <<< "$fields"
         [[ "$state" == OPEN && "$cross" == false ]] || return 1
         [[ "$branch" == "$PR_BRANCH_PREFIX"* ]] || return 1
         [[ -n "$head" && "$head" == "$3" ]] || return 1
-        [[ -n "$rollup" ]] || return 1
+        [[ -n "$rollup" && -n "$names" ]] || return 1
         for conclusion in ${rollup//,/ }; do
           case "$conclusion" in
             SUCCESS|SKIPPED|NEUTRAL) ;;
             *) return 1 ;;
           esac
         done
+        for tok in $expected; do
+          [[ ",$names," == *",$tok,"* ]] || return 1
+        done
         count=$((count + 1)) ;;
     esac
   done
   [[ "$count" -gt 0 && "$count" == "$2" ]]
+}
+
+# The check names the workflow files committed at $1 promise on every PR
+# head, one whitespace-stripped token per line (names carry spaces; the
+# rollup side is stripped the same way). Non-zero when they cannot be read.
+expected_check_names() {
+  local out line
+  out="$("$TIMEOUT_BIN" 30 "$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py" \
+    expected-checks --root "$WORK" --rev "$1" 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    line="${line//[[:space:]]/}"
+    [[ -n "$line" ]] && printf '%s\n' "$line"
+  done <<< "$out"
 }
 
 # The head SHA the record's green was verified at, or "" (DS-2026-10-21-10).
@@ -389,22 +416,24 @@ _phase_clock() {
 }
 
 # Last lines of this phase's log, secret-scrubbed, or a fixed omission line.
-# A failed scrub publishes no tail.
+# A failed scrub publishes no tail. The scrub runs over the WHOLE log and the
+# tail is cut from its output, never the other way round: a cut can drop a
+# block-scalar header or an assignment's key while keeping the opaque value,
+# and without that context no rule recognises the value as a secret.
 _sanitize_log_tail() {
-  local raw clipped cleaned
+  local cleaned clipped
   if [[ ! -f "${PHASE_LOG:-}" || -L "${PHASE_LOG:-}" ]]; then
     printf '%s\n' "(no phase log)"
     return 0
   fi
-  raw="$(tail -n 80 "$PHASE_LOG" 2>/dev/null || true)"
-  clipped="$(printf '%s\n' "$raw" | tail -c 4000)"
-  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
-  clipped="${clipped//\`\`\`/[fence]}"
-  if ! cleaned="$(printf '%s\n' "$clipped" | _redact_secret_classes | _redact_diag_lines)"; then
+  if ! cleaned="$(_redact_secret_classes <"$PHASE_LOG" | _redact_diag_lines)"; then
     printf '%s\n' "(log tail omitted: redaction failed)"
     return 0
   fi
-  printf '%s\n' "$cleaned"
+  clipped="$(printf '%s\n' "$cleaned" | tail -n 80 | tail -c 4000)"
+  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
+  clipped="${clipped//\`\`\`/[fence]}"
+  printf '%s\n' "$clipped"
 }
 
 # The agent writes latest-report-<phase>.md. A phase with no file newer than
