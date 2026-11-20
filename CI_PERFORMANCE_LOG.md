@@ -2907,3 +2907,61 @@ than 20% higher. Status `VALIDATING`.
 green (4 passed). Related prune/runtime pull contracts 62 passed / 135
 deselected. `bash -n` on the runtime script. Full suites, Vitest, Docker
 builds, and workflow lint are left to PR CI.
+
+## CIP-034 - cache-from the previous gateway SHA on scripts-only rebuilds (2026-11-20) - VALIDATING
+
+Scripts-only mixed rebuilds still pip-install torch and re-export the
+gateway even though CIP-028 put the lock before vendor CLIs and
+runtime-deps layers are CACHED. The GHA docker cache is gone (Actions
+cache listing is uv/bun only). `buildcache` imported in 0.3s and did
+not supply the torch layer.
+
+Evidence, attempt-1 mixed scripts-rebuild gateway steps (`gh run view
+--json jobs` plus job logs). Queue 2–3s is excluded from the gain:
+
+| Run | Clock | Gateway job | Torch pip | Export layers | Last required gate |
+|---|---|---|---|---|---|
+| [44612924566](https://github.com/joemccann/radon/actions/runs/44612924566) | 543s | 206s (job 135874396489) | 36.8s | 49.8s | gateway |
+| [44610736666](https://github.com/joemccann/radon/actions/runs/44610736666) | 631s | 202s | present | present | gateway |
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | 591s | 211s | present | present | gateway |
+| [43996903765](https://github.com/joemccann/radon/actions/runs/43996903765) | 760s | 228s | 43.6s | 50.5s | gateway |
+
+Newest mixed scripts-rebuild p50 clock among those gateway-wall runs is
+591s (n=4; 10% is 59s). On 44612924566 torch + export are 86.6s of the
+171s build step after Exact app images authorized deploy. Cache-from
+the previous 40-hex SHA image is expected to reuse torch and skip the
+full layer export, about 60–80s of the 206s gateway job. A missing,
+all-zero, or non-40-hex `github.event.before` keeps buildcache only.
+`:latest` is not a cache donor. Ihash retags (gateway 26–40s) are a
+different class. Runner minutes fall with the skipped pip.
+
+**Change.** Gateway `cache-from` starts with
+`ghcr.io/joemccann/radon-model-gateway:${{ github.event.before }}` when
+that value is a real 40-hex SHA, then the existing buildcache and GHA
+scopes. Exact SHA tags, Darwin-before-publish, CIP-026 `pbounds-` skip,
+CIP-029 skip-load, ihash receipts, health, recovery, rollback, and the
+40-second stability window stay. No `needs` edge, test inventory,
+coverage, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Fail closed to build. Revert if a
+scripts-only main rebuild with an unchanged torch lock still runs
+`pip install ... torch==2.12.1+cpu`, if a pull request or first-push
+empty before SHA is used as a registry ref, if `:latest` becomes a
+cache or deploy donor, or if deploy no longer waits for gateway.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 206s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 44612924566 (job
+135874396489). Acceptance remains five comparable mixed scripts-rebuild
+deploys whose torch lock is unchanged, before and after: same-class p50
+at least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no
+worse than 10%; runner minutes no more than 20% higher. The first
+after-run still measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip034_gateway_image_cache_from.py`
+was red (3 failed: missing previous-SHA cache step) then green (3
+passed). Related cloud gateway image contracts 32 passed. YAML parses.
+Full suites, Vitest, Docker builds, and workflow lint are left to PR
+CI.
