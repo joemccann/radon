@@ -25,6 +25,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -43,6 +44,8 @@ try:
     from db import writer  # type: ignore[attr-defined]
 except ImportError:  # pragma: no cover — tests inject a FakeWriter
     writer = None  # type: ignore[assignment]
+
+from utils import index_live  # noqa: E402
 
 # The indicator's math and its named constants both live in the pure module;
 # they are re-exported here because docs/indicators/vixcor.md section B.3
@@ -77,6 +80,13 @@ COR_JSON = _PROJECT_DIR / "data" / "cor.json"
 VIX_SYMBOL = "VIX"
 VIX_SOURCE = "cboe"
 SERVICE = "vixcor"
+# Intraday ticks publish today's provisional row in this small snapshot; the
+# official snapshot is never rewritten for it (same contract as vixts:live).
+LIVE_SERVICE = index_live.live_service(SERVICE)
+COR3M_SYMBOL = "COR3M"
+LIVE_SYMBOLS = (VIX_SYMBOL, COR3M_SYMBOL)
+SESSION_LOOKBACK_DAYS = 14
+_ET = ZoneInfo("America/New_York")
 
 PARENT_LAG_GRACE_SESSIONS = 2   # cor3m may be this far behind before it is an error
 PARENT_READ_PAGE_ROWS = 2000    # keyset page size for the cor_history read
@@ -208,11 +218,14 @@ def _write_db(
     rows_changed: bool,
     vix_tail: Optional[list[dict[str, Any]]] = None,
     health_error: Optional[dict[str, Any]] = None,
+    snapshot: bool = True,
 ) -> None:
     """Snapshot + heartbeat every cycle; row upserts only when the source moved.
 
     The snapshot and heartbeat run even on the 304 path so a silently dead
     writer trips the staleness banner (feedback_service_health_heartbeat).
+    ``snapshot=False`` is the unchanged-source live tick: heartbeat only, the
+    official snapshot stays as written (it is re-aged at least every 12h).
     """
     if writer is None:
         return
@@ -231,7 +244,8 @@ def _write_db(
             "class": "db_write_failed",
         }
     try:
-        writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+        if snapshot:
+            writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
         writer.record_service_health(
             SERVICE,
             "ok" if (health_error is None and row_error is None) else "error",
@@ -471,8 +485,13 @@ def run(
         if cached and text is None:
             print("[vixcor] all sources unchanged (304); refreshing snapshot only", file=sys.stderr)
             payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
-            _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
-            persist_json(payload)
+            live = _live_payload(payload, scan_time=scan_time, now=now)
+            if live["row"] is not None and not index_live.snapshot_is_old(cached.get("scan_time"), now):
+                _write_db(payload, scan_time, rows_changed=False, health_error=health_error, snapshot=False)
+            else:
+                _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
+                persist_json(payload)
+            _write_live(live, scan_time)
             return payload
 
         if text is None:
@@ -523,10 +542,93 @@ def run(
             health_error=health_error,
         )
         persist_json(payload)
+        _write_live(_live_payload(payload, scan_time=scan_time, now=now), scan_time)
         return payload
     except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise
+
+
+# ── intraday provisional row (vixcor:live) ────────────────────────
+
+def _previous_session(session: str) -> Optional[str]:
+    from utils.market_calendar import is_trading_day_et
+
+    noon = datetime.fromisoformat(session).replace(hour=12, tzinfo=_ET)
+    for back in range(1, SESSION_LOOKBACK_DAYS + 1):
+        candidate = noon - timedelta(days=back)
+        if is_trading_day_et(candidate):
+            return candidate.date().isoformat()
+    return None
+
+
+def _extends_series(official_as_of: Optional[str], session: str, now: datetime) -> bool:
+    """True when ``session`` is the very next session after the official close.
+
+    A gap is never bridged: pairing today with a series missing a session
+    would shift every window by one row (same ban as forward filling).
+    """
+    if not official_as_of or not official_as_of < session <= index_live.et_today(now):
+        return False
+    return _previous_session(session) == official_as_of
+
+
+def _today_extends_series(payload: dict[str, Any], now: datetime) -> bool:
+    from utils.market_calendar import is_trading_day_et
+
+    return is_trading_day_et(now) and _extends_series(payload.get("as_of"), index_live.et_today(now), now)
+
+
+def _fetch_live(now: datetime) -> Optional[dict[str, Any]]:
+    return index_live.fetch_live(LIVE_SYMBOLS, now, try_ib=index_live.ib_allowed(), label=SERVICE)
+
+
+def _provisional_series(payload: dict[str, Any], live: dict[str, Any]) -> list[dict[str, Any]]:
+    joined = [
+        {"date": row["date"], "vix_close": row["vix_close"], "cor3m_close": row["cor3m_close"]}
+        for row in payload.get("series") or []
+    ]
+    values = live["values"]
+    joined.append({"date": live["date"], "vix_close": values[VIX_SYMBOL], "cor3m_close": values[COR3M_SYMBOL]})
+    return compute_corr_series(joined)
+
+
+def build_live_snapshot(
+    payload: dict[str, Any], live: Optional[dict[str, Any]], *, scan_time: str, now: datetime
+) -> dict[str, Any]:
+    """Provisional row + recomputed card for the session after the official close, or row None."""
+    if not live or not _extends_series(payload.get("as_of"), live["date"], now):
+        return {"scan_time": scan_time, "row": None, "current": None, "source": None, "quote_time": None}
+    series = _provisional_series(payload, live)
+    episodes = attach_forward_drawups(series, detect_episodes(series))
+    latest = series[-1]
+    return {
+        "scan_time": scan_time,
+        "row": {**latest, "episode": latest["date"] in episode_membership(series, episodes)},
+        "current": build_current(series, episodes, compute_stats(series)),
+        "source": live["source"],
+        "quote_time": live["quote_time"],
+    }
+
+
+def _live_payload(payload: dict[str, Any], *, scan_time: str, now: datetime) -> dict[str, Any]:
+    """Advisory: a failed live read or computation never fails the official run."""
+    try:
+        live = _fetch_live(now) if _today_extends_series(payload, now) else None
+        return build_live_snapshot(payload, live, scan_time=scan_time, now=now)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[vixcor] live row non-fatal: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return build_live_snapshot(payload, None, scan_time=scan_time, now=now)
+
+
+def _write_live(live: dict[str, Any], scan_time: str) -> None:
+    """Only a real row is written; the route ignores a row not newer than the official close."""
+    if writer is None or live["row"] is None:
+        return
+    try:
+        writer.upsert_scan_snapshot(LIVE_SERVICE, scan_time, live)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[vixcor] live snapshot write non-fatal: {exc}", file=sys.stderr)
 
 
 def _print_summary(payload: dict[str, Any]) -> None:

@@ -10,6 +10,10 @@ from typing import Any, Optional
 _SECRET_KEY = (
     r"(?:api[_-]?key|access[_-]?key|secret[_-]?key|access[_-]?token"
     r"|client[_-]?secret|password|passwd|secret|token|_pass|_pwd"
+    # Named key aliases the structural rules already knew; a plain quoted or
+    # bare assignment under them survived (DS-2026-11-18). A generic `_key`
+    # stays off the single-line rules so `primary_key = "id"` is prose.
+    r"|credential|(?:signing|webhook|private|encryption|service)[_-]?key"
     # `cookie` belongs in the KEY alternation, not only in the line-oriented
     # header rule below: a serialized header (`{"Cookie": "..."}`) has no colon
     # directly after the name, so the header rule missed it and no generic
@@ -133,8 +137,14 @@ def build_block_scalar_re(key_pattern: str) -> "re.Pattern[str]":
 # values are the gap: a block or triple-quoted body is not on the header
 # line the hook rewrites. `[_-]key` matches `signing_key` and `webhook-key`.
 # `authorization` is here for the same reason: its single-line rule below read
-# a triple delimiter as the whole value and left the body in place.
-_MULTILINE_KEY = rf"(?:{_SECRET_KEY}|authorization|credential|[_-]key)"
+# a triple delimiter as the whole value and left the body in place. A bare
+# `pass` / `auth` is in the hook's line alphabet too; the block and
+# triple-quote shapes that follow carry no prose risk (`tests pass: 3` has
+# no indicator), so both names belong here even though the single-line
+# rules keep the underscore form. `author` and `passage` are prose, not keys.
+_MULTILINE_KEY = (
+    rf"(?:{_SECRET_KEY}|pass(?!age|ing|ed)|auth(?!or)|authorization|credential|[_-]key)"
+)
 
 # The key alternation carries no prefix or suffix run of its own, and the
 # block rule is line-anchored, so an ordinary `db_password` or `UW_TOKEN`
@@ -301,7 +311,10 @@ _HEAD_GAP = r"(?:(?:(?<=[ \t])\#[^\r\n]*)?\r?\n[ \t]*(?:\#[^\r\n]*\r?\n[ \t]*)*)
 
 _ASSIGNMENT_HEAD = re.compile(
     # `\]?`: a subscript target, `os.environ['UW_TOKEN'] = ...`.
-    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}[\"']?\]?"
+    # An optional backslash before the closing quote: JSON serialized inside
+    # another string escapes the key's quote, and the key then never met its
+    # separator (DS-2026-11-18).
+    rf"[\"']?{_SECRET_KEY}{_KEY_SUFFIX}(?:\\?[\"'])?\]?"
     # A type annotation before the initializer, `NAME: str = ...`
     # (DS-2026-10-26-20); bounded, and only when an `=` follows it.
     # A string annotation (`NAME: "str" = ...`) is one too (DS-2026-10-27-11).
@@ -365,6 +378,15 @@ def _scan_value(text: str, pos: int, *, heredoc: bool = True) -> tuple[int, int,
             while following < length:
                 if text[following] in " \t":
                     following += 1
+                elif text.startswith("/*", following):
+                    # A block comment between concatenated literals is not
+                    # the end of the value; an unclosed one runs to the end.
+                    closing = text.find("*/", following + 2)
+                    following = length if closing == -1 else closing + 2
+                elif text.startswith("//", following):
+                    # A line comment ends at its line; the continuation rule
+                    # below then decides whether a `+` carries on.
+                    following = _end_of_line(text, following)
                 elif text[following] == "+" and not joined:
                     # Explicit concatenation, `"" + "<v>"`; one per gap.
                     joined = True
@@ -475,8 +497,27 @@ def _scan_quoted(text: str, index: int) -> tuple[int, int, str]:
     return body, length, delimiter
 
 
+# The start positions from which a close search over the CURRENT text already
+# failed, per (delimiter, grammar). ``body`` always follows an opening
+# delimiter, so every search is aligned the same way and a failure from one
+# start is a failure from every later one. Without this, one unterminated
+# secret value per line (`token = \\"v`) walked to the end of the input for
+# every later assignment: quadratic, 5.5s at 4,000 lines. The one shape the
+# memo reads differently is an empty literal (`""`) after such a failure,
+# which then runs to the end of its line: more redaction, never less.
+_NO_CLOSE_MEMO: dict = {"text": None, "fails": {}}
+
+
 def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool) -> Optional[int]:
     """Index of the delimiter that closes a quoted value opened at ``body``."""
+    memo = _NO_CLOSE_MEMO
+    if memo["text"] is not text:
+        memo["text"] = text
+        memo["fails"] = {}
+    key = (delimiter, backslash_escapes)
+    failed_from = memo["fails"].get(key)
+    if failed_from is not None and body >= failed_from:
+        return None
     quote = delimiter[0]
     cursor = body
     length = len(text)
@@ -491,6 +532,7 @@ def _find_close(text: str, body: int, delimiter: str, *, backslash_escapes: bool
         if text.startswith(delimiter, cursor):
             return cursor
         cursor += 1
+    memo["fails"][key] = body if failed_from is None else min(failed_from, body)
     return None
 
 
@@ -763,9 +805,11 @@ _SECRET_SCRUB_PATTERNS = _SPECIFIC_SCRUB_PATTERNS + _GENERIC_ASSIGNMENT_PATTERNS
 # credential word; the trailing run is bounded well above any real suffix
 # (`_PROD`). Detection is unchanged.
 _SECRET_LITERAL_ASSIGNMENT = re.compile(
-    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}[\"']?\]?\s*[:=]\s*"
-    # A quoted value may open on the key line and start on the next one.
-    r"(?:[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
+    # The key's closing quote may be escaped (JSON inside a string).
+    rf"[\"']?{_SECRET_KEY}[A-Za-z0-9_-]{{0,64}}(?:\\?[\"'])?\]?\s*[:=]\s*"
+    # A quoted value may open on the key line and start on the next one; its
+    # opening quote may be escaped the same way.
+    r"(?:\\?[\"'][ \t]*(?:\r?\n[ \t]*)?)?"
     # The value run is MAXIMAL (the first lookahead rejects its own alphabet,
     # so only one length is ever tried) and BOUNDED. An unbounded run with a
     # lookahead that rejected punctuation made every candidate rescan the
