@@ -340,7 +340,7 @@ class TestPortfolioOperations:
         client.connect(client_id=1)
         positions = client.get_positions()
 
-        mock_ib.positions.assert_called_once()
+        mock_ib.positions.assert_called()
         assert len(positions) == 2
         assert positions[0].contract.symbol == "AAPL"
 
@@ -384,8 +384,11 @@ class TestPortfolioOperations:
         # The refresh must happen BEFORE the cache read so the cache
         # contains the latest TWS state.
         mock_ib.reqPositions.assert_called_once()
-        mock_ib.sleep.assert_called()  # short drain wait
-        mock_ib.positions.assert_called_once()
+        # The blocking reqPositions proves positionEnd (DS-2026-11-20-01) and
+        # avgCost is valid, so the drain wait returns without a sleep step.
+        mock_ib.sleep.assert_not_called()
+        mock_ib.positions.assert_called()
+        assert client._positions_snapshot_ended is True
 
     @patch("clients.ib_client.IB")
     def test_get_positions_refresh_false_skips_reqPositions(self, MockIB):
