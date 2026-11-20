@@ -986,6 +986,7 @@ def main(argv=None):
                                   only_pr_head_sha=bridge.priority_head_sha)
         finally:
             bridge.flush_feedback(state.data["releases"])
+            bridge.close_settled_validation_prs()
         from operator_runtime_refresh import refresh
         refresh(github)
         print(json.dumps(asdict(result)))
