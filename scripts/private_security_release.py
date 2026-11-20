@@ -26,6 +26,7 @@ WORKFLOW_PATHS = tuple('.github/workflows/' + name for name in ('ci.yml', 'pr-bo
 
 
 MAX_FEEDBACK_BYTES = 131072
+PRIVATE_PR_PAGE = 100
 FEEDBACK_STATUSES = frozenset(('private-checks-failed', 'private-review-rejected', 'private-review-invalid',
     'public-checks-invalid', 'public-checks-failed', 'public-head-changed', 'public-pr-closed',
     'public-diff-invalid', 'public-review-rejected', 'public-review-invalid', 'released'))
@@ -780,6 +781,37 @@ class PrivateReleaseBridge:
             if self._read_feedback(existing, base, head) != value: raise PermissionError('immutable feedback ref differs')
             data['feedback_published'] = existing
             self._replace_marker(marker, data)
+
+    def close_settled_validation_prs(self):
+        """Retire private validation PRs whose candidate needs no more private CI.
+
+        Closing leaves the immutable validation/fix and feedback refs intact, and
+        run_once never reopens a PR for a head that already has a marker.
+        """
+        for row in self._open_private_prs():
+            head = self._validation_head(row)
+            if head and self._is_settled(head):
+                self._api(f'repos/{PRIVATE}/pulls/{row["number"]}', '--method', 'PATCH', payload={'state': 'closed'})
+
+    def _open_private_prs(self):
+        page = 1
+        while True:
+            rows = self._api(f'repos/{PRIVATE}/pulls?state=open&per_page={PRIVATE_PR_PAGE}&page={page}')
+            yield from rows
+            if len(rows) < PRIVATE_PR_PAGE: return
+            page += 1
+
+    @staticmethod
+    def _validation_head(row):
+        head = row.get('head', {})
+        match = re.fullmatch(r'validation/fix/[0-9a-f]{40}/([0-9a-f]{40})', head.get('ref', ''))
+        return match.group(1) if match and head.get('sha') == match.group(1) else None
+
+    def _is_settled(self, head):
+        marker = self.directory / f'{head}.json'
+        if not marker.is_file() or marker.is_symlink(): return False
+        data = json.loads(marker.read_text())
+        return data.get('head_sha') == head and bool(data.get('public_pr') or data.get('feedback_published'))
 
     def _save_marker(self, marker, value):
         fd, temporary = tempfile.mkstemp(prefix=marker.name + '.', dir=marker.parent)
