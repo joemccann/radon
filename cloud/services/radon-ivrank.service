@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon IV RANK Indicator (SPY 1M implied volatility rank, daily)
+Description=Radon IV RANK Indicator (SPY 1M implied volatility rank, intraday + daily final)
 After=network.target
 
 StartLimitIntervalSec=300

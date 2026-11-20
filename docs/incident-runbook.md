@@ -3503,18 +3503,20 @@ a short rate limit.
   180s is `flow-refresh-discover-budget-timeout`. Instant
   `Subprocess capacity exhausted` is `flow-refresh-capacity-502`.
   `curl: (7)` then fallback is `flow-refresh-connect-refused`.
-  `Result=signal` is deploy stop-clean. Quota text and a completed
-  provider HTTP error stay a hard 400. If `/health/lite` is down, or
-  a Turso `SELECT 1` fails in the same minute, stand down.
+  `Result=signal` is deploy stop-clean. A UW 5xx
+  (`error_type` `UWServerError`, about 49s) is
+  `flow-refresh-discover-server-error`. Quota text and any other
+  completed provider HTTP error stay a hard 400. If `/health/lite` is
+  down, or a Turso `SELECT 1` fails in the same minute, stand down.
 - **Remediation (code):** when the only miss is that transport
   failure and nothing was scored, set `error` to
   `discover transport shed`. The wrapper returns exit 75 and the
   oneshot exits 0 with a warn health row. It does not retry the POST
   and does not launch a direct `discover.py`. A scored name still
-  returns 200. Quota exhaustion, auth failure, and any completed
+  returns 200. Quota exhaustion, auth failure, and any non-5xx
   provider error still set the hard error and the oneshot still
-  exits 1. Do not `reset-failed`. The next timer after deploy is
-  enough.
+  exits 1. A lone UW 5xx is `flow-refresh-discover-server-error`.
+  Do not `reset-failed`. The next timer after deploy is enough.
 - **Regression:**
   `scripts/tests/test_discover.py::test_options_flow_page_timeout_sheds_instead_of_failing_the_oneshot`,
   `test_only_darkpool_page_timeout_sheds_instead_of_failing_the_oneshot`,
@@ -3524,6 +3526,76 @@ a short rate limit.
 - **Code:** `scripts/discover.py` (`_provider_error_key`,
   `_apply_provider_failures`), `scripts/run_flow_refresh.sh`
   (`_is_transport_shed`).
+
+---
+
+## flow-refresh-discover-server-error
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when one fail-fast UW 5xx hits options flow and
+discover returns a hard provider error.** Peak: 2026-11-18 15:01:10Z,
+page `c7372befae094ca3f8540413238e81ab`. Scanner in the same fire
+exited OK. Flow-analysis spent one instant HTTP 502 capacity retry,
+then completed.
+
+- **Mechanism:** the market-wide client is fail-fast
+  (`max_retries=0`, 30s page timeout, 5s admission). One HTTP status
+  >= 500 becomes `UWServerError`. discover mapped every non-rate-limit,
+  non-timeout `UWAPIError` to `required provider data unavailable`.
+  `_run_flow_tab` returned HTTP 400. The wrapper does not retry that
+  body and does not launch a direct `discover.py`, so the oneshot
+  exited 1. The 15:00 discover POST lasted 48.6s, one slow 5xx plus
+  overhead. `service_health[discover]` updated in the failure second
+  with `candidates_found` 0, `skipped` 1, and
+  `provider_failures` `options_flow` / `UWServerError`. Successful
+  discovers the previous session took about 48s to 54s and returned
+  OK. `/health/lite` stayed authenticated. Database stayed up. Other
+  UW consumers in the same minute stayed OK. Not a deploy
+  (`Result=exit-code`, API up since the previous day).
+- **Detection:** unit journal scanner OK, flow-analysis OK (optional
+  instant capacity retry), then one discover POST, then
+  `discover FastAPI outcome indeterminate (curl=0, http=400)` about
+  49s later, then
+  `Flow refresh finished with 1 failed scan(s)`. `systemctl show` is
+  `exit-code` / `ExecMainStatus=1` / `NRestarts=0`. The discover
+  health row's `updated_at` matches that second and `last_error` is
+  `required provider data unavailable` with `skipped` 1,
+  `candidates_found` 0, and `error_type` `UWServerError`.
+- **Discriminating check:** `curl=0` and `http=400` about one slow
+  page after the discover POST, and the health row names
+  `UWServerError`, not `UWAPIError`. A page timeout is
+  `error_type` `UWAPIError` and the message prefix
+  `UW connection failed after 1 attempts`
+  (`flow-refresh-discover-page-timeout`). HTTP 400 in about 2s is
+  `flow-refresh-discover-admission-busy`. HTTP 400 about 45s to 70s
+  with `UWRateLimitError` is
+  `flow-refresh-discover-rate-limit-shed`. A scored walk with one
+  darkpool skip is `flow-refresh-discover-partial-400`.
+  `curl=28` / `http=000` at 180s is
+  `flow-refresh-discover-budget-timeout`. Instant
+  `Subprocess capacity exhausted` is `flow-refresh-capacity-502`.
+  `curl: (7)` then fallback is `flow-refresh-connect-refused`.
+  `Result=signal` is deploy stop-clean. Auth failure, quota text,
+  and any non-5xx completed provider error stay a hard 400. If
+  `/health/lite` is down, or a Turso `SELECT 1` fails in the same
+  minute, stand down.
+- **Remediation (code):** when the only miss is that 5xx and nothing
+  was scored, set `error` to `discover server shed`. The wrapper
+  returns exit 75 and the oneshot exits 0 with a warn health row. It
+  does not retry the POST and does not launch a direct `discover.py`.
+  A scored name still returns 200. Quota exhaustion, auth failure,
+  and any non-5xx provider error still set the hard error and the
+  oneshot still exits 1. Do not `reset-failed`. The next timer after
+  deploy is enough.
+- **Regression:**
+  `scripts/tests/test_discover.py::test_options_flow_server_error_sheds_instead_of_failing_the_oneshot`,
+  `test_only_darkpool_server_error_sheds_instead_of_failing_the_oneshot`,
+  `test_server_error_mixed_with_a_provider_outage_stays_a_hard_error`,
+  `scripts/tests/test_run_flow_refresh_wrapper.py::test_discover_server_400_sheds_without_retry_or_fallback`,
+  `test_discover_provider_outage_400_still_fails_the_unit`.
+- **Code:** `scripts/discover.py` (`_provider_error_key`,
+  `_is_server_failure`, `_apply_provider_failures`),
+  `scripts/run_flow_refresh.sh` (`_is_server_shed`).
 
 ---
 

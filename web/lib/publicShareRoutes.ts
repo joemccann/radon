@@ -38,18 +38,18 @@ export const AUTHENTICATED_SHARE_GENERATOR_ROUTES = [
 
 // Repo-relative pointer the */share/content GET resolves against the same cwd
 // (Next.js route handlers run with cwd = web/, see lib/shareReportPath.ts).
-const REPO_RELATIVE_REPORTS_PREFIX = "../reports/";
+const REPO_RELATIVE_SHARE_CARDS_PREFIX = "../data/share_cards/";
 
 function toRepoRelativeReportPath(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   const name = value.split("/").pop();
-  return name ? `${REPO_RELATIVE_REPORTS_PREFIX}${name}` : null;
+  return name ? `${REPO_RELATIVE_SHARE_CARDS_PREFIX}${name}` : null;
 }
 
 /**
  * Rewrites a share-generator payload so it carries no absolute host path.
  *
- * The generators return `/home/<user>/<deploy>/reports/...`, which handed a
+ * The generators return `/home/<user>/<deploy>/data/share_cards/...`, which handed a
  * caller the exact base path lib/shareReportPath.ts hardened the content routes
  * against guessing. The preview fetch only needs a pointer the content route
  * can resolve, and nothing consumes the card/png path arrays, so they are

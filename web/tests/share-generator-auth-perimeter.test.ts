@@ -164,7 +164,7 @@ describe("share generator responses — no absolute reports/ path disclosure", (
       expect(body.png_paths).toBeUndefined();
       // The preview fetch still works: the modal hands preview_path straight to
       // the content GET, which resolves it against the same cwd.
-      expect(body.preview_path).toBe("../reports/tweet-gex-2026-08-11.html");
+      expect(body.preview_path).toBe("../data/share_cards/tweet-gex-2026-08-11.html");
       // Non-path fields (the stale-data notice) pass through untouched.
       expect(body.stale).toBe(true);
       expect(body.data_date).toBe("2026-08-08");

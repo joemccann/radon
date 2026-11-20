@@ -92,6 +92,18 @@ async def _reap_timed_out_worker(task: asyncio.Task) -> None:
         ib_executor.clear_wedged()
 
 
+def _on_connect_loop(client, operation, *args, **kwargs):
+    """Run a sync IB call on the loop the client connected on.
+
+    ib_executor workers have no loop of their own, and a fresh one never reads
+    the client's socket.
+    """
+    loop = getattr(client, "connect_loop", None)
+    if isinstance(loop, asyncio.AbstractEventLoop):
+        asyncio.set_event_loop(loop)
+    return operation(*args, **kwargs)
+
+
 async def _bounded_pool_call(
     pool, role: str, client, operation, *args, timeout: float = IB_OPERATION_TIMEOUT_SECS, **kwargs
 ):
@@ -104,7 +116,7 @@ async def _bounded_pool_call(
     """
     try:
         pending = asyncio.ensure_future(
-            ib_executor.submit(operation, *args, **kwargs)
+            ib_executor.submit(_on_connect_loop, client, operation, *args, **kwargs)
         )
     except ib_executor.IBExecutorSaturated as exc:
         raise HTTPException(

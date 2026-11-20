@@ -614,3 +614,91 @@ def test_bearer_escape_variants_redact_the_whole_value():
 def test_a_backslash_inside_a_bare_bearer_token_is_still_redacted():
     body = scrub_credential_text("authorization: bearer abc\\\\123def456ghi")
     assert "123def456ghi" not in body, body
+
+
+def test_bare_pass_and_auth_block_bodies_are_scrubbed():
+    """The hook's line alphabet names a bare `pass` and `auth` key, so a
+    `pass: |` header is rewritten there, but the multiline rules did not carry
+    either name and the indented body was published intact."""
+    for header in ("pass: |", "auth: >", "PASS: |", 'auth = """'):
+        if header.endswith('"""'):
+            text = f"{header}\nNOTREALOPAQUE9\n\"\"\"\nsibling: keep\n"
+        else:
+            text = f"{header}\n  NOTREALOPAQUE9\n  second line\nsibling: keep\n"
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+        assert "sibling: keep" in out, out
+    prose = ("tests pass: 3 of 3\nauthor: |\n  ordinary prose stays\n"
+             "passage: |\n  quoted paragraph\n")
+    assert scrub_credential_text(prose) == prose
+
+
+def test_repeated_unterminated_secret_values_scan_linearly():
+    """A secret-named assignment whose quote is escaped (`token = \\"v`) has no
+    close under the escaping grammar, so the close search walked to the end of
+    the input; one such line per assignment repeated that walk for every later
+    assignment: 0.3s at 1,000 lines, 5.5s at 4,000. A failed whole-suffix search
+    must not be repeated from a later start."""
+    import subprocess
+
+    probe = (
+        "import sys, time;"
+        f"sys.path.insert(0, {str(_SCRIPTS_DIR)!r});"
+        "from credential_redaction import scrub_credential_text as s;"
+        "t = ''.join(f'token{i} = \\\\\"NOTREAL{i}\\n' for i in range(6000));"
+        "t0 = time.perf_counter(); out = s(t);"
+        "assert time.perf_counter() - t0 < 2.0;"
+        "assert 'NOTREAL5999' not in out and 'NOTREAL0' not in out"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)
+
+
+def test_a_comment_between_concatenated_literals_does_not_end_the_value():
+    """The gap walk between adjacent literals crossed whitespace, `+` and a
+    line break, but a JavaScript comment ended the value at the empty first
+    literal and the concatenated body survived."""
+    for text in (
+        'token = "" /* note */ + "NOTREALOPAQUE9"\n',
+        'token = "" + /* note */ "NOTREALOPAQUE9"\n',
+        'token = "" // note\n  + "NOTREALOPAQUE9"\n',
+        'token = "" + // note\n  "NOTREALOPAQUE9"\n',
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+    prose = 'token = "" // the next statement is unrelated\nname = "keep"\n'
+    assert 'name = "keep"' in scrub_credential_text(prose)
+
+
+def test_named_key_aliases_are_redacted_on_a_single_line():
+    """`signing_key`, `webhook-key`, `private_key` and `credential` were known
+    only to the block-scalar and triple-quoted rules; an ordinary quoted or
+    bare assignment under those names survived the scrubber and the literal
+    detector. Generic `*_key` names stay prose (`primary_key = "id"`)."""
+    for text in (
+        'signing_key = "NOTREALOPAQUE9"\n',
+        'credential: "NOTREALOPAQUE9"\n',
+        "webhook-key=NOTREALOPAQUE9\n",
+        'PRIVATE_KEY = "NOTREALOPAQUE9"\n',
+        "access_key: NOTREALOPAQUE9\n",
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9" not in out, out
+    prose = 'primary_key = "id"\nauthor = "ann"\ntests pass: 3 of 3\n'
+    assert scrub_credential_text(prose) == prose
+
+
+def test_a_json_serialized_inside_a_string_is_redacted_and_detected():
+    """JSON nested in another string carries a backslash before the key's
+    closing quote (`{\\"password\\": \\"<v>\\"}`), so neither the assignment head
+    nor the literal detector saw a credential key followed by its separator and
+    the prefixless value survived both."""
+    from credential_redaction import find_secret_assignments
+
+    for text in (
+        'log: "{\\"password\\": \\"NOTREALOPAQUE9ABCDEF\\"}"\n',
+        '{\\"token\\": \\"NOTREALOPAQUE9ABCDEF\\"}\n',
+        'payload = "{\\"api_key\\":\\"NOTREALOPAQUE9ABCDEF\\"}"\n',
+    ):
+        out = scrub_credential_text(text)
+        assert "NOTREALOPAQUE9ABCDEF" not in out, out
+        assert find_secret_assignments(text), text
