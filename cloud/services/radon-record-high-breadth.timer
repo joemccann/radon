@@ -1,10 +1,13 @@
 [Unit]
-Description=Radon SPX Breadth - daily 18:15 Eastern
+Description=Radon SPX Breadth - daily 18:15 and 20:15 Eastern
 
 [Timer]
-# Conservative after-close collection, not a TradingView finality guarantee.
+# 18:15 ET is a conservative first pass, not a TradingView finality guarantee.
+# A one-session gap there is a warning. 20:15 ET retries and fails the
+# oneshot if the expected session is still incomplete.
 # Calendar-day runs reconcile revisions and heartbeat unchanged weekends.
 OnCalendar=*-*-* 18:15:00 America/New_York
+OnCalendar=*-*-* 20:15:00 America/New_York
 Persistent=true
 RandomizedDelaySec=60
 
