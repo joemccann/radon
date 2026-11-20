@@ -278,12 +278,28 @@ describe("nextRefreshUtc", () => {
   });
 });
 
+describe("IV rank samples intraday", () => {
+  it("fires every five minutes in ET trading hours, not only after the close", () => {
+    // Wednesday 2026-11-18 11:42 ET (16:42 UTC): IB serves the in-progress
+    // OPTION_IMPLIED_VOLATILITY bar, so the last sample is 11:40 ET.
+    const midSession = new Date(Date.UTC(2026, 10, 18, 16, 42));
+    expect(previousRefreshUtc(IV_RANK_REFRESH, midSession).toISOString()).toBe("2026-11-18T16:40:00.000Z");
+    expect(nextRefreshUtc(IV_RANK_REFRESH, midSession).toISOString()).toBe("2026-11-18T16:45:00.000Z");
+  });
+
+  it("keeps the 22:10 UTC post-close final", () => {
+    const evening = new Date(Date.UTC(2026, 10, 18, 22, 0));
+    expect(nextRefreshUtc(IV_RANK_REFRESH, evening).toISOString()).toBe("2026-11-18T22:10:00.000Z");
+  });
+});
+
 describe("previousRefreshUtc", () => {
   it("daily: the slot itself when standing on it, otherwise the one before", () => {
     const atSlot = new Date(Date.UTC(2026, 7, 26, 22, 10));
-    expect(previousRefreshUtc(IV_RANK_REFRESH, atSlot).toISOString()).toBe("2026-08-26T22:10:00.000Z");
+    const daily: RefreshSchedule = [{ hours: [22], minutes: [10] }];
+    expect(previousRefreshUtc(daily, atSlot).toISOString()).toBe("2026-08-26T22:10:00.000Z");
     const before = new Date(Date.UTC(2026, 7, 26, 22, 9));
-    expect(previousRefreshUtc(IV_RANK_REFRESH, before).toISOString()).toBe("2026-08-25T22:10:00.000Z");
+    expect(previousRefreshUtc(daily, before).toISOString()).toBe("2026-08-25T22:10:00.000Z");
   });
 
   it("weekday-only: Friday's last slot all weekend", () => {

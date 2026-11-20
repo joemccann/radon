@@ -298,14 +298,14 @@ describe("POST /api/regime/share", () => {
   it("returns 200 on FastAPI success", async () => {
     mockRadonFetch.mockResolvedValueOnce({ ok: true, url: "/share/regime" });
     const { POST } = await import("../app/api/regime/share/route");
-    const res = await POST();
+    const res = await POST(new Request("http://localhost/api/regime/share", { method: "POST" }));
     expect(res.status).toBe(200);
   });
 
   it("returns 500 envelope on FastAPI failure", async () => {
     mockRadonFetch.mockRejectedValueOnce(new Error("upstream down"));
     const { POST } = await import("../app/api/regime/share/route");
-    const res = await POST();
+    const res = await POST(new Request("http://localhost/api/regime/share", { method: "POST" }));
     expect(res.status).toBe(500);
   });
 });

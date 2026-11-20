@@ -13,8 +13,8 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
 | msr | `/regime/msr` | `msr` | [msr.md](msr.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
-| vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
-| ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
+| vixcor | `/regime/vixcor` | `vixcor`, `vixcor:live` | [vixcor.md](vixcor.md) (provisional current session every 5 min 09:00-15:55 ET + 02:35 UTC official) |
+| ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) (every 5 min in ET trading hours + 22:10 UTC final) |
 | iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`; timer 22:15 UTC between ivrank 22:10 and dispersion 22:20) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
@@ -34,7 +34,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | high-low | `/regime/high-low` | `high-low-line` | [high-low.md](high-low.md); operator-only common-stock breadth, Daily/Weekly StochRSI and SAR. The spec is the only procedure and cites no path outside this repo. |
 | exports | `/regime/exports` | `asia-export-lead` | [Specification](exports.md); official total exports, three-month mean, optional six-month display alignment; licensed EPS comparison deferred |
 | vix-model-spread | `/regime/vix-model-spread` | `vix-model-spread` | [Specification](vix-model-spread.md), [source research](vix-model-spread-source-research.md); personal operator use, 20/252-session bands; provisional current-session row every 5 minutes in ET trading hours |
-| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index); provisional current-session row every 5 minutes in ET trading hours |
+| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index); provisional current-session row every 5 minutes in ET trading hours, SKEW held at its last official close until Cboe posts it |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) (22:20 UTC sweep, 23:20 UTC if a deploy killed the first run) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 | quant | `/regime/quant` | `quant-targets`, `quant-execute` | [quant-strategies.md](../quant-strategies.md) (systematic sleeve, outside the Four Gates) |

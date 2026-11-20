@@ -3,6 +3,8 @@ import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
+import { appendProvisionalRow, readLiveSnapshot } from "@/lib/provisionalRow";
+import { isVixcorEntry, type VixcorData } from "@/lib/vixcor";
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
 // the dev server restarts.
@@ -28,9 +30,10 @@ const MISSING_VIXCOR = {
   forward_stats: null,
 };
 
-// radon-vixcor.timer fires daily at 02:35 UTC including weekends (Cboe
-// re-touch days heartbeat via conditional GET), so a snapshot older than
-// two days means the writer is down.
+// radon-vixcor.timer fires every 5 minutes 09:00-15:55 ET on weekdays (each tick
+// refreshes the vixcor:live provisional row) and daily at 02:35 UTC including
+// weekends (Cboe re-touch days heartbeat via conditional GET), so a snapshot
+// older than two days means the writer is down.
 const VIXCOR_MAX_AGE_MS = 48 * 60 * 60_000;
 
 async function readVixcorFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
@@ -42,8 +45,16 @@ async function readVixcorFromDb(): Promise<TimestampedRead<Record<string, unknow
   });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  const data = JSON.parse(row.payload) as Record<string, unknown>;
+  // Freshness stays on the official snapshot; the provisional row only extends it.
+  const merged = isMissingPayload(data) || !Array.isArray(data.series)
+    ? data
+    : appendProvisionalRow(
+        data as unknown as VixcorData,
+        await readLiveSnapshot((statement) => db.execute(statement), "vixcor", isVixcorEntry),
+      );
   return {
-    data: JSON.parse(row.payload) as Record<string, unknown>,
+    data: merged as unknown as Record<string, unknown>,
     timestampMs: contentTimestampMs(row.scan_time),
   };
 }

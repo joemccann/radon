@@ -1044,6 +1044,14 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mod, "writer", fake)
     monkeypatch.setattr(mod, "load_cor3m_rows", lambda: COR3M_PARENT_ROWS)
     monkeypatch.setattr(mod, "latest_stored_vix_date", lambda: "2026-08-13")
+    fake.live = None
+    fake.live_calls = []
+
+    def _fetch_live(now):
+        fake.live_calls.append(now)
+        return fake.live
+
+    monkeypatch.setattr(mod, "_fetch_live", _fetch_live, raising=False)
     return mod, fake, tmp_path
 
 
@@ -1582,3 +1590,95 @@ class TestConditionalGetDoesNotLaunderDegradedState:
         assert second["lag_sessions"] >= 3
         assert second["status"] == "stale_parent"
         assert fake.health[1][1] == "error"
+
+
+# ── intraday provisional row (vixcor:live) ────────────────────────
+# The official series closes on Cboe's daily CSVs, so the card sat on the prior
+# session all day. During the session the job appends a provisional row from
+# live VIX and COR3M (IB pool bars, else Cboe delayed quotes) and recomputes
+# the 20-session reading in a separate vixcor:live snapshot.
+NOW_MON_INTRADAY = datetime(2026, 8, 17, 15, 0, tzinfo=timezone.utc)   # 11:00 ET
+NOW_TUE_INTRADAY = datetime(2026, 8, 18, 15, 0, tzinfo=timezone.utc)   # 11:00 ET
+
+
+def _live(day: str, vix: float = 30.0, cor3m: float = 12.0) -> dict[str, Any]:
+    return {"date": day, "values": {"VIX": vix, "COR3M": cor3m},
+            "source": "cboe_delayed", "quote_time": f"{day}T10:45:00"}
+
+
+def _expected_live_corr(series: list[dict[str, Any]], live: dict[str, Any]) -> Optional[float]:
+    mod = _mod()
+    joined = [{"date": r["date"], "vix_close": r["vix_close"], "cor3m_close": r["cor3m_close"]} for r in series]
+    joined.append({"date": live["date"], "vix_close": live["values"]["VIX"],
+                   "cor3m_close": live["values"]["COR3M"]})
+    return mod.compute_corr_series(joined)[-1]["corr20"]
+
+
+def _live_snapshots(fake: _FakeWriter) -> list[dict[str, Any]]:
+    return [payload for service, _t, payload in fake.snapshots if service == "vixcor:live"]
+
+
+class TestLiveProvisionalRow:
+    def test_appends_today_and_recomputes_the_card(self, job):
+        mod, _fake, _tmp = job
+        official = mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        live = _live("2026-08-17")
+        snapshot = mod.build_live_snapshot(official, live, scan_time="2026-08-17T15:00:00Z", now=NOW_MON_INTRADAY)
+
+        row = snapshot["row"]
+        assert row["date"] == "2026-08-17"
+        assert (row["vix_close"], row["cor3m_close"]) == (30.0, 12.0)
+        assert row["corr20"] == pytest.approx(_expected_live_corr(official["series"], live), abs=1e-12)
+        assert isinstance(row["episode"], bool)
+        current = snapshot["current"]
+        assert current["date"] == "2026-08-17"
+        assert current["corr20"] == row["corr20"]
+        assert current["vix_close"] == 30.0
+        assert current["regime"] == mod.classify_regime(row["corr20"])
+        assert (snapshot["source"], snapshot["quote_time"]) == ("cboe_delayed", "2026-08-17T10:45:00")
+        assert snapshot["scan_time"] == "2026-08-17T15:00:00Z"
+
+    def test_a_missing_session_between_close_and_today_is_never_bridged(self, job):
+        mod, _fake, _tmp = job
+        official = mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        snapshot = mod.build_live_snapshot(official, _live("2026-08-18"), scan_time="t", now=NOW_TUE_INTRADAY)
+        assert snapshot["row"] is None and snapshot["current"] is None and snapshot["source"] is None
+
+    def test_a_session_the_official_series_already_has_is_ignored(self, job):
+        mod, _fake, _tmp = job
+        official = mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        snapshot = mod.build_live_snapshot(official, _live("2026-08-14"), scan_time="t", now=NOW_MON_INTRADAY)
+        assert snapshot["row"] is None
+
+    def test_intraday_run_writes_the_live_snapshot(self, job):
+        mod, fake, _tmp = job
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        fake.live = _live("2026-08-17")
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_MON_INTRADAY)
+        [live] = _live_snapshots(fake)
+        assert live["row"]["date"] == "2026-08-17"
+        assert fake.health[-1] == ("vixcor", "ok", None)
+
+    def test_unchanged_source_tick_heartbeats_without_rewriting_the_official_snapshot(self, job):
+        mod, fake, _tmp = job
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        fake.live = _live("2026-08-17")
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_MON_INTRADAY)
+        before = len(fake.snapshots)
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_MON_INTRADAY + timedelta(minutes=5))
+        assert [service for service, _t, _p in fake.snapshots[before:]] == ["vixcor:live"]
+        assert len(fake.health) == 3
+
+    def test_no_live_quote_writes_no_live_snapshot(self, job):
+        mod, fake, _tmp = job
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_MON_INTRADAY)
+        assert fake.live_calls == [NOW_MON_INTRADAY]
+        assert _live_snapshots(fake) == []
+
+    @pytest.mark.parametrize("now", [NOW_SAT, NOW_TUE_INTRADAY], ids=("weekend", "session-gap"))
+    def test_no_fetch_when_today_cannot_extend_the_series(self, job, now):
+        mod, fake, _tmp = job
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=NOW_SAT)
+        mod.run(client=_StubClient(VIX_CSV, VIX_STAMP), now=now)
+        assert fake.live_calls == []

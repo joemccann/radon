@@ -11,8 +11,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { IV_RANK_REFRESH } from "@/lib/refreshSchedule";
+import type { RefreshSchedule } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, WRITER_GRACE_MS } from "@/lib/freshnessRail";
+
+/** A once-a-day 22:10 UTC writer: the rail fixture these cases are written against. */
+const DAILY_2210: RefreshSchedule = [{ hours: [22], minutes: [10] }];
 
 describe("(a) a session the exchange never printed is not a missing sample", () => {
   it("does not go behind over Thanksgiving", () => {
@@ -20,14 +23,14 @@ describe("(a) a session the exchange never printed is not a missing sample", () 
     // the previous session, a weekday-only model calls 2026-11-26 the last
     // completed session and marks a panel holding 2026-11-25 as behind.
     const thanksgivingEvening = new Date("2026-11-26T22:00:00Z");
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-11-25", thanksgivingEvening);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-11-25", thanksgivingEvening);
     expect(rail.behind).toBe(false);
     expect(rail.overdue).toBe(false);
   });
 
   it("does not go behind on Christmas Day", () => {
     const rail = computeFreshnessRail(
-      IV_RANK_REFRESH,
+      DAILY_2210,
       "2026-12-24",
       new Date("2026-12-25T22:00:00Z"),
     );
@@ -36,7 +39,7 @@ describe("(a) a session the exchange never printed is not a missing sample", () 
 
   it("still goes behind on a genuine missed weekday", () => {
     // 2026-08-26 is an ordinary Wednesday; a panel holding Monday IS behind.
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-24", new Date("2026-08-26T22:30:00Z"));
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-24", new Date("2026-08-26T22:30:00Z"));
     expect(rail.behind).toBe(true);
   });
 });
@@ -44,7 +47,7 @@ describe("(a) a session the exchange never printed is not a missing sample", () 
 describe("(b) a missing data date is UNKNOWN, not current", () => {
   for (const [label, asOf] of [["null", null], ["undefined", undefined], ["empty", ""]] as const) {
     it(`reports ${label} as unknown`, () => {
-      const rail = computeFreshnessRail(IV_RANK_REFRESH, asOf, new Date("2026-08-26T21:00:00Z"));
+      const rail = computeFreshnessRail(DAILY_2210, asOf, new Date("2026-08-26T21:00:00Z"));
       expect(rail.unknown).toBe(true);
       // The original case asserted these three, and they still hold: an
       // unknown date must not crash the rail or invent a session.
@@ -55,7 +58,7 @@ describe("(b) a missing data date is UNKNOWN, not current", () => {
   }
 
   it("a real date is not unknown", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", new Date("2026-08-26T21:00:00Z"));
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", new Date("2026-08-26T21:00:00Z"));
     expect(rail.unknown).toBe(false);
   });
 });
@@ -67,12 +70,12 @@ describe("(c) the writer's own run window is not lateness", () => {
   const LONG_PAST_SLOT = new Date("2026-08-28T00:10:00Z"); // slot + 2h
 
   it("does not alarm five minutes past the slot", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", JUST_PAST_SLOT);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", JUST_PAST_SLOT);
     expect(rail.overdue).toBe(false);
   });
 
   it("does alarm two hours past the slot", () => {
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", LONG_PAST_SLOT);
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-26", LONG_PAST_SLOT);
     expect(rail.overdue).toBe(true);
   });
 
@@ -87,13 +90,13 @@ describe("(c) the writer's own run window is not lateness", () => {
 describe("(d) a long outage is distinguishable from a short one", () => {
   it("reports more than 24h overdue for a week-old reading", () => {
     // Past the writer grace, so the alarm is live and the magnitude is real.
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-20", new Date("2026-08-28T00:00:00Z"));
+    const rail = computeFreshnessRail(DAILY_2210, "2026-08-20", new Date("2026-08-28T00:00:00Z"));
     expect(rail.overdue).toBe(true);
     expect(rail.msOverdue).toBeGreaterThan(24 * 60 * 60 * 1000);
   });
 
   it("still reports a small figure for a twenty-minute miss", () => {
-    const short = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", new Date("2026-08-28T00:10:00Z"));
+    const short = computeFreshnessRail(DAILY_2210, "2026-08-26", new Date("2026-08-28T00:10:00Z"));
     expect(short.msOverdue).toBeLessThan(24 * 60 * 60 * 1000);
   });
 });

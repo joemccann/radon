@@ -882,3 +882,19 @@ describe("VixCorPanel — brand tokens", () => {
     expect(bareColorLiterals(container)).toEqual([]);
   });
 });
+
+describe("VixCorPanel — provisional current session", () => {
+  it("names the live source and quote time while the session is provisional", () => {
+    renderPanel(hookState({
+      data: buildData({ provisional: { source: "cboe_delayed", quote_time: "2026-08-17T10:45:00", scan_time: "2026-08-17T15:00:00Z" } }),
+    }));
+    expect(screen.getByTestId("vixcor-provisional").textContent).toBe(
+      "Current session is provisional: Cboe 15-minute delayed quotes as of 10:45 ET, until the official close posts.",
+    );
+  });
+
+  it("renders no provisional note on an official-only payload", () => {
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.queryByTestId("vixcor-provisional")).toBeNull();
+  });
+});
