@@ -805,7 +805,9 @@ deploy's `install-units` verb from `installed-units.sha256`. Spec:
 
 Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_calm_streak.py`, `TimeoutStartSec=300`. Pulls Cboe's official
-`_SPX.json` daily OHLC history with a conditional GET, counts consecutive
+`_SPX.json` daily OHLC history with a conditional GET. The GET sends
+`Referer: https://www.cboe.com/` and keeps User-Agent `radon/2.0`, because
+Cloudflare 403s that JSON when Referer is absent. Counts consecutive
 completed sessions whose `(high - low) / prior close` stays at or under 1%,
 and writes `calm_streak_history` (only new sessions; an empty table backfills
 from 1985) plus the `calm-streak` snapshot. The regeneration time of the Cboe

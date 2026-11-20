@@ -24,7 +24,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (timer 16:20 ET, close-anchored across DST) |
 | rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) (timer 16:40 ET, 20 min behind ma-ratio) |
-| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers; an empty Cboe SPX body keeps last-good, 2026-10-10) |
+| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers; an empty Cboe SPX body keeps last-good, 2026-10-10; historical JSON sends `Referer: https://www.cboe.com/` so Cloudflare does not 403, 2026-11-20) |
 | record-high-breadth | `/regime/record-high-breadth` | `record-high-breadth` | [Implementation](record-high-breadth-validation.md), [source parity](record-high-breadth-source-parity.md) (TradingView variant; formula suite is `scripts/tests/test_record_high_breadth.py`) |
 | imbalance | `/regime/imbalance` | `imbalance` | [imbalance.md](imbalance.md) (TradingView USI trade-count ASK-BID; timer 18:25 ET, not installed) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
