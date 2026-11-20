@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import stat
 import sys
 from datetime import date, datetime, timedelta, timezone
 import sys
@@ -52,6 +53,7 @@ from api.health_dependencies import health_dependencies
 from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
+from api import regime_share as regime_share_gen
 from api.option_secdef import (
     OPTION_SECDEF_TTL_S,
     OptionSecdefCache,
@@ -5285,6 +5287,8 @@ async def gex_share():
 
 _SHARE_CARD_TYPES = frozenset({"gex", "internals"})
 
+from utils.share_cards import SHARE_CARDS_DIR  # noqa: E402
+
 
 @app.get("/share/content", response_class=HTMLResponse)
 async def share_content(type: str, name: str):
@@ -5294,11 +5298,23 @@ async def share_content(type: str, name: str):
     pattern = re.compile(rf"^tweet-{re.escape(type)}-\d{{4}}-\d{{2}}-\d{{2}}\.html$")
     if not pattern.fullmatch(name) or Path(name).name != name:
         raise HTTPException(status_code=403, detail="Access denied")
-    path = PROJECT_ROOT / "reports" / name
+    path = SHARE_CARDS_DIR / name
+    # SHARE_CARDS_DIR is a shared read-write mount: open the final component without
+    # following links or blocking on a fifo, and serve only a regular file, never
+    # whatever a link points at.
     try:
-        return HTMLResponse(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as exc:
         raise HTTPException(status_code=404, detail="File not found") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise HTTPException(status_code=404, detail="File not found")
+        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+            fd = -1
+            return HTMLResponse(fh.read())
+    finally:
+        if fd != -1:
+            os.close(fd)
 
 
 @app.post("/gex/scan")
@@ -5359,9 +5375,9 @@ async def gamma_rotation_scan():
 
 
 @app.post("/regime/share")
-async def regime_share():
-    """Generate Regime/CRI X share report (4 cards + preview HTML). Returns output path."""
-    result = await run_script("generate_regime_share.py", ["--json", "--no-open"], timeout=120)
+async def regime_share(live: Optional[regime_share_gen.RegimeLiveOverlay] = None):
+    """Generate Regime/CRI X share report (4 cards + preview HTML) with the page's live reading."""
+    result = await regime_share_gen.generate(live, card_type="regime")
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     return result.data
@@ -5431,13 +5447,9 @@ async def llm_token_index(days: int = Query(default=180, ge=1, le=3650)):
 
 
 @app.post("/internals/share")
-async def internals_share():
+async def internals_share(live: Optional[regime_share_gen.RegimeLiveOverlay] = None):
     """Generate internals share report using the shared CRI report builder."""
-    result = await run_script(
-        "generate_regime_share.py",
-        ["--json", "--no-open", "--card-type", "internals"],
-        timeout=120,
-    )
+    result = await regime_share_gen.generate(live, card_type="internals")
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     return result.data

@@ -1,9 +1,12 @@
-import { readFile } from "fs/promises";
+import { open } from "fs/promises";
+import { constants } from "fs";
 import { resolve, dirname, basename } from "path";
 
-// reports/ lives at the repo root; Next.js route handlers run with cwd = web/.
+// Share cards live in data/share_cards (scripts/utils/share_cards.py): data/ is the
+// bind mount the API and Next.js containers share, and the only checkout path the
+// app image lets them write. Next.js route handlers run with cwd = web/.
 const PROJECT_ROOT = resolve(process.cwd(), "..");
-export const REPORTS_DIR = resolve(PROJECT_ROOT, "reports");
+export const SHARE_CARDS_DIR = resolve(PROJECT_ROOT, "data", "share_cards");
 
 export type ShareCardType = "gex" | "vcg" | "regime" | "internals" | "cta";
 
@@ -17,7 +20,7 @@ export type ShareCardType = "gex" | "vcg" | "regime" | "internals" | "cta";
 //
 // The only files these routes may serve are the public share cards the generators
 // (scripts/generate_*_share.py) emit: tweet-<type>-YYYY-MM-DD[-card-N].html. Each
-// route is scoped to its OWN card type, the file must live DIRECTLY in reports/
+// route is scoped to its OWN card type, the file must live DIRECTLY in SHARE_CARDS_DIR
 // (no traversal, no subdirectories, no sibling-dir prefix tricks), and the
 // basename must match the card pattern exactly.
 function shareCardPattern(type: ShareCardType): RegExp {
@@ -27,11 +30,36 @@ function shareCardPattern(type: ShareCardType): RegExp {
 export function isAllowedShareCardPath(rawPath: string | null | undefined, type: ShareCardType): boolean {
   if (!rawPath) return false;
   const resolved = resolve(rawPath);
-  // Strict containment: the file must sit immediately inside reports/. Comparing
+  // Strict containment: the file must sit immediately inside SHARE_CARDS_DIR. Comparing
   // the parent directory exactly avoids the startsWith() trailing-separator class
   // of bypass and blocks any nested path.
-  if (dirname(resolved) !== REPORTS_DIR) return false;
+  if (dirname(resolved) !== SHARE_CARDS_DIR) return false;
   return shareCardPattern(type).test(basename(resolved));
+}
+
+/**
+ * Reads a card as a REGULAR FILE only. SHARE_CARDS_DIR sits in the shared read-write
+ * data/ mount, so a name that passes the lexical allowlist may still be a link some
+ * other writer planted. The final component is opened with O_NOFOLLOW, without
+ * blocking on a fifo, and the open descriptor must be a regular file; anything else
+ * is treated as absent.
+ */
+export async function readRegularShareCardFile(path: string): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) return null;
+    return await handle.readFile("utf-8");
+  } catch {
+    return null;
+  } finally {
+    await handle.close().catch(() => {});
+  }
 }
 
 /** Returns the share-card HTML, or null if the path is not an allowed card or is missing. */
@@ -40,9 +68,5 @@ export async function readShareCard(
   type: ShareCardType,
 ): Promise<string | null> {
   if (!isAllowedShareCardPath(rawPath, type)) return null;
-  try {
-    return await readFile(resolve(rawPath as string), "utf-8");
-  } catch {
-    return null;
-  }
+  return readRegularShareCardFile(resolve(rawPath as string));
 }
