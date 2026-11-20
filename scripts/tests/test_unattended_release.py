@@ -1169,11 +1169,13 @@ def test_main_drains_bridge_green_outbox_even_when_bridge_waits_or_review_fails(
     from types import SimpleNamespace
     notifier = FakeNotifier()
     flushed = []
+    retired = []
     class Bridge:
         priority_pr_number = None
         priority_head_sha = None
         def __init__(self, *args, on_public_green=None): self.callback = on_public_green
         def flush_feedback(self, releases): flushed.append(json.loads(json.dumps(releases)))
+        def close_settled_validation_prs(self): retired.append(len(flushed))
         def run_once(self):
             assert callable(self.callback)
             self.callback(42, HEAD)
@@ -1206,6 +1208,7 @@ def test_main_drains_bridge_green_outbox_even_when_bridge_waits_or_review_fails(
         assert json.loads(capsys.readouterr().out)['status'] == ('green' if bridge_status=='release-green' else bridge_status)
     assert [event for event, _ in notifier.calls] == [f'pr-green:42:{HEAD}']
     assert len(flushed)==1
+    assert retired==[1]
     if bridge_status.startswith('release-'):
         key=f'42:{HEAD}'
         persisted=ur.FileStateStore(tmp_path/'state').data['releases']
