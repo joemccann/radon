@@ -2019,3 +2019,21 @@ def test_high_low_line_install_schedule_and_watchdog_contract():
         'open': 26 * 3600, 'closed': 26 * 3600, 'requires_ib': False,
     }
     assert 'high-low-line' in BUCKETS['daily']
+
+
+class TestStraddleTimerClearsCboePublication:
+    """Cboe stamps SPX_History.csv as late as 02:31 UTC in EST (observed
+    2026-11-05, 11-14, 11-20). The old 02:15 UTC slot raced it, so most
+    November nights missed the prior session and the tab sat one close
+    behind, with LIVE dividing a two-session move by a one-day straddle."""
+
+    LATEST_OBSERVED_SPX_PUBLISH_MIN = 2 * 60 + 31
+    REQUIRED_SLACK_MIN = 45
+
+    def test_straddle_fires_well_after_latest_spx_publication(self, services_dir):
+        raw = (services_dir / "radon-straddle.timer").read_text()
+        calendar = next(line for line in raw.splitlines() if line.startswith("OnCalendar="))
+        hh, mm = calendar.split()[-2].split(":")[:2]
+        assert calendar.endswith(" UTC")
+        fire_min = int(hh) * 60 + int(mm)
+        assert fire_min >= self.LATEST_OBSERVED_SPX_PUBLISH_MIN + self.REQUIRED_SLACK_MIN

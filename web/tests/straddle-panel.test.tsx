@@ -14,7 +14,7 @@
 import React from "react";
 import { expectStripFillsGrid } from "./helpers/stripFit";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildStraddleChartRows,
@@ -24,6 +24,7 @@ import {
   formatStraddlePct,
   impliedStraddlePctFromVix1d,
   computeLiveRatio,
+  liveReferenceEntry,
   ratioColor,
   type StraddleData,
   type StraddleEntry,
@@ -248,7 +249,7 @@ describe("StraddlePanel — header strip", () => {
 });
 
 describe("StraddlePanel — freshness rail", () => {
-  it("shows the held session and counts down to the 02:15 UTC slot", () => {
+  it("shows the held session and counts down to the 03:25 UTC slot", () => {
     // 23:00 UTC on a Wednesday: 3h15m short of radon-straddle.timer's
     // 02:15 UTC slot. radon-cor (02:20) reads 3h 20m, radon-vixcor (02:35)
     // 3h 35m, so the constant is pinned, not just "some daily timer".
@@ -268,7 +269,7 @@ describe("StraddlePanel — freshness rail", () => {
     const rail = screen.getByTestId("straddle-freshness-rail");
     expect(rail).toBeTruthy();
     expect(rail.textContent).toContain("2026-08-25");
-    expect(screen.getByTestId("straddle-freshness-rail-countdown").textContent).toBe("3h 15m");
+    expect(screen.getByTestId("straddle-freshness-rail-countdown").textContent).toBe("4h 25m");
     expect(rail.textContent).toContain("Next sample");
   });
 });
@@ -319,7 +320,17 @@ function withKnownLatestSession(data: StraddleData): StraddleData {
   return { ...data, series };
 }
 
+/** 2026-08-05 10:00 ET (Wed): SPX trades the 08-05 session, measured from the 08-04 close. */
+const DURING_AUG_05_SESSION = new Date("2026-08-05T14:00:00Z");
+
+function pinClock(at: Date) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(at);
+}
+
 describe("StraddlePanel — LIVE intraday cell", () => {
+  beforeEach(() => pinClock(DURING_AUG_05_SESSION));
+
   it("renders the live ratio from the SPX tick against the latest close", () => {
     mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
     render(<StraddlePanel prices={{ SPX: { last: 7793.5 } } as never} />);
@@ -350,5 +361,56 @@ describe("StraddlePanel — LIVE intraday cell", () => {
     const live = screen.getByTestId("straddle-live-value");
     expect(live.textContent).toBe("---");
     expect(live.style.color).toBe("var(--text-muted)");
+  });
+});
+
+/* ─── LIVE reference close must be the PRIOR session (2026-11-20) ─── */
+
+describe("liveReferenceEntry — the close the live spot is measured from", () => {
+  const rows = [
+    entry({ date: "2026-11-17", spx_close: 7340.53, vix1d_close: 26.84 }),
+    entry({ date: "2026-11-18", spx_close: 7323.63, vix1d_close: 23.25 }),
+    entry({ date: "2026-11-19", spx_close: 7175.83, vix1d_close: 32.06 }),
+  ];
+
+  it("uses the prior session's close while today's session trades", () => {
+    const at = new Date("2026-11-20T18:38:00Z"); // Fri 13:38 ET
+    expect(liveReferenceEntry(rows, at)?.date).toBe("2026-11-19");
+  });
+
+  it("returns null when the prior session's row has not landed yet", () => {
+    // 2026-11-20: the 02:15 UTC run beat Cboe's SPX publish, so the series
+    // ended at 11-18 and LIVE divided a two-session move by a one-day straddle.
+    const at = new Date("2026-11-20T18:38:00Z");
+    expect(liveReferenceEntry(rows.slice(0, 2), at)).toBeNull();
+  });
+
+  it("keeps measuring the finished session from its prior close after the bell", () => {
+    // Sat: the Fri row has landed, but the frozen SPX close still belongs to Fri.
+    const at = new Date("2026-11-21T15:00:00Z");
+    const withFriday = [...rows, entry({ date: "2026-11-20", spx_close: 7100, vix1d_close: 30 })];
+    expect(liveReferenceEntry(withFriday, at)?.date).toBe("2026-11-19");
+  });
+
+  it("measures pre-open from the session before the last one", () => {
+    const at = new Date("2026-11-20T12:00:00Z"); // Fri 07:00 ET, before the open
+    expect(liveReferenceEntry(rows, at)?.date).toBe("2026-11-18");
+  });
+});
+
+describe("StraddlePanel — LIVE when the prior close is missing", () => {
+  it("shows --- and names the awaited close instead of a multi-session ratio", () => {
+    pinClock(new Date("2026-11-20T18:38:00Z"));
+    const stale = [
+      ...buildData().series.slice(0, -2),
+      entry({ date: "2026-11-17", spx_close: 7340.53, vix1d_close: 26.84, ratio: 0.5 }),
+      entry({ date: "2026-11-18", spx_close: 7323.63, vix1d_close: 23.25, ratio: -0.17 }),
+    ];
+    mockUseStraddle.mockReturnValue(
+      hookState({ data: buildData({ series: stale, current: { ...buildData().current!, date: "2026-11-18" } }) }),
+    );
+    render(<StraddlePanel prices={{ SPX: { last: 7080 } } as never} />);
+    expect(screen.getByTestId("straddle-live-value").textContent).toBe("---");
+    expect(screen.getByTestId("straddle-strip-live").textContent).toContain("AWAITING 2026-11-19 CLOSE");
   });
 });

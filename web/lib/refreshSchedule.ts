@@ -133,7 +133,7 @@ export const VIX_PC_REFRESH: RefreshSchedule = [
 ];
 
 /** cloud/services/radon-straddle.timer */
-export const STRADDLE_REFRESH: RefreshSchedule = [daily(2, 15)];
+export const STRADDLE_REFRESH: RefreshSchedule = [daily(3, 25)];
 
 /** cloud/services/radon-msr.timer */
 export const MSR_REFRESH: RefreshSchedule = [daily(3, 0)];

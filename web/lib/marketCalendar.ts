@@ -92,7 +92,7 @@ export function isMarketOpenAt(now: Date = new Date()): boolean {
   return getMarketPhaseFromDate(now) === "open";
 }
 
-function previousTradingDay(isoDate: string): string {
+export function previousTradingDay(isoDate: string): string {
   const cursor = new Date(`${isoDate}T12:00:00Z`);
   do cursor.setUTCDate(cursor.getUTCDate() - 1);
   while (!isUsTradingDay(cursor.toISOString().slice(0, 10)));
