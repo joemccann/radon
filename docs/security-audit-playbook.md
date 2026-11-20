@@ -532,7 +532,9 @@ line here whenever you ship a security fix.**
   runs first, so every character class in it excludes both quotes AND the
   backslash that escapes one: eating a closing quote, or the escape in front
   of one, moved where the value appeared to end and published its tail. That
-  root cause has now shipped three times, each time as a different character.
+  root cause has now shipped four times, each time as a different character
+  or rule: the credential-query and database-URL rules were the fourth, their
+  value runs ending only at whitespace or a quote and so eating the escape.
   A new pre-tokenizer rule carries the burden of proving it alters no quoting.
 
   The continuation rule follows the language, not just the indentation: an

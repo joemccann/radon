@@ -774,3 +774,25 @@ def test_a_bare_marker_line_inside_a_quoted_value_is_blank():
     assert _clean(scrubbed), scrubbed
     assert "> next: ok" in scrubbed, scrubbed
     assert find_secret_assignments(text), text
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://h.invalid/x?api_key={OPAQUE}",
+        f"https://h.invalid/x?token={OPAQUE}",
+        f"https://h.invalid/x?client_secret={OPAQUE}",
+        f"libsql://h.turso.io/db?authToken={OPAQUE}",
+        "https://h.turso.io/v2",
+    ],
+)
+def test_a_url_rule_keeps_the_escape_in_front_of_a_quote(quote, url):
+    """A quoted credential value holding a URL a pre-tokenizer rule redacts,
+    then an escaped quote and more of the value: the rule may not eat the
+    backslash, or the tokenizer closes the value at that quote and the tail
+    is published (the bearer rule's root cause, in the URL rules)."""
+    text = f"password = {quote}{url}\\{quote} {TAIL}{quote}\nnext = 1\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed), scrubbed
+    assert "next = 1" in scrubbed

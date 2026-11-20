@@ -190,8 +190,11 @@ _SPECIFIC_SCRUB_PATTERNS = [
         ),
         "[redacted-private-key]",
     ),
-    (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
-    (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    # The URL runs stop at a quote AND at the backslash escaping one, like the
+    # bearer rule below: eating the `\\` of `PASS="libsql://h/db\\" tail"` left
+    # the quote as the value's terminator and `tail` outside every span.
+    (re.compile(r"libsql://(?:[^\s'\"\\]|\\(?![\s'\"]))+", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"https://[a-z0-9.-]+\.turso\.io(?:[^\s'\"\\]|\\(?![\s'\"]))*", re.IGNORECASE), "[redacted-db-url]"),
     # "Bearer <token>" is the literal HTTP header value shape (space, not an
     # "=" / ":" assignment) and must run before the assignment pattern below,
     # which would otherwise treat the word "Bearer" itself as the value and
@@ -248,7 +251,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
     # inspected (DS-2026-10-25-10).
     (
         re.compile(
-            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+",
+            # Stops at the backslash escaping a quote, like the bearer rule.
+            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)(?:[^\s&'\"\\]|\\(?![\s'\"]))+",
             re.IGNORECASE,
         ),
         r"\1[redacted]",
