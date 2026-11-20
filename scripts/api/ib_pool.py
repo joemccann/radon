@@ -34,14 +34,12 @@ LIVENESS_PROBE_TIMEOUT_SECS = 3.0
 def _connect_in_thread(host: str, port: int, client_id: int, timeout: int = 5) -> IBClient:
     """Connect an IBClient in a thread with its own event loop.
 
-    ib_insync needs an event loop in the connecting thread. When called
-    from asyncio.to_thread(), the thread has no loop by default.
+    ib_insync binds the client's socket to the loop current in the connecting
+    thread. Always a fresh loop: a reused default-executor thread still holds
+    an earlier client's loop, and two clients must never share one.
     """
     import asyncio as _aio
-    try:
-        _aio.get_event_loop()
-    except RuntimeError:
-        _aio.set_event_loop(_aio.new_event_loop())
+    _aio.set_event_loop(_aio.new_event_loop())
 
     client = IBClient()
     try:

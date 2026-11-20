@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
+from clients.uw_client import UWAPIError, UWClient, UWRateLimitError, UWServerError
 from db.readers import read_portfolio_positions, read_watchlist_tickers
 
 logger = logging.getLogger(__name__)
@@ -473,6 +473,7 @@ def _apply_provider_failures(
     result: dict, provider_failures: list, *,
     shed_admission: bool = False,
     shed_transport: bool = False,
+    shed_server: bool = False,
 ) -> None:
     """Record skipped tickers without turning a scored scan into a hard error.
 
@@ -484,7 +485,8 @@ def _apply_provider_failures(
     a short UW rate limit uses the shed marker instead, so the oneshot does
     not page (2026-10-22 20:01Z, page 9d06ddf8). A total miss that is only
     the fail-fast page timeout uses the transport shed (2026-11-16 21:01Z,
-    page 10df476c).
+    page 10df476c). A total miss that is only a fail-fast UW 5xx uses the
+    server shed (2026-11-18 15:01Z, page c7372bef).
     """
     if not provider_failures:
         return
@@ -496,6 +498,8 @@ def _apply_provider_failures(
     if not result.get("candidates"):
         if shed_admission:
             result["error"] = DISCOVER_ADMISSION_SHED
+        elif shed_server:
+            result["error"] = DISCOVER_SERVER_SHED
         elif shed_transport:
             result["error"] = DISCOVER_TRANSPORT_SHED
         else:
@@ -612,6 +616,10 @@ DISCOVER_BUDGET_SHED = "discover budget shed"
 # "UW connection failed after 1 attempts". That is an unfinished page,
 # not a provider outage. The wrapper sheds this HTTP 400.
 DISCOVER_TRANSPORT_SHED = "discover transport shed"
+# Fail-fast client (max_retries=0) maps one HTTP 5xx to UWServerError and
+# does not retry. That is one unfinished page, not an auth or quota miss.
+# The wrapper sheds this HTTP 400. A 4xx, auth failure, or quota miss stays hard.
+DISCOVER_SERVER_SHED = "discover server shed"
 _TRANSPORT_FAILURE_PREFIX = "UW connection failed after "
 _QUOTA_MARKERS = (
     "daily request limit",
@@ -674,14 +682,24 @@ def _is_transport_failure(exc: BaseException) -> bool:
     """True for the fail-fast client's one timed-out or reset attempt.
 
     ``UWClient(max_retries=0)`` raises ``UWAPIError`` with this prefix and
-    drops the requests exception. Quota, auth, and a completed HTTP error
-    use other messages and stay a hard miss.
+    drops the requests exception. Quota, auth, and a non-5xx HTTP error
+    use other types and stay a hard miss.
     """
     return (
         isinstance(exc, UWAPIError)
-        and not isinstance(exc, UWRateLimitError)
+        and not isinstance(exc, (UWRateLimitError, UWServerError))
         and str(exc).startswith(_TRANSPORT_FAILURE_PREFIX)
     )
+
+
+def _is_server_failure(exc: BaseException) -> bool:
+    """True for one completed UW 5xx from the fail-fast client.
+
+    ``UWClient`` maps status >= 500 to ``UWServerError``. The hourly client
+    sets ``max_retries=0``, so that 5xx is a single unfinished page. Auth,
+    quota, and a 4xx stay a hard miss.
+    """
+    return isinstance(exc, UWServerError)
 
 
 def _provider_error_key(exc: BaseException) -> str:
@@ -689,6 +707,8 @@ def _provider_error_key(exc: BaseException) -> str:
         return DISCOVER_ADMISSION_SHED
     if _is_transport_failure(exc):
         return DISCOVER_TRANSPORT_SHED
+    if _is_server_failure(exc):
+        return DISCOVER_SERVER_SHED
     return "required provider data unavailable"
 
 
@@ -878,6 +898,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         provider_failures = []
         admission_sheds = []
         transport_sheds = []
+        server_sheds = []
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
@@ -910,6 +931,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
                         and not _rate_limit_is_a_hard_outage(exc)
                     )
                     transport_sheds.append(_is_transport_failure(exc))
+                    server_sheds.append(_is_server_failure(exc))
                     print(f"    [{done}/{total}] {ticker}... SKIP (provider unavailable)", file=sys.stderr)
                     continue
                 if candidate is None:
@@ -929,17 +951,25 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         "candidates": candidates[:top]
     }
     transient = [
-        admission or transport
-        for admission, transport in zip(admission_sheds, transport_sheds)
+        admission or transport or server
+        for admission, transport, server in zip(
+            admission_sheds, transport_sheds, server_sheds
+        )
     ]
+    all_transient = bool(provider_failures) and all(transient)
     _apply_provider_failures(
         result,
         provider_failures,
         shed_admission=bool(provider_failures) and all(admission_sheds),
         shed_transport=(
-            bool(provider_failures)
+            all_transient
             and any(transport_sheds)
-            and all(transient)
+            and not any(server_sheds)
+            and not all(admission_sheds)
+        ),
+        shed_server=(
+            all_transient
+            and any(server_sheds)
             and not all(admission_sheds)
         ),
     )

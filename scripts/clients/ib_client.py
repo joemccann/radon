@@ -285,6 +285,7 @@ class IBClient:
         self._last_client_id: int = 0
         self._last_timeout: int = 10
         self._last_error: Optional[tuple] = None
+        self._connect_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # Active streaming market-data subscriptions (introspection; pruned
         # by cancel_market_data / clear_subscriptions)
@@ -301,6 +302,21 @@ class IBClient:
     @property
     def ib(self) -> IB:
         return self._ib
+
+    @property
+    def connect_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """The event loop ib_insync bound this client's socket to at connect.
+
+        A sync call from another thread must run this loop: a fresh loop
+        never reads the socket and the request times out.
+        """
+        return self._connect_loop
+
+    def _remember_connect_loop(self) -> None:
+        try:
+            self._connect_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._connect_loop = None
 
     @property
     def failed_contracts(self) -> Set[Any]:
@@ -339,7 +355,9 @@ class IBClient:
         # A dropped session may never have called disconnect().
         self._reset_session_state()
         if client_id == "auto":
-            return self._connect_auto_allocate(host, port, timeout)
+            self._connect_auto_allocate(host, port, timeout)
+            self._remember_connect_loop()
+            return
 
         if client_id is None and client_name is not None:
             if client_name in POOL_ROLES:
@@ -369,6 +387,7 @@ class IBClient:
                     "Connected to IB on %s:%s (clientId=%s)",
                     host, port, client_id,
                 )
+                self._remember_connect_loop()
                 return
             except Exception as exc:
                 last_exc = exc

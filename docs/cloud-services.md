@@ -906,6 +906,22 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### VIX-COR (`radon-vixcor.timer`)
+
+Every 5 minutes 09:00-15:55 ET Mon-Fri plus daily `02:35 UTC` (after
+`radon-cor` at 02:20), no randomized delay, oneshot `scripts/fetch_vixcor.py`,
+`TimeoutStartSec=300`. The 02:35 run joins Cboe `VIX_History.csv` with Turso
+`cor_history.cor3m` into the official `vixcor` snapshot. Every run also reads
+live VIX and COR3M through `scripts/utils/index_live.py` (IB pool daily bars,
+else Cboe 15-minute delayed quotes) and, when that session is the next one
+after the official `as_of`, writes the recomputed 20-session reading only to
+the small `vixcor:live` snapshot, which `/api/vixcor` appends with a
+`provisional` marker. An unchanged-source tick heartbeats without rewriting the
+official snapshot unless it is over 12h old. Intraday slots stop at 15:55 so
+none is expected to carry the official close. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/vixcor.md`](indicators/vixcor.md).
+
 ### Panic Proxy (`radon-panic-index.timer`)
 
 Every 5 minutes 09:00-16:55 ET Mon-Fri, plus `16:01 ET` (13:01 PT) and
@@ -1066,7 +1082,8 @@ deploy's `install-units` verb from `installed-units.sha256`.
 
 ### IV RANK (`radon-ivrank.timer`)
 
-Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
+Every 5 min 09:00-16:55 ET Mon-Fri (in-progress session bar) plus daily
+`22:10 UTC` final (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_ivrank.py`. SPY 30-day implied vol from IB
 (`OPTION_IMPLIED_VOLATILITY` daily bars, health-gated), UW iv-rank fallback,
 ranked over the trailing 252 sessions. Heartbeat `ivrank`. Installed by the

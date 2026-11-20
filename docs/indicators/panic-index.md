@@ -935,3 +935,21 @@ scan_time}` when it is newer than the official `data_date`. The panel labels
 it. An unchanged-source live tick heartbeats without rewriting the official
 snapshot unless that snapshot is over 12h old.
 
+### SKEW is carried intraday (2026-11-19)
+
+Cboe disseminates SKEW once, after the close (delayed quote stamped ~17:00 ET);
+neither its delayed quote nor an IB bar is on the current session during RTH.
+The one-session rule therefore rejected every intraday read, and the only
+`panic-index:live` row ever written was an after-close one (2026-11-11). SKEW is
+now a `carry` symbol: VIX, VIX3M and VVIX set the session, a SKEW not yet on it
+is left out of `values` and listed in `carried`, and the row takes SKEW at the
+last official close. The live snapshot and `provisional` carry `carried:
+["SKEW"]`, and the panel note says SKEW is held at its last official close.
+Intraday Δ1d therefore moves on three legs; SKEW's contribution is zero until
+the official row posts.
+
+The IB pool leg of the same read had also failed on every call:
+`/historical/bars` ran its IB call on an `ib_executor` worker with no event
+loop. Pool calls now run on the loop the client connected on
+(`IBClient.connect_loop`, `historical._on_connect_loop`).
+
