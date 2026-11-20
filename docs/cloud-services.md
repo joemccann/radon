@@ -819,7 +819,7 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 
 ### SPX breadth (`radon-record-high-breadth.timer`)
 
-Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
+Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). The 18:15 ET pass warns on a one-session gap. The 20:15 ET pass fails if that session is still incomplete. Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
 
 ### ASK-BID imbalance (`radon-imbalance.timer`)
 
