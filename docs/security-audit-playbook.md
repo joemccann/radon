@@ -77,6 +77,14 @@ line here whenever you ship a security fix.**
   must apply `is_trusted_local_request()` inside the handler, before any
   side effect, because Caddy's `/api/ib/*` mount makes every exempt path
   world-reachable. Pinned by `test_ws_ticket_validate_local_only.py`.
+- **A green verdict pins the full check-name set** — every path that turns a
+  PR head's checks into "ready to merge" (`nightly_deliver.classify_checks` in
+  the watch step, `deliver_urls_verified` in `security_post.sh`) compares the
+  rollup against `expected_pull_request_check_names()` from the workflow files
+  and treats a missing name as pending. An all-green rollup is not a green
+  suite: the PR-body check lands in seconds, long before the pytest and Vitest
+  shards register. Unreadable expectations fail closed. Pinned by
+  `test_nightly_deliver.py` and `test_runner_security_hooks.py`.
 - **Middleware perimeter** — default-deny (`if(!isPublicRoute)`), ALLOWED_USER_IDS
   operator gate, the `/api` matcher always running, `PUBLIC_SHARE_API_ROUTES` a
   FIXED explicit list (no `/api/**/share` regex).
