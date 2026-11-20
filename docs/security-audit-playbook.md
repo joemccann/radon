@@ -540,6 +540,12 @@ line here whenever you ship a security fix.**
   trailing backslash, and a blank line inside a bracket is still inside it.
   A value that continues only because of indentation was the narrower rule,
   and a key line ending in `(` with the value at column zero escaped it.
+  Indentation is measured after the excerpt lead the key line carries: a
+  quoted (`> `) or bulleted (`- `) excerpt repeats that lead on every line,
+  so from column zero a next-line value sat level with its key and the
+  continuation stopped before it. A line carrying only the bare marker is
+  blank. The detector reads a lead-only value token the same way, since the
+  literal follows the repeated marker on that line.
 
   An egress scrub runs before any truncation, never after. Slicing a
   diagnostic to its last N characters can remove the `KEY=` or provider
