@@ -2929,7 +2929,9 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   sync-libsql hang, a different class. A statement error (not a read
   timeout) on the history upsert still fails the oneshot.
   `Expecting value: line 1 column 1 (char 0)` on an empty Cboe body is
-  `calm-streak-empty-cboe-body`.
+  `calm-streak-empty-cboe-body`. `HTTP Error 403: Forbidden` on the
+  historical JSON, cleared by `Referer: https://www.cboe.com/`, is
+  `calm-streak-cloudflare-referer`.
 - **Remediation (code):** `_record_ok_heartbeat` catches the ok
   heartbeat, logs `service_health heartbeat failed`, and still writes
   `data/calm_streak.json`. The oneshot exits 0. No ok heartbeat is
@@ -2985,6 +2987,9 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   a different outage: stand down. `TimeoutError: The read operation
   timed out` is `calm-streak-hrana-read-timeout`. `no such table:
   calm_streak_history` is `calm-streak-shadowed-migration`.
+  `HTTP Error 403: Forbidden` on the historical JSON, while the same
+  GET with `Referer: https://www.cboe.com/` is HTTP 200, is
+  `calm-streak-cloudflare-referer`.
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A statement error on the
   history upsert still fails the oneshot. HTTP 5xx still fails the
@@ -3002,6 +3007,69 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `test_empty_body_without_a_cache_still_fails`,
   `test_http_error_still_fails_the_oneshot`.
 - **Code:** `scripts/fetch_calm_streak.py` (`run`).
+
+---
+
+## calm-streak-cloudflare-referer
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when Cloudflare 403s `_SPX.json` for a request with
+no Referer.** Peak: 2026-11-20 02:40Z, page
+`5061ba0b8fb9030ac87d717e218a2892`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The 02:40 UTC timer
+  started at 02:40:34Z and Python exited 1 in the same second
+  (`ExecMainStatus=1`, `CPUUsageNSec` about 118ms). That span is one
+  rejected GET, not `FETCH_TIMEOUT_S=30` and not
+  `TimeoutStartSec=300`.
+  `cdn.cboe.com/.../historical/_SPX.json` returns HTTP 403
+  `text/html` (Cloudflare "Sorry, you have been blocked") for
+  User-Agent `radon/2.0`, a browser UA, and curl, with or without
+  `Origin`. The same GET with `Referer: https://www.cboe.com/` and
+  UA `radon/2.0` is HTTP 200 `application/json`, about 1.7 MB,
+  `Last-Modified: Fri, 20 Nov 2026 02:09:40 GMT`, last row
+  `2026-11-19`. A conditional GET with that stamp is 304.
+  `SPX_History.csv` is HTTP 200 but `DATE,SPX` only, so it cannot
+  compute the band. `_fetch_source` sent User-Agent and Accept only.
+  urllib raised `HTTP Error 403: Forbidden`. `main` printed
+  `run failed` and exited 1. The responder account cannot read the
+  journal; the exception is the live reproduction of that GET.
+  `requires_ib` is false. `:8321/health/lite` answered 401 to an
+  anonymous GET, so the API process was up. Sibling `radon-vixcor`
+  (CSV) exited 0 at 02:35Z. This is not
+  `calm-streak-empty-cboe-body` (no `JSONDecodeError`; the body is
+  an HTML 403). This is not `calm-streak-hrana-read-timeout` (no
+  `TimeoutError`). This is not `calm-streak-shadowed-migration`
+  (the fetch never reaches the table).
+- **Detection:** `systemctl show` → `exit-code` / `0` / `1`. Exec
+  span is the same second. CPU under 200ms. A direct urllib GET of
+  the historical URL is `HTTP Error 403: Forbidden`. The same GET
+  with the Cboe Referer is 200 JSON.
+- **Discriminating check:** urllib (and `curl` without a Referer)
+  get HTTP 403 HTML. Adding `Referer: https://www.cboe.com/` while
+  keeping UA `radon/2.0` gets HTTP 200 whose last `date` is a
+  completed session, and `If-Modified-Since` of that
+  `Last-Modified` gets 304. A CSV 200 does not clear this case.
+  A 403 that remains after the Referer is set still fails the
+  oneshot. Do not keep last-good for it, and do not impersonate a
+  browser User-Agent. `Expecting value: line 1 column 1 (char 0)`
+  on an empty 200 is `calm-streak-empty-cboe-body`.
+  `TimeoutError: The read operation timed out` is
+  `calm-streak-hrana-read-timeout`. `no such table:
+  calm_streak_history` is `calm-streak-shadowed-migration`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down, or a
+  Turso canary failure, is a different outage: stand down.
+- **Remediation (code):** send `Referer: https://www.cboe.com/` on
+  the historical JSON GET. Keep UA `radon/2.0`. HTTP 403 and 5xx
+  still fail the oneshot. Do not `reset-failed` as the fix. The
+  unit is not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the next
+  timer (02:40 or 14:30 UTC) clears the latch.
+- **Regression:**
+  `scripts/tests/test_calm_streak.py::TestCloudflareReferer::test_historical_json_403_without_cboe_referer_still_exits_zero`,
+  `test_http_403_still_fails_when_the_referer_does_not_clear_it`.
+- **Code:** `scripts/fetch_calm_streak.py` (`_fetch_source`,
+  `CBOE_REFERER`).
 
 ---
 
