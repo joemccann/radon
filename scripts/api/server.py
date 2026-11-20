@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import stat
 import sys
 from datetime import date, datetime, timedelta, timezone
 import sys
@@ -5298,10 +5299,22 @@ async def share_content(type: str, name: str):
     if not pattern.fullmatch(name) or Path(name).name != name:
         raise HTTPException(status_code=403, detail="Access denied")
     path = SHARE_CARDS_DIR / name
+    # SHARE_CARDS_DIR is a shared read-write mount: open the final component without
+    # following links or blocking on a fifo, and serve only a regular file, never
+    # whatever a link points at.
     try:
-        return HTMLResponse(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as exc:
         raise HTTPException(status_code=404, detail="File not found") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise HTTPException(status_code=404, detail="File not found")
+        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+            fd = -1
+            return HTMLResponse(fh.read())
+    finally:
+        if fd != -1:
+            os.close(fd)
 
 
 @app.post("/gex/scan")

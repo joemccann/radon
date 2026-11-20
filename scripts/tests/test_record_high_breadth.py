@@ -205,6 +205,8 @@ def test_daily_unit_and_manifest_registration():
     assert "TimeoutStartSec=240" in service
     assert scan.COLLECTION_TIMEOUT < 240
     assert "OnCalendar=*-*-* 18:15:00 America/New_York" in timer
+    assert "OnCalendar=*-*-* 20:15:00 America/New_York" in timer
+    assert scan.PUBLICATION_LAG_DEADLINE_HOUR_ET == 20
     for path in ("cloud/config/auto-sync-units.txt", "cloud/config/installed-units.sha256", "cloud/scripts/setup-vps.sh"):
         text = (root / path).read_text()
         assert "radon-record-high-breadth.service" in text
@@ -272,3 +274,85 @@ def test_fractional_latest_count_lags_instead_of_zero_breadth():
     assert payload["current"]["date"] == "2026-09-17"
     assert payload["series"][-1]["new_highs"] is None
     assert payload["series"][-1]["net_high_low_per_500"] is None
+
+
+def test_18_15_et_single_session_lag_does_not_fail_the_oneshot(monkeypatch):
+    """The 18:15 ET fire with only the prior session must exit clean.
+
+    Production failed here: the oneshot raised, systemd recorded exit-code
+    with NRestarts=0, and the unit watchdog paged P1. The snapshot is
+    already retained and labeled lagging. A hole older than one session
+    still fails. The 20:15 ET retry is the hard failure if today is still
+    missing.
+    """
+    from contextlib import contextmanager
+
+    now = datetime(2026, 11, 19, 23, 15, tzinfo=timezone.utc)
+    payload = scan.build_output(sources(("2026-11-18",)), now=now)
+    assert payload["degraded"] and payload["source"]["lagging"]
+    assert payload["data_date"] == "2026-11-18"
+    assert payload["source"]["expected_session_date"] == "2026-11-19"
+    cycles = []
+
+    @contextmanager
+    def cycle(service, *, market_hours_class):
+        handle = Mock(finished_at=None, warning=None)
+        cycles.append(handle)
+        yield handle
+
+    async def collect(client):
+        return payload
+
+    persist = Mock()
+    monkeypatch.setattr(scan, "service_cycle", cycle)
+    monkeypatch.setattr(scan, "collect", collect)
+    monkeypatch.setattr(scan, "persist_result", persist)
+    assert scan.run(client=object())["data_date"] == "2026-11-18"
+    persist.assert_called_once_with(payload)
+    assert cycles[0].finished_at == payload["scan_time"]
+    assert cycles[0].warning and "latest expected" in cycles[0].warning
+    assert "expected 2026-11-19, latest 2026-11-18" in cycles[0].warning
+
+
+def test_20_15_et_single_session_lag_still_fails(monkeypatch):
+    from contextlib import contextmanager
+
+    now = datetime(2026, 11, 20, 1, 15, tzinfo=timezone.utc)
+    payload = scan.build_output(sources(("2026-11-18",)), now=now)
+    assert payload["data_date"] == "2026-11-18"
+    assert payload["source"]["expected_session_date"] == "2026-11-19"
+
+    @contextmanager
+    def cycle(service, *, market_hours_class):
+        yield Mock(finished_at=None, warning=None)
+
+    async def collect(client):
+        return payload
+
+    monkeypatch.setattr(scan, "service_cycle", cycle)
+    monkeypatch.setattr(scan, "collect", collect)
+    monkeypatch.setattr(scan, "persist_result", Mock())
+    with pytest.raises(RuntimeError, match=r"expected 2026-11-19, latest 2026-11-18"):
+        scan.run(client=object())
+
+
+def test_multi_session_hole_fails_at_18_15_et(monkeypatch):
+    from contextlib import contextmanager
+
+    now = datetime(2026, 11, 19, 23, 15, tzinfo=timezone.utc)
+    payload = scan.build_output(sources(("2026-11-17",)), now=now)
+    assert payload["degraded"]
+    assert payload["data_date"] == "2026-11-17"
+
+    @contextmanager
+    def cycle(service, *, market_hours_class):
+        yield Mock(finished_at=None, warning=None)
+
+    async def collect(client):
+        return payload
+
+    monkeypatch.setattr(scan, "service_cycle", cycle)
+    monkeypatch.setattr(scan, "collect", collect)
+    monkeypatch.setattr(scan, "persist_result", Mock())
+    with pytest.raises(RuntimeError, match="latest expected"):
+        scan.run(client=object())

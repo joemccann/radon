@@ -661,17 +661,20 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     return counts
 
 
-# db_http wraps a socket failure as DbHttpError("<ExcType>: ...") or
-# "research transaction transport failed: <ExcType>". Statement errors and
-# missing credentials carry no such prefix and still fail the unit.
-_TRANSPORT_TYPES = r"(?:TimeoutError|socket\.timeout|ConnectionResetError|ConnectionAbortedError|RemoteDisconnected|IncompleteRead)"
-_DB_TRANSPORT_RE = re.compile(rf"^(?:{_TRANSPORT_TYPES}:|research transaction transport failed: {_TRANSPORT_TYPES}$)")
-
-
 def _is_transport_blip(exc: BaseException) -> bool:
+    """True only for a wire blip. Message text is not evidence.
+
+    service_cycle has already written the error row. Exit 0 lets the next
+    timer retry. A statement error has no transport cause and stays fatal.
+    """
     if isinstance(exc, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
         return True
-    return isinstance(exc, DbHttpError) and bool(_DB_TRANSPORT_RE.match(str(exc).strip()))
+    from db.hrana_http import HranaHttpError, is_transport_error
+    if isinstance(exc, HranaHttpError):
+        return is_transport_error(exc)
+    if not isinstance(exc, DbHttpError) or exc.__cause__ is None:
+        return False
+    return is_transport_error(exc.__cause__)
 
 
 def _terminate(signum, frame):  # noqa: ARG001 - signal handler signature

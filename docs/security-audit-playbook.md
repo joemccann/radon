@@ -59,9 +59,16 @@ line here whenever you ship a security fix.**
   loopback, so peer address alone is untrustworthy). The relay must call it.
   (`feedback_ws_relay_trust_forwarding_headers`)
 - **Share-content allowlist** — the 5 `*/share/content` routes serve ONLY
-  `tweet-<type>-<date>[-card-N].html` from directly inside `reports/`, scoped per
-  type. Never widen to arbitrary `reports/` paths.
+  `tweet-<type>-<date>[-card-N].html` from directly inside `data/share_cards/`, scoped per
+  type. Never widen to arbitrary paths.
   (`feedback_share_content_allowlist_not_arbitrary_reports`, `web/lib/shareReportPath.ts`)
+- **Anonymous readers rooted in a shared writable mount serve regular files only** —
+  `data/` is a multi-writer read-write bind mount, so a lexical allowlist on the name
+  does not bound what a name resolves to. Both `*/share/content` readers open the final
+  component with `O_NOFOLLOW` and serve only when the descriptor is a regular file
+  (`web/lib/shareReportPath.ts:readRegularShareCardFile`, `scripts/api/server.py:share_content`).
+  When a served directory moves, ask who else can write the new location.
+  (`web/tests/share-card-regular-file.test.ts`, `scripts/tests/test_share_cards_dir.py`)
 - **AUTH_EXEMPT_PATHS** — must NOT contain `/docs` or `/openapi.json` (trusted-local
   only); pinned by `test_health_payload.py` + `test_route_authz_matrix.py`.
   (`feedback_auth_exempt_paths_double_pin`)
@@ -70,6 +77,14 @@ line here whenever you ship a security fix.**
   must apply `is_trusted_local_request()` inside the handler, before any
   side effect, because Caddy's `/api/ib/*` mount makes every exempt path
   world-reachable. Pinned by `test_ws_ticket_validate_local_only.py`.
+- **A green verdict pins the full check-name set** — every path that turns a
+  PR head's checks into "ready to merge" (`nightly_deliver.classify_checks` in
+  the watch step, `deliver_urls_verified` in `security_post.sh`) compares the
+  rollup against `expected_pull_request_check_names()` from the workflow files
+  and treats a missing name as pending. An all-green rollup is not a green
+  suite: the PR-body check lands in seconds, long before the pytest and Vitest
+  shards register. Unreadable expectations fail closed. Pinned by
+  `test_nightly_deliver.py` and `test_runner_security_hooks.py`.
 - **Middleware perimeter** — default-deny (`if(!isPublicRoute)`), ALLOWED_USER_IDS
   operator gate, the `/api` matcher always running, `PUBLIC_SHARE_API_ROUTES` a
   FIXED explicit list (no `/api/**/share` regex).
@@ -525,7 +540,9 @@ line here whenever you ship a security fix.**
   runs first, so every character class in it excludes both quotes AND the
   backslash that escapes one: eating a closing quote, or the escape in front
   of one, moved where the value appeared to end and published its tail. That
-  root cause has now shipped three times, each time as a different character.
+  root cause has now shipped four times, each time as a different character
+  or rule: the credential-query and database-URL rules were the fourth, their
+  value runs ending only at whitespace or a quote and so eating the escape.
   A new pre-tokenizer rule carries the burden of proving it alters no quoting.
 
   The continuation rule follows the language, not just the indentation: an
@@ -533,6 +550,12 @@ line here whenever you ship a security fix.**
   trailing backslash, and a blank line inside a bracket is still inside it.
   A value that continues only because of indentation was the narrower rule,
   and a key line ending in `(` with the value at column zero escaped it.
+  Indentation is measured after the excerpt lead the key line carries: a
+  quoted (`> `) or bulleted (`- `) excerpt repeats that lead on every line,
+  so from column zero a next-line value sat level with its key and the
+  continuation stopped before it. A line carrying only the bare marker is
+  blank. The detector reads a lead-only value token the same way, since the
+  literal follows the repeated marker on that line.
 
   An egress scrub runs before any truncation, never after. Slicing a
   diagnostic to its last N characters can remove the `KEY=` or provider

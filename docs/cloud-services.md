@@ -805,7 +805,9 @@ deploy's `install-units` verb from `installed-units.sha256`. Spec:
 
 Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_calm_streak.py`, `TimeoutStartSec=300`. Pulls Cboe's official
-`_SPX.json` daily OHLC history with a conditional GET, counts consecutive
+`_SPX.json` daily OHLC history with a conditional GET. The GET sends
+`Referer: https://www.cboe.com/` and keeps User-Agent `radon/2.0`, because
+Cloudflare 403s that JSON when Referer is absent. Counts consecutive
 completed sessions whose `(high - low) / prior close` stays at or under 1%,
 and writes `calm_streak_history` (only new sessions; an empty table backfills
 from 1985) plus the `calm-streak` snapshot. The regeneration time of the Cboe
@@ -817,7 +819,7 @@ heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 
 ### SPX breadth (`radon-record-high-breadth.timer`)
 
-Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
+Post-close TradingView comparison on the app host. Cadence and the OAuth store are the [operations timer row](operations.md). The 18:15 ET pass warns on a one-session gap. The 20:15 ET pass fails if that session is still incomplete. Formula and source gaps are [source parity](indicators/record-high-breadth-source-parity.md). This unit does not install account credentials.
 
 ### ASK-BID imbalance (`radon-imbalance.timer`)
 
