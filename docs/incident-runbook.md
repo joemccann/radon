@@ -10,6 +10,11 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 - HTTP 200 is transport truth only. `/api/service-health`, `/api/probe/freshness`,
   and `:8330/status` all return 200 during real outages — judge the BODY.
+- Journal freshness on `/api/probe/freshness` during RTH is pipeline liveness:
+  `journal-sync` still ok inside its open window, and no live `journal-gap-sli`
+  row with `missing_exec_id_count>0`. Last-fill `age_secs` is informational.
+  One error cycle, a gap-sli self-error, or a stale gap-sli heartbeat does
+  not page. A missing row still fails the leg.
 - An anonymous 401/404 on a protected route is the auth perimeter, not an outage.
   Liveness curls use the public `/sign-in` route only.
 - A bounded-probe timeout is `unknown`, never `down`. Off-hours quiet is normal
