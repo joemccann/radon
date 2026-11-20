@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+import nightly_deliver as _nd
 import nightly_phase_status as nps
 
 REPO = Path(__file__).resolve().parents[2]
@@ -38,6 +39,8 @@ LIB = ("nightly_deliver.py", "nightly_issue_prune.py", "credential_redaction.py"
 BASH = shutil.which("bash") or "/bin/bash"
 TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/usr/bin/timeout").parent)
 PR = "https://github.com/joemccann/radon/pull/901"
+FULL_CHECK_NAMES = ",".join(
+    "".join(name.split()) for name in _nd.expected_pull_request_check_names())
 HEAD_SHA = "a" * 40
 AUDITED_SHA = "0123456789abcdef0123456789abcdef01234567"
 TS_RE = r"ts=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
@@ -341,7 +344,7 @@ def rig(tmp_path):
             "RUNNER_DIR": str(runner), "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(slice_log),
             "PHASE_START_MARK": str(mark), "RADON_RUNNER_GH": str(bin_dir / "gh"),
             "RADON_SECURITY_REPORTS_REMOTE": str(tmp_path / "no-reports.git"), "STUB_ISSUE": "204",
-            "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS",
+            "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS {FULL_CHECK_NAMES}",
             "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555",
             "RADON_WEEKEND_SKIP_ISSUE_PRUNE": "1", "PHASE_AUDITED_SHA": AUDITED_SHA, **env,
         }
