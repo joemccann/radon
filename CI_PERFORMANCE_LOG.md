@@ -2965,3 +2965,64 @@ was red (3 failed: missing previous-SHA cache step) then green (3
 passed). Related cloud gateway image contracts 32 passed. YAML parses.
 Full suites, Vitest, Docker builds, and workflow lint are left to PR
 CI.
+
+## CIP-035 - copy scripts/ after the Next build in the node image (2026-11-20) - VALIDATING
+
+`COPY scripts/ ./scripts` sits above `bun run build`, so a scripts-only
+push invalidates the Next layer even though the compile reads only
+`scripts/config/market_holidays.json` and
+`scripts/config/market_early_closes.json`
+(`web/lib/marketCalendar.ts`). Other `scripts/` imports under `web/`
+are tests, which `.dockerignore` already excludes.
+
+Evidence, mixed run
+[44594349045](https://github.com/joemccann/radon/actions/runs/44594349045)
+job 135808679573 (`gh run view --json jobs` plus the node image log).
+Queue is excluded from the gain:
+
+| Step | Wall |
+|---|---|
+| bun install (root + web) | CACHED |
+| playwright install | 16.9s (uncached; separate from this COPY) |
+| COPY scripts/ | 4.1s |
+| bun run build (Turbopack 20.0s compile) | 24.7s |
+| export layers / cache-to / push | 8.0s / 12.1s / 84.3s |
+| node job wall | 171s, last image gate (gateway 122s) |
+
+CIP-002 deferred this move. After CIP-034 the gateway job is expected
+to drop, so the 171s node job becomes the image authorizer on
+scripts-only mixed deploys. Copying the two holiday tables before
+`COPY web/` + `bun run build`, then the rest of `scripts/` after the
+build, is expected to cache the 24.7s Next layer whenever holidays and
+`web/` are unchanged. Playwright cache misses stay CIP-036. Exact SHA
+tags, health, recovery, rollback, and the 40-second stability window
+stay. Runner minutes fall with the skipped compile.
+
+**Change.** `docker/app/Dockerfile.node` copies the two holiday JSON
+files before `COPY web/` and `bun run build`, then `COPY scripts/`
+after the `.next/cache` cleanup and before `USER radon`. bun install
+and playwright install stay ahead of the holiday COPY. No `needs`
+edge, test inventory, coverage, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Revert if a scripts-only main rebuild
+with unchanged holiday tables and `web/` still runs
+`next build --experimental-build-mode=compile` for ~20s, if the image
+drops `scripts/` (newsfeed / relay need the tree), or if Next compile
+starts importing any other path under `scripts/`.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build node image | 171s | pending | TBD until 5 samples |
+
+Before is the node-image job wall on run 44594349045 (job
+135808679573). Acceptance remains five comparable mixed scripts-only
+deploys whose holiday tables and `web/` are unchanged, before and
+after: same-class p50 at least 10% and 15s faster; p95 no worse than
+5% or 15s; cold p50 no worse than 10%; runner minutes no more than
+20% higher. The first after-run still measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip035_node_scripts_after_build.py`
+was red (2 failed: holiday COPY missing) then green (2 passed).
+Related `test_app_images.py` + `test_app_plane_cutover_safety.py` 109
+passed / 2 skipped. Full suites, Vitest, Docker builds, and workflow
+lint are left to PR CI.
