@@ -36,7 +36,12 @@ def _workflow() -> dict:
 def test_py_tests_stay_on_loadfile_without_a_new_shard() -> None:
     job = _workflow()["jobs"]["py-tests"]
     commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
-    assert "--dist loadfile" in commands
+    assert "matrix.xdist" in commands
+    rows = {str(row["shard"]): row for row in job["strategy"]["matrix"]["include"]}
+    for name, row in rows.items():
+        if name == "rest":
+            continue
+        assert row["xdist"] == "-n auto --dist loadfile", name
     shards = job["strategy"]["matrix"]["shard"]
     assert shards == [
         "scripts-ac",
