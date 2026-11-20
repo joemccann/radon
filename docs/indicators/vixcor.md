@@ -641,7 +641,7 @@ runs regardless. The snapshot and heartbeat run on **every** cycle including the
 ### E.4 Cadence, unit and timer
 
 `OnCalendar=*-*-* 02:35:00 UTC`, daily, every calendar day. Verified free:
-straddle 02:15, cor 02:20, nothing at 02:35. It must run **after** `radon-cor`
+cor 02:20, nothing at 02:35 (straddle moved from 02:15 to 03:25 on 2026-11-20). It must run **after** `radon-cor`
 so the parent row for the session exists; cor's `TimeoutStartSec=300` means the
 gap has to clear 02:25, so 02:35 is the first safe slot.
 

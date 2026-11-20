@@ -10,7 +10,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | vol-skew-mr | `/scanner?mode=vol-skew-mr` | `vol-skew-mr` (on-demand) | [vol-skew-mr.md](vol-skew-mr.md) |
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
-| straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
+| straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) (daily 03:25 UTC, after Cboe's EST SPX publish; LIVE measures from the prior session's close) |
 | msr | `/regime/msr` | `msr` | [msr.md](msr.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor`, `vixcor:live` | [vixcor.md](vixcor.md) (provisional current session every 5 min 09:00-15:55 ET + 02:35 UTC official) |

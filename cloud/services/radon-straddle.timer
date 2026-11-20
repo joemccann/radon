@@ -2,11 +2,14 @@
 Description=Radon Straddle Indicator - daily Cboe SPX/VIX1D pull
 
 [Timer]
-# Cboe appends the session row ~20:00 ET, which is 00:00 UTC (EDT) or
-# 01:00 UTC (EST); 02:15 UTC clears both DST regimes with margin. Runs
-# daily including weekends: weekend/holiday runs are 304 heartbeats that
-# keep service_health fresh inside the 48h API staleness window.
-OnCalendar=*-*-* 02:15:00 UTC
+# Cboe stamps SPX_History.csv ~21:10-21:31 ET: 01:11-01:31 UTC in EDT,
+# 02:10-02:31 UTC in EST (Last-Modified, Oct-Nov 2026). The old 02:15 slot
+# raced the EST publish and left the tab one session behind most nights;
+# 03:25 clears the latest observed stamp by ~50 minutes and sits in the free
+# gap between model-catalog 03:10 and the 03:40 slot. Runs daily including
+# weekends: weekend/holiday runs are 304 heartbeats that keep service_health
+# fresh inside the 48h API staleness window.
+OnCalendar=*-*-* 03:25:00 UTC
 Persistent=true
 RandomizedDelaySec=300
 
