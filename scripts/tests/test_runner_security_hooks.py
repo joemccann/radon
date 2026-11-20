@@ -29,7 +29,13 @@ TIMEOUT_DIR = str(Path(shutil.which("timeout") or shutil.which("gtimeout") or "/
 MARKERS = {"security": "SECURITY-NIGHTLY PHASE COMPLETE:", "security-deepsec": "SECURITY-DEEPSEC PHASE COMPLETE:"}
 LABELS = {"security": "security-nightly", "security-deepsec": "security-deepsec"}
 PR = "https://github.com/joemccann/radon/pull/901"
-HEAD_SHA = "a" * 40
+# The hook's `pr view` stub: state, head branch, cross-repo, head SHA, the
+# conclusion tokens, then the whitespace-stripped check NAMES. The names are
+# derived from the real workflow files, which the rig seeds into its clone.
+sys.path.insert(0, str(REPO / "scripts"))
+import nightly_deliver as _nd  # noqa: E402
+FULL_CHECK_NAMES = ",".join(
+    "".join(name.split()) for name in _nd.expected_pull_request_check_names())
 CANARY_TOKEN = "ghp_" + "A" * 36
 CANARY_FINDING = "web/lib/secret.ts:12 lets an anonymous caller read /api/admin/keys"
 UNSET = (REPO / "scripts" / "runner" / "loops" / "security.env").read_text().split('AGENT_UNSET="')[1].split('"')[0]
@@ -60,6 +66,9 @@ def rig(request, tmp_path):
     src = tmp_path / "origin-src"
     src.mkdir()
     (src / "README.md").write_text("radon\n")
+    (src / ".github" / "workflows").mkdir(parents=True)
+    for wf in ("ci.yml", "pr-body.yml"):
+        shutil.copy2(REPO / ".github" / "workflows" / wf, src / ".github" / "workflows" / wf)
     _git("init", "-q", "-b", "main", cwd=src)
     _git("add", ".", cwd=src)
     _git("commit", "-qm", "init", cwd=src)
@@ -102,6 +111,10 @@ def rig(request, tmp_path):
 
     r = Rig()
     r.loop, r.work, r.state, r.home, r.calls, r.origin, r.reports = loop, work, state, home, calls, origin, reports
+    # The PR head the deliver record was verified at must be a real commit of
+    # the clone: the hook binds the workflow expectations to it.
+    r.head_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, capture_output=True,
+                                text=True, check=True).stdout.strip()
     r.scratch = state / "scratch"
     r.marker = MARKERS[loop]
     r.mark = state / f".phase-start-{loop}"
@@ -117,7 +130,7 @@ def rig(request, tmp_path):
                 "RUNNER_PYTHON": sys.executable, "PHASE_LOG": str(r.slice), "PHASE_START_MARK": str(r.mark),
                 "RADON_RUNNER_GH": str(bin_dir / "gh"),
                 "RADON_SECURITY_REPORTS_REMOTE": str(reports), "STUB_ISSUE": "204",
-                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {HEAD_SHA} SUCCESS",
+                "STUB_PR_VIEW": f"OPEN {loop}/2026-09-28 false {r.head_sha} SUCCESS {FULL_CHECK_NAMES}",
                 "STUB_COMMENT_URL": "https://github.com/joemccann/radon/issues/204#issuecomment-555", **extra}
 
     def pre(phase="audit", cwd=None, **extra):
@@ -390,7 +403,7 @@ def _record(rig, **fields):
     record = rig.state / f".{rig.loop}-deliver" / "record.json"
     record.parent.mkdir(parents=True, exist_ok=True)
     body = {"loop": rig.loop, "branch": f"{rig.loop}/2026-09-28", "pr": 901, "url": PR,
-            "status": "green", "check": None, "head_sha": HEAD_SHA,
+            "status": "green", "check": None, "head_sha": rig.head_sha,
             "updated_at": "2099-01-01T00:00:00+00:00"}
     body.update(fields)
     record.write_text(json.dumps(body))
@@ -495,22 +508,111 @@ def test_a_missing_or_unfinished_check_rollup_is_never_green(rig, rollup):
     # "No checks reported" is PENDING, not success.
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {HEAD_SHA} {rollup}")
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} {rollup} {FULL_CHECK_NAMES}")
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
 
 
+# A rollup can be all-green and still be a SUBSET of the suite: the PR-body
+# check finishes in seconds, long before the pytest and Vitest shards register
+# on the head. `nightly_deliver.classify_checks` already refuses that partial
+# set; the hook's own re-verification must refuse it too.
+
+
+def test_an_all_green_rollup_missing_expected_checks_is_pending_not_ready(rig):
+    _record(rig)
+    only_body = "".join("PR body template".split())
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {only_body}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_a_rollup_with_no_check_names_is_never_ready(rig):
+    # Conclusions alone, no names: there is nothing to compare the suite against.
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS,SUCCESS")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+
+
+def test_unreadable_workflow_expectations_fail_closed(rig):
+    # The expected suite comes from the workflow files committed at the
+    # verified head. A head without them cannot say what "every check"
+    # means, so nothing is ready.
+    _git("rm", "-q", "-r", ".github/workflows", cwd=rig.work)
+    _git("commit", "-qm", "drop workflows", cwd=rig.work)
+    bare = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rig.work, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _record(rig, head_sha=bare)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {bare} SUCCESS {FULL_CHECK_NAMES}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_workflow_expectations_edited_in_the_working_tree_verify_nothing(rig):
+    # The expected suite is read from the clone, which the agent can edit.
+    # A working-tree workflow that differs from the verified head is not the
+    # suite GitHub runs, so nothing is ready.
+    _record(rig)
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_an_index_flag_cannot_hide_a_working_tree_workflow_edit(rig):
+    # `git diff` against the verified commit honours assume-unchanged and
+    # skip-worktree, so a flagged file reads as clean while its content on
+    # disk differs. The expectations must come from the commit's blobs, not
+    # from anything the clone's index can suppress.
+    _record(rig)
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    subprocess.run(["git", "update-index", "--assume-unchanged", ".github/workflows/ci.yml"],
+                   cwd=rig.work, check=True, capture_output=True)
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_extra_unexpected_checks_in_a_full_green_rollup_still_verify(rig):
+    _record(rig)
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {rig.head_sha} SUCCESS,SUCCESS "
+                                f"{FULL_CHECK_NAMES},codecov/patch")
+
+    assert out["status"].startswith("OK: 1 PR(s) green, ready to merge"), out
+
+
 @pytest.mark.parametrize("fields", [
-    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS",
-    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS",
-    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS",
-    "OPEN main false {sha} SUCCESS",
+    "CLOSED {prefix}/2026-09-28 false {sha} SUCCESS {names}",
+    "MERGED {prefix}/2026-09-28 false {sha} SUCCESS {names}",
+    "OPEN {prefix}/2026-09-28 true {sha} SUCCESS {names}",
+    "OPEN main false {sha} SUCCESS {names}",
 ])
 def test_a_closed_cross_repo_or_off_prefix_pr_is_never_ready(rig, fields):
     _record(rig)
     out = rig.post(phase="deliver", output=_stamp(rig),
-                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=HEAD_SHA))
+                   STUB_PR_VIEW=fields.format(prefix=rig.loop, sha=rig.head_sha, names=FULL_CHECK_NAMES))
 
     assert out["status"].startswith("INCOMPLETE: unverified-pr-url"), out
 
@@ -695,6 +797,26 @@ def test_a_missing_agent_report_publishes_a_sanitized_failure_report(rig):
     for leak in (CANARY_TOKEN, "CLI crashed", "payload=drop", "/api/admin/keys",
                  str(rig.home), "/Users/_radonbot", "radon-security-reports"):
         assert leak not in comment, leak
+
+
+def test_the_log_tail_is_scrubbed_before_it_is_cut(rig):
+    """The failure report quotes the last 80 lines of the phase log. Cutting
+    first can drop a block-scalar header while keeping its indented body, and
+    without the header the scrubber has nothing to recognise the body by. The
+    scrub must see the whole log; only then is the tail taken."""
+    (rig.home / ".radon-runner-reports-key").write_text("key\n")
+    rig.scratch.mkdir(parents=True, exist_ok=True)
+    old = time.time() - 30
+    os.utime(rig.mark, (old, old))
+    body_lines = [f"  qzBodyLine{i}NOTREAL" for i in range(120)]
+    log = "\n".join(["Error: CLI crashed", "password: |", *body_lines, "session ended", ""])
+
+    out = rig.post(rc=1, output=log)
+
+    body = _published(rig)
+    assert body is not None, out
+    assert "session ended" in body
+    assert "NOTREAL" not in body, body
 
 
 def test_a_block_scalar_or_compound_named_credential_body_is_redacted(rig):

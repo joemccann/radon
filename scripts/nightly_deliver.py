@@ -215,22 +215,42 @@ def _checks_from_workflow(text: str) -> list[str] | None:
     return names or None
 
 
-def expected_pull_request_check_names(root: Path | None = None) -> list[str] | None:
+def _workflow_text(root: Path, name: str, rev: str | None) -> str:
+    """The workflow file from the working tree, or from the blob at ``rev``.
+
+    The blob read is index-independent: `git diff` against a commit honours
+    assume-unchanged and skip-worktree, so a flagged file reads as clean while
+    its content on disk differs. Replacement objects are disabled so a
+    `refs/replace` entry cannot stand in for the commit's tree.
+    """
+    path = Path(".github") / "workflows" / name
+    if rev is None:
+        return (root / path).read_text(encoding="utf-8")
+    proc = subprocess.run(
+        ["git", "-C", str(root), "--no-replace-objects", "show", f"{rev}:{path.as_posix()}"],
+        capture_output=True, text=True, check=False, timeout=60,
+    )
+    if proc.returncode != 0:
+        raise OSError(f"git show {rev}:{path} failed")
+    return proc.stdout
+
+
+def expected_pull_request_check_names(
+    root: Path | None = None, *, rev: str | None = None,
+) -> list[str] | None:
     """Check names CI must report before a PR is green.
 
     Derived from the workflow files the same way the merge-group tests pin
     the unconditional jobs. Push-only and path-gated jobs are not required
-    on every pull request. None when the workflows cannot be read.
+    on every pull request. With ``rev``, the files are the blobs committed
+    at that revision rather than the working tree. None when the workflows
+    cannot be read.
     """
     root = Path(__file__).resolve().parents[1] if root is None else Path(root)
     try:
-        ci_names = _checks_from_workflow(
-            (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        )
-        pr_names = _checks_from_workflow(
-            (root / ".github" / "workflows" / "pr-body.yml").read_text(encoding="utf-8")
-        )
-    except OSError:
+        ci_names = _checks_from_workflow(_workflow_text(root, "ci.yml", rev))
+        pr_names = _checks_from_workflow(_workflow_text(root, "pr-body.yml", rev))
+    except (OSError, subprocess.SubprocessError):
         return None
     if not ci_names or not pr_names:
         return None
@@ -503,6 +523,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_dstatus.add_argument("--loop", required=True, choices=LOOPS)
 
+    p_expected = sub.add_parser(
+        "expected-checks",
+        help="the check names CI must report on a PR head, one per line (rc 1 when unreadable)",
+    )
+    p_expected.add_argument("--root", required=True, help="repository root holding .github/workflows")
+    p_expected.add_argument("--rev", default=None,
+                            help="read the workflow blobs committed at this revision, not the working tree")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "verdict":
@@ -529,6 +557,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "deliver-status":
         print(status_from_record(args.loop))
+        return 0
+    if args.cmd == "expected-checks":
+        names = expected_pull_request_check_names(Path(args.root), rev=args.rev)
+        if not names:
+            return 1
+        sys.stdout.write("".join(f"{name}\n" for name in names))
         return 0
     if args.cmd == "show":
         record = read_record(args.loop) or {}
