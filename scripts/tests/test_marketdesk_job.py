@@ -8,8 +8,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from http.client import RemoteDisconnected
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pytest
 
@@ -573,9 +575,6 @@ def test_main_returns_nonzero_on_failure_and_zero_on_success(monkeypatch, capsys
 @pytest.mark.parametrize("exc", [
     TimeoutError("The read operation timed out"),
     ConnectionResetError("Connection reset by peer"),
-    DbHttpError("TimeoutError: The read operation timed out"),
-    DbHttpError("RemoteDisconnected: Remote end closed connection without response"),
-    DbHttpError("research transaction transport failed: TimeoutError"),
 ])
 def test_main_exits_zero_on_a_transport_timeout(monkeypatch, capsys, exc):
     # 2026-11-15 05:34:52 UTC: one Hrana read timeout exited 1, latched the unit failed and paged
@@ -593,6 +592,37 @@ def test_main_exits_zero_on_a_transport_timeout(monkeypatch, capsys, exc):
 ])
 def test_main_still_fails_on_non_transport_errors(monkeypatch, exc):
     monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(exc))
+    assert job.main() == 1
+
+
+def _chained_db_error(message, cause):
+    error = DbHttpError(message)
+    error.__cause__ = cause
+    return error
+
+
+@pytest.mark.parametrize("cause", [
+    TimeoutError("The read operation timed out"),
+    ConnectionResetError("Connection reset by peer"),
+    RemoteDisconnected("Remote end closed connection without response"),
+    URLError("timed out"),
+])
+def test_chained_db_http_transport_exits_zero(monkeypatch, capsys, cause):
+    """db_http wraps the wire error with `from exc`. The cause is the contract."""
+    error = _chained_db_error(
+        f"{type(cause).__name__}: {cause}", cause)
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(error))
+    assert job.main() == 0
+    assert "cycle deferred: transport" in capsys.readouterr().err
+
+
+def test_transport_message_without_cause_still_fails_the_oneshot(monkeypatch):
+    """A statement error can carry TimeoutError in the text. Cause is required."""
+    monkeypatch.setattr(
+        job, "run_cycle",
+        lambda **kw: (_ for _ in ()).throw(
+            DbHttpError("TimeoutError: The read operation timed out")),
+    )
     assert job.main() == 1
 
 
