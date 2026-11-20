@@ -425,6 +425,120 @@ class TestEmptySourceBody:
         assert ("health", "calm-streak", "error") in writes
 
 
+class _RefererGatedJson:
+    """HTTP 200 JSON body. json.load reads the whole payload."""
+
+    status = 200
+
+    def __init__(self, payload: dict, last_modified: str):
+        self._raw = json.dumps(payload).encode()
+        self.headers = {
+            "Content-Type": "application/json",
+            "Last-Modified": last_modified,
+        }
+
+    def read(self, _n=-1):
+        data, self._raw = self._raw, b""
+        return data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _three_session_payload() -> dict:
+    """Three OHLC rows so compute_streaks emits two published sessions."""
+    rows = []
+    for day, close in (("2026-11-17", 100.0), ("2026-11-18", 100.2), ("2026-11-19", 100.3)):
+        rows.append({
+            "date": day,
+            "open": f"{close - 0.2:.6f}",
+            "high": f"{close + 0.3:.6f}",
+            "low": f"{close - 0.3:.6f}",
+            "close": f"{close:.6f}",
+            "volume": "0.0",
+        })
+    return {"timestamp": "2026-11-20 02:09:10", "symbol": "_SPX", "data": rows}
+
+
+class TestCloudflareReferer:
+    def test_historical_json_403_without_cboe_referer_still_exits_zero(
+        self, writes, monkeypatch, capsys,
+    ):
+        """Page 5061ba0b8fb9030ac87d717e218a2892 (2026-11-20 02:40Z).
+
+        Cloudflare blocks cdn.cboe.com delayed-quotes historical JSON with
+        HTTP 403 unless the request carries Referer https://www.cboe.com/.
+        The 02:40 oneshot exited 1 in the same second (Result=exit-code,
+        NRestarts=0, about 118ms CPU). A request with the honest radon/2.0
+        UA and that Referer is HTTP 200. Missing Referer must not latch
+        the unit. A browser User-Agent is not the fix.
+        """
+        import fetch_calm_streak as mod
+        from urllib.error import HTTPError
+        from urllib.request import Request
+
+        seen: list[tuple] = []
+
+        def urlopen(req, timeout=None):
+            assert isinstance(req, Request)
+            referer = req.get_header("Referer")
+            ua = req.get_header("User-agent")
+            seen.append((req.full_url, referer, ua, timeout))
+            if referer != "https://www.cboe.com/" or ua != "radon/2.0":
+                raise HTTPError(req.full_url, 403, "Forbidden", hdrs=None, fp=None)
+            return _RefererGatedJson(
+                _three_session_payload(),
+                "Fri, 20 Nov 2026 02:09:40 GMT",
+            )
+
+        monkeypatch.setattr(mod, "urlopen", urlopen)
+        monkeypatch.setattr(mod, "_latest_stored_date", lambda: "2026-11-17")
+        monkeypatch.setattr(mod, "last_completed_session_date", lambda now: "2026-11-19")
+
+        assert mod.main([]) == 0
+        err = capsys.readouterr().err
+        assert "run failed" not in err
+        assert "HTTP Error 403" not in err
+        assert seen == [(
+            mod.CBOE_SPX_URL,
+            "https://www.cboe.com/",
+            "radon/2.0",
+            mod.FETCH_TIMEOUT_S,
+        )]
+        assert ("health", "calm-streak", "ok") in writes
+        mirror = json.loads(mod.CALM_STREAK_JSON.read_text())
+        assert mirror["data_date"] == "2026-11-19"
+        assert mirror["missing"] is False
+        assert mirror["source_last_modified"] == "Fri, 20 Nov 2026 02:09:40 GMT"
+
+    def test_http_403_still_fails_when_the_referer_does_not_clear_it(
+        self, writes, monkeypatch, capsys,
+    ):
+        """A block that survives the Cboe Referer is still a failed fetch.
+        Do not keep last-good for it. HTTP 5xx stays on the same path."""
+        import fetch_calm_streak as mod
+        from urllib.error import HTTPError
+
+        seen: list[str | None] = []
+
+        def urlopen(req, timeout=None):
+            seen.append(req.get_header("Referer"))
+            raise HTTPError(req.full_url, 403, "Forbidden", hdrs=None, fp=None)
+
+        monkeypatch.setattr(mod, "urlopen", urlopen)
+
+        assert mod.main([]) == 1
+        err = capsys.readouterr().err
+        assert seen == ["https://www.cboe.com/"]
+        assert "run failed" in err
+        assert "HTTP Error 403: Forbidden" in err
+        assert "keeping last-good" not in err
+        assert ("health", "calm-streak", "error") in writes
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
