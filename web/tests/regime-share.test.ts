@@ -41,10 +41,12 @@ describe("POST /regime/share FastAPI endpoint", () => {
     expect(content).toContain('"/regime/share"');
   });
 
-  it("calls generate_regime_share.py", async () => {
+  it("calls generate_regime_share.py through api/regime_share.py", async () => {
     const serverPath = path.join(PROJECT_ROOT, "scripts", "api", "server.py");
     const content = await readFile(serverPath, "utf-8");
-    expect(content).toContain("generate_regime_share.py");
+    expect(content).toContain('regime_share_gen.generate(live, card_type="regime")');
+    const owner = await readFile(path.join(PROJECT_ROOT, "scripts", "api", "regime_share.py"), "utf-8");
+    expect(owner).toContain("generate_regime_share.py");
   });
 });
 
@@ -58,10 +60,8 @@ describe("POST /internals/share FastAPI endpoint", () => {
   it("calls generate_regime_share.py", async () => {
     const serverPath = path.join(PROJECT_ROOT, "scripts", "api", "server.py");
     const content = await readFile(serverPath, "utf-8");
-    const idxInternals = content.indexOf('"/internals/share"');
-    const idxGenerate = content.indexOf("generate_regime_share.py");
-    expect(idxInternals).toBeGreaterThan(-1);
-    expect(idxGenerate).toBeGreaterThan(-1);
+    expect(content).toContain('"/internals/share"');
+    expect(content).toContain('regime_share_gen.generate(live, card_type="internals")');
   });
 });
 
