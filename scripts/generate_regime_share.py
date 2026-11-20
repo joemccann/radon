@@ -30,7 +30,7 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.card_screenshot import screenshot_card, shared_browser  # noqa: E402
 from utils.cta_percentiles import normalize_pctile, reconcile_tables  # noqa: E402
 
 DATA_DIR = PROJECT_ROOT / "data"
@@ -703,18 +703,19 @@ def main():
     card_html_paths = []
     png_paths = []
 
-    for i, gen in enumerate(generators, 1):
-        html_content = gen(data, ds)
-        html_path = str(REPORTS_DIR / f"tweet-regime-{ds}-card-{i}.html")
-        with open(html_path, "w") as f:
-            f.write(html_content)
-        card_html_paths.append(html_path)
+    with shared_browser():
+        for i, gen in enumerate(generators, 1):
+            html_content = gen(data, ds)
+            html_path = str(REPORTS_DIR / f"tweet-regime-{ds}-card-{i}.html")
+            with open(html_path, "w") as f:
+                f.write(html_content)
+            card_html_paths.append(html_path)
 
-        png_path = str(REPORTS_DIR / f"tweet-regime-{ds}-card-{i}.png")
-        ok = screenshot_card(html_path, png_path)
-        if not ok:
-            print(f"⚠ Screenshot failed for card {i}", file=sys.stderr)
-        png_paths.append(png_path if ok else "")
+            png_path = str(REPORTS_DIR / f"tweet-regime-{ds}-card-{i}.png")
+            ok = screenshot_card(html_path, png_path)
+            if not ok:
+                print(f"⚠ Screenshot failed for card {i}", file=sys.stderr)
+            png_paths.append(png_path if ok else "")
 
     # Base64 encode
     cards_b64 = []
