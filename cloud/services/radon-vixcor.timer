@@ -1,14 +1,21 @@
 [Unit]
-Description=Radon VIXCOR Indicator - daily Cboe VIX x COR3M correlation
+Description=Radon VIXCOR Indicator - every 5 minutes in ET trading hours plus daily Cboe VIX x COR3M correlation
 
 [Timer]
+# Intraday fires refresh a provisional current-session row (live VIX and COR3M
+# from IB pool bars, else Cboe 15-minute delayed quotes, with the 20-session
+# correlation recomputed) in the small vixcor:live snapshot. Unchanged-source
+# ticks are 304 heartbeats that never rewrite the official snapshot. The
+# window ends at 15:55: every intraday slot precedes the close, so none is
+# expected to carry the official session, which posts at the 02:35 UTC slot.
+OnCalendar=Mon..Fri *-*-* 09..15:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
 # 02:35 UTC, 15 minutes behind radon-cor.timer (02:20 UTC, TimeoutStartSec=300)
 # so the COR3M row for the session is already in Turso when this child reads
 # it. Runs every calendar day: weekend and holiday runs are 304 heartbeats
 # that keep service_health fresh inside the 26h staleness window.
 OnCalendar=*-*-* 02:35:00 UTC
 Persistent=true
-RandomizedDelaySec=120
+RandomizedDelaySec=0
 
 [Install]
 WantedBy=timers.target

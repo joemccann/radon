@@ -10,6 +10,8 @@ export interface ProvisionalMeta {
   source: ProvisionalSource;
   quote_time: string | null;
   scan_time: string;
+  /** Legs the writer held at their last official close (Cboe SKEW posts after the close). */
+  carried?: string[];
 }
 
 export interface LiveSnapshot<Row> {
@@ -19,16 +21,23 @@ export interface LiveSnapshot<Row> {
   current?: unknown;
   source: ProvisionalSource | null;
   quote_time: string | null;
+  carried?: string[];
 }
 
 interface SeriesPayload<Row> {
   series: Row[];
-  data_date: string | null;
+  /** Official close date; payloads keyed on `as_of` alone (VIX-COR) omit it. */
+  data_date?: string | null;
+  as_of?: string | null;
   status?: string | null;
   expected_session?: string | null;
 }
 
 type Execute = (statement: { sql: string; args: string[] }) => Promise<{ rows: ArrayLike<unknown> }>;
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
 
 /** Latest live snapshot for `service`, or null when absent, malformed or unreadable. */
 export async function readLiveSnapshot<Row extends { date: string }>(
@@ -47,6 +56,7 @@ export async function readLiveSnapshot<Row extends { date: string }>(
     if (live.row !== null && !isRow(live.row)) return null;
     if (live.source !== null && live.source !== "ib" && live.source !== "cboe_delayed") return null;
     if (live.quote_time !== null && typeof live.quote_time !== "string") return null;
+    if (live.carried !== undefined && !isStringList(live.carried)) return null;
     return live as unknown as LiveSnapshot<Row>;
   } catch {
     return null;
@@ -63,7 +73,8 @@ export function appendProvisionalRow<Row extends { date: string }, P extends Ser
   live: LiveSnapshot<Row> | null,
 ): P & { provisional?: ProvisionalMeta } {
   const row = live?.row;
-  if (!live || !row || !live.source || !payload.data_date || row.date <= payload.data_date) return payload;
+  const closeDate = "data_date" in payload ? payload.data_date : payload.as_of;
+  if (!live || !row || !live.source || !closeDate || row.date <= closeDate) return payload;
   const series = [...payload.series, row];
   const expected = payload.expected_session;
   return {
@@ -71,10 +82,15 @@ export function appendProvisionalRow<Row extends { date: string }, P extends Ser
     series,
     count: series.length,
     current: live.current ?? row,
-    data_date: row.date,
+    ...("data_date" in payload ? { data_date: row.date } : {}),
     ...("as_of" in payload ? { as_of: row.date } : {}),
     ...(payload.status !== undefined ? { status: expected && row.date >= expected ? "ok" : payload.status } : {}),
-    provisional: { source: live.source, quote_time: live.quote_time, scan_time: live.scan_time },
+    provisional: {
+      source: live.source,
+      quote_time: live.quote_time,
+      scan_time: live.scan_time,
+      ...(live.carried?.length ? { carried: live.carried } : {}),
+    },
   };
 }
 
@@ -84,5 +100,6 @@ const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York",
 export function provisionalNote(provisional: ProvisionalMeta): string {
   const source = provisional.source === "ib" ? "IB index bars" : "Cboe 15-minute delayed quotes";
   const time = provisional.quote_time ? provisional.quote_time.slice(11, 16) : ET_TIME.format(new Date(provisional.scan_time));
-  return `Current session is provisional: ${source} as of ${time} ET, until the official close posts.`;
+  const held = provisional.carried?.length ? `, ${provisional.carried.join(" and ")} held at its last official close` : "";
+  return `Current session is provisional: ${source} as of ${time} ET${held}, until the official close posts.`;
 }

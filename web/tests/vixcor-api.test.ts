@@ -406,3 +406,50 @@ describe("GET /api/vixcor — route contract", () => {
     expect(res.headers.get("X-Cache-Tags")).toBe("vixcor");
   });
 });
+
+describe("GET /api/vixcor — provisional current session", () => {
+  const TODAY = "2026-08-17";
+  const liveRow = { date: TODAY, vix_close: 22.1, cor3m_close: 13.2, corr20: 0.1834, episode: true };
+  const liveCurrent = { ...liveRow, change_1d: 0.1684, percentile: 0.03, regime: "DECOUPLED", vix_cov_20d: 0.08, episode: null };
+  const live = (overrides: Payload = {}): Payload => ({
+    scan_time: new Date().toISOString(), row: liveRow, current: liveCurrent,
+    source: "ib", quote_time: null, ...overrides,
+  });
+
+  async function insertLive(payload: Payload): Promise<void> {
+    await db.execute({
+      sql: `INSERT INTO scan_snapshots (service, scan_time, payload) VALUES ('vixcor:live', ?, ?)`,
+      args: [payload.scan_time as string, JSON.stringify(payload)],
+    });
+  }
+
+  it("appends the vixcor:live row and serves its recomputed card", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertLive(live());
+    const { GET } = await import("../app/api/vixcor/route");
+    const json = await jsonOf(await GET());
+    expect(json.as_of).toBe(TODAY);
+    expect(json.current).toEqual(liveCurrent);
+    expect((json.series as Payload[]).at(-1)).toEqual(liveRow);
+    expect(json.count).toBe((official.series as Payload[]).length + 1);
+    expect(json.provisional).toEqual({ source: "ib", quote_time: null, scan_time: expect.any(String) });
+    expect("data_date" in json).toBe(false);
+  });
+
+  it("ignores a live row that is not newer than the official close", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertLive(live({ row: { ...liveRow, date: "2026-08-14" } }));
+    const { GET } = await import("../app/api/vixcor/route");
+    expect(await jsonOf(await GET())).toEqual(official);
+  });
+
+  it("ignores a malformed live row", async () => {
+    const official = buildPayload();
+    await insertSnapshot(official);
+    await insertLive(live({ row: { ...liveRow, corr20: "x" } }));
+    const { GET } = await import("../app/api/vixcor/route");
+    expect(await jsonOf(await GET())).toEqual(official);
+  });
+});

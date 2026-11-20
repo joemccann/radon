@@ -18,6 +18,8 @@
  * never recomputes a window, and never scopes a statistic to the visible slice.
  */
 
+import type { ProvisionalMeta } from "./provisionalRow";
+
 /* ─── Constants (display copy only) ──────────────────── */
 
 /** Trailing joined sessions in the correlation window, inclusive of today. */
@@ -133,6 +135,20 @@ export interface VixcorData {
   episodes: VixcorEpisode[];
   forward_stats: VixcorForwardStats | null;
   series: VixcorEntry[];
+  /** Present while the latest row is the writer's intraday vixcor:live session. */
+  provisional?: ProvisionalMeta | null;
+}
+
+const finiteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Shape guard for a provisional `vixcor:live` row before the route appends it. */
+export function isVixcorEntry(value: unknown): value is VixcorEntry {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+    && finiteNumber(row.vix_close) && finiteNumber(row.cor3m_close)
+    && (row.corr20 === null || finiteNumber(row.corr20))
+    && typeof row.episode === "boolean";
 }
 
 /** Signed two-decimal correlation: "+0.01", "-0.53"; "---" when unavailable. */
