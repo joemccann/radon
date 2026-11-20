@@ -203,7 +203,10 @@ export const DIV_YIELD_REFRESH: RefreshSchedule = [daily(22, 40)];
 export const HY_AD_REFRESH: RefreshSchedule = [{ weekdays: TUE_SAT, hours: [11], minutes: [0] }];
 
 /** cloud/services/radon-record-high-breadth.timer */
-export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [15] }];
+export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", hours: [18], minutes: [15] },
+  { tz: "America/New_York", hours: [20], minutes: [15] },
+];
 
 /** cloud/services/radon-imbalance.timer */
 export const IMBALANCE_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [25] }];
