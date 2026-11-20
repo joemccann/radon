@@ -745,3 +745,32 @@ def test_rescan13_shape_is_scrubbed_and_detected(text):
 def test_leading_operator_walk_keeps_the_next_statement():
     out = scrub_credential_text(f'PASSWORD = "{OPAQUE}"\nSYMBOL = "SPY"\n')
     assert OPAQUE not in out and 'SYMBOL = "SPY"' in out, out
+
+
+@pytest.mark.parametrize("lead", ["> ", "- ", "    > "])
+@pytest.mark.parametrize("head", ["!!str", "", "# db credential"])
+def test_a_quoted_excerpt_repeats_its_lead_on_the_next_line_value(lead, head):
+    """DS-2026-11-18-12: a quoted or bulleted excerpt repeats its lead on every
+    line, so the continuation's indentation is measured after that lead, not
+    from column 0 where the repeated marker sits. A `# ` lead is not covered:
+    the key's comment-gap rule reads the repeated `#` lines as YAML comments."""
+    text = f"{lead}password: {head}\n{lead}  {OPAQUE}\n{lead}next: ok\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed), scrubbed
+    assert f"{lead}next: ok" in scrubbed, scrubbed
+    assert find_secret_assignments(text), text
+
+
+def test_a_repeated_lead_without_deeper_indentation_is_a_sibling():
+    text = f"> password: !!str\n> next: {TAIL}\n"
+    scrubbed = scrub_credential_text(text)
+    assert f"> next: {TAIL}" in scrubbed, scrubbed
+    assert "[redacted" in scrubbed, scrubbed
+
+
+def test_a_bare_marker_line_inside_a_quoted_value_is_blank():
+    text = f"> password:\n>\n>   {OPAQUE}\n> next: ok\n"
+    scrubbed = scrub_credential_text(text)
+    assert _clean(scrubbed), scrubbed
+    assert "> next: ok" in scrubbed, scrubbed
+    assert find_secret_assignments(text), text
