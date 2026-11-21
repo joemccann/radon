@@ -54,6 +54,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; root-owned gateway client shims are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
 | No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home. The [credential publisher](#credential-publisher) is off by default and does not change this until a later cutover |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
+| Agent network stays unfiltered until the operator enables the egress proxy | `/usr/local/radon-runner/enable-egress` must be a root-owned regular file that `_radonbot` cannot write. Without it, `install.sh` creates no `_radonegress` account, LaunchDaemon, pf anchor, or `/etc/pf.conf` edit. With it, that separate account runs a localhost proxy in log-only mode and a pf anchor that only passes and logs. The allowlist is the root-owned host file `/usr/local/radon-runner/egress-allowlist`, which is not in git. `mode block` is ignored |
 
 The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
@@ -93,6 +94,9 @@ Where things live when you are done:
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
 | `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
+| `/usr/local/radon-runner/enable-egress` | root, not writable by `_radonbot` | Operator-created switch. Absent means the egress proxy is not installed |
+| `/usr/local/radon-runner/egress-allowlist` | root, not writable by `_radonbot` | Host allowlist. Not in git. `scripts/runner/egress-allowlist.example` is the empty template |
+| `/Library/Radon/egress/log/decisions.log` | `_radonegress`, not writable by `_radonbot` | Log-only would-block records. `egress_report.py` summarizes them by day |
 | `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Library/Radon/model-gateway/identity` | root, 600 | Dedicated model-only SSH transport key; never a provider or operator key |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
@@ -103,6 +107,24 @@ Where things live when you are done:
 | `/usr/local/radon-runner/enable-publisher` | root, not writable by `_radonbot` | Absent unless an operator creates it. While it is missing, untrusted, or writable by the bot, `install.sh` creates no `_radonpub` account, no publisher directory, and no `com.radon.publisher` job, and it copies no credential |
 | `/Library/Radon/publisher/secrets` | `_radonpub`, 700 | Created empty only after the flag passes. Holds `github-token`, `reports-deploy-key`, `pushover-user`, and `pushover-token`. The installer never reads or copies the bot's files into it |
 | Operator login keychain: `github-radon-runner-bot`, `github-radon-runner-bot-token` | operator | The bot's GitHub password and token, for rotation |
+
+### Egress proxy (off by default)
+
+Nothing is dropped. The proxy records destinations that are not in the host allowlist and still forwards them. `mode block` is ignored. Run this on the Mac mini only when you want log-only observation. Replace the clone path with the checkout you install from.
+
+```bash
+sudo install -d -o root -g wheel -m 755 /usr/local/radon-runner
+sudo touch /usr/local/radon-runner/enable-egress
+sudo chown root:wheel /usr/local/radon-runner/enable-egress
+sudo chmod 644 /usr/local/radon-runner/enable-egress
+sudo install -o root -g wheel -m 644 /dev/null /usr/local/radon-runner/egress-allowlist
+sudo /bin/bash /path/to/clone/scripts/runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo /bin/launchctl print system/com.radon.egress-proxy
+sudo -u _radonbot test ! -w /usr/local/radon-runner/enable-egress
+sudo /opt/homebrew/bin/python3.13 -I /usr/local/radon-runner/egress_report.py
+```
+
+Edit `/usr/local/radon-runner/egress-allowlist` as root before expecting allow decisions. One `host`, `ipv4`, or `ipv6` rule per line. Do not make the flag or the allowlist writable by `_radonbot`.
 
 ### 1. Prerequisites (operator)
 
