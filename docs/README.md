@@ -30,6 +30,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
 | Unattended maintenance releases and toolchain recovery | [`docs/unattended-releases.md`](unattended-releases.md) · [`docs/nightly-toolchain-updates.md`](nightly-toolchain-updates.md) |
 | Nightly agent runner (one clone, one prompt, one session) | [`docs/runner.md`](runner.md) |
+| Runner scope, live-test limits, and outside stop | [`docs/runner-scope-and-stop.md`](runner-scope-and-stop.md) |
 | Cloud architecture, Turso, laptop attach contract | [`docs/cloud-services.md`](cloud-services.md) |
 | Network topology (private CI, app/broker, recovery SSH, isolated demo) | [`docs/spof-host-split.md`](spof-host-split.md) · [`docs/radon-network-topology.svg`](radon-network-topology.svg) |
 | Retired beta.radon.run (do not recreate) | [`docs/cloud-services.md`](cloud-services.md#retired-betaradonrun-2026-08-20) |
