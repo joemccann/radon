@@ -52,7 +52,7 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; root-owned gateway client shims are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home. The [credential publisher](#credential-publisher) is off by default and does not change this until a later cutover |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
 
 The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
@@ -81,6 +81,30 @@ sudo launchctl print system/com.radon.runner-logd
 sudo -u _radonbot test ! -r /Library/Radon/runner-logs/keys/id_ed25519
 ```
 
+## Credential publisher
+
+`system/com.radon.publisher` is a LaunchDaemon that runs as `_radonpub` (hidden, not an admin, login shell disabled). That account is the only reader of `/Library/Radon/publisher/secrets`. Agents on `_radonbot` talk to `/Library/Radon/publisher/run/publisher.sock`. The socket accepts only four requests: push the caller's own `<prefix>/<YYYY-MM-DD>` branch, open or edit a draft PR for that branch, publish one private security report, or send the operator notification. Merges, force-pushes, any other branch, and arbitrary git or API calls are refused. Every request is appended to `/Library/Radon/publisher/log/requests.log`, which `_radonbot` cannot read.
+
+`run_loop.sh`, the `gh` guard, and `security_post.sh` do not call the socket yet. Branch pushes still authenticate as they do today: `run_loop.sh` exports `GH_TOKEN` from `~/.radon-runner.env` into the agent environment, and `GIT_CONFIG_GLOBAL` points at the root-owned gitconfig whose `https://github.com` credential helper is `gh auth git-credential`. The private reports repository is separate: `security_post.sh` sets `GIT_SSH_COMMAND` to `ssh -i ~/.radon-runner-reports-key` and pushes `HEAD:main`. Pushover keys are read by the runner and unset in the agent process.
+
+The job is not installed unless `/usr/local/radon-runner/enable-publisher` is a regular file, not a symlink, owned by root, not group- or world-writable, with a parent directory held to the same bar. `install.sh` then creates the account and the empty secrets directory. It does not read or copy `~/.radon-runner.env`, the reports deploy key, or the Pushover dotenv. Removing the flag later does not stop a daemon that is already loaded; boot it out by hand.
+
+```bash
+sudo install -d -o root -g wheel -m 755 /usr/local/radon-runner
+sudo install -o root -g wheel -m 644 /dev/null /usr/local/radon-runner/enable-publisher
+sudo -u _radonbot test ! -w /usr/local/radon-runner/enable-publisher
+sudo -u _radonbot test ! -w /usr/local/radon-runner
+# After the loops are idle, from a reviewed checkout, or wait for com.radon.runner-update:
+sudo /path/to/radon/scripts/runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/github-token
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/reports-deploy-key
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/pushover-user
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/pushover-token
+# Write each value as _radonpub. Do not copy the bot's files with the installer.
+sudo -u _radonbot test ! -r /Library/Radon/publisher/secrets/github-token
+sudo launchctl print system/com.radon.publisher
+```
+
 ## Set up a new Mac
 
 The whole install, start to finish, on a Mac that has never run Radon. Allow about 45 minutes. Everything runs in Terminal as the operator (an admin account); a step says when to switch to the bot shell. You never need to log in to the bot's desktop.
@@ -103,6 +127,8 @@ Where things live when you are done:
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
 | `/Users/_radonbot/radon-runner/tmp` | bot, 700 | The daemons' `TMPDIR`, so the bot's temporary files never land in the shared, world-writable `/tmp` |
 | `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write deploy key for the private `joemccann/radon-security-reports`, used by the post-run hook. The agent runs as the same user and can read it, as it could read the old wrapper's key; a deploy key reaches only that one repository |
+| `/usr/local/radon-runner/enable-publisher` | root, not writable by `_radonbot` | Absent unless an operator creates it. While it is missing, untrusted, or writable by the bot, `install.sh` creates no `_radonpub` account, no publisher directory, and no `com.radon.publisher` job, and it copies no credential |
+| `/Library/Radon/publisher/secrets` | `_radonpub`, 700 | Created empty only after the flag passes. Holds `github-token`, `reports-deploy-key`, `pushover-user`, and `pushover-token`. The installer never reads or copies the bot's files into it |
 | Operator login keychain: `github-radon-runner-bot`, `github-radon-runner-bot-token` | operator | The bot's GitHub password and token, for rotation |
 
 ### 1. Prerequisites (operator)
