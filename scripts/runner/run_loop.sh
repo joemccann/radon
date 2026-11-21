@@ -429,9 +429,23 @@ build_prompt() {
   } > "$PROMPT_FILE"
 }
 
+# Log-only observation. The proxy is armed only after the root-owned flag
+# gate and a live localhost probe. A missing flag leaves the environment alone.
+arm_egress_proxy() {
+  local py="$RUNNER_DIR/egress_proxy.py"
+  [[ -f "$py" && ! -L "$py" ]] || return 0
+  "$RUNNER_PYTHON" -I "$py" gate >/dev/null 2>&1 || return 0
+  "$RUNNER_PYTHON" -I "$py" probe >/dev/null 2>&1 || return 0
+  export http_proxy="http://localhost:8373" https_proxy="$http_proxy"
+  export HTTP_PROXY="$http_proxy" HTTPS_PROXY="$https_proxy"
+  export NO_PROXY="localhost,::1" no_proxy="$NO_PROXY"
+  log "egress: log-only proxy for this phase"
+}
+
 # Runs in the child, inside timeout's process group, with cwd = the clone.
 launch_agent() {
   local agent="$1" provider="${2:-}"
+  arm_egress_proxy
   unset PUSHOVER_USER PUSHOVER_TOKEN
   export RADON_RUNNER_AGENT="$agent" RADON_RUNNER_MODEL="$provider"
   # The root-owned client adapter controls model traffic. The existing clone,
