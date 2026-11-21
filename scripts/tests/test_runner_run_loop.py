@@ -80,6 +80,7 @@ def rig(tmp_path):
     (install / "loops").mkdir(parents=True)
     shutil.copy2(RUNNER, install / "run_loop.sh")
     shutil.copy2(REPO / "scripts" / "runner" / "phase_status.sh", install / "phase_status.sh")
+    shutil.copy2(REPO / "scripts" / "runner" / "runner_logd.py", install / "runner_logd.py")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -1728,3 +1729,57 @@ def test_a_single_session_loop_whose_hook_refuses_never_starts_an_agent(rig):
     assert rig.called() == []
     assert rig.notification()["title"] == "radon doc: REFUSED"
     assert rig.notification()["message"] == "the clone is not trusted"
+
+
+def test_a_missing_log_daemon_keeps_the_local_log_and_records_it(rig, tmp_path):
+    secret = "ghp_" + "A" * 36
+    proc = rig.run(
+        RADON_RUNNER_LOGD_SOCKET=str(tmp_path / "missing.sock"),
+        STUB_GROK=f'echo GH_TOKEN={secret}',
+    )
+    assert proc.returncode == 0, proc.stderr + rig.log()
+    assert "grok" in rig.called()
+    assert secret in rig.log()
+    assert "runner-logd: streaming unavailable" in rig.log()
+    assert rig.log().count("runner-logd: streaming unavailable") == 1
+
+
+def test_a_live_log_socket_gets_each_line_with_secrets_removed(rig, tmp_path):
+    secret = "ghp_" + "B" * 36
+    sock_path = tmp_path / "ingest.sock"
+    got = tmp_path / "got"
+    server = r"""
+import socket, sys
+path, dest = sys.argv[1:]
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.bind(path)
+sock.settimeout(0.5)
+with open(dest, "ab", buffering=0) as handle:
+    while True:
+        try:
+            data, _addr = sock.recvfrom(8192)
+        except socket.timeout:
+            continue
+        handle.write(data + b"\n")
+"""
+    proc_server = subprocess.Popen([sys.executable, "-c", server, str(sock_path), str(got)])
+    try:
+        for _ in range(50):
+            if sock_path.exists():
+                break
+            time.sleep(0.02)
+        assert sock_path.exists()
+        proc = rig.run(
+            RADON_RUNNER_LOGD_SOCKET=str(sock_path),
+            STUB_GROK=f'echo GH_TOKEN={secret}',
+        )
+        assert proc.returncode == 0, proc.stderr + rig.log()
+    finally:
+        proc_server.kill()
+        proc_server.wait(timeout=5)
+    body = got.read_text(encoding="utf-8", errors="replace")
+    assert "starting grok" in body
+    assert secret not in body
+    assert "GH_TOKEN=[redacted]" in body
+    assert "runner-logd: streaming unavailable" not in rig.log()
+    assert secret in rig.log()

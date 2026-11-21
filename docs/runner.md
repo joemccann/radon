@@ -57,6 +57,30 @@ Safety is where the runner runs, not what the script checks:
 
 The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
 
+## External run logs
+
+`com.radon.runner-logd` copies each run log out of the bot home. It stays uninstalled until `/usr/local/radon-runner/enable-runner-logd` exists as a regular file owned by root and not group- or world-writable. `install.sh` does not create that flag, the `_radonlog` account, `/Library/Radon/runner-logs`, the deploy key, or the LaunchDaemon. `com.radon.runner-update` calls the same installer every six hours, so a host without the flag stays inactive. Removing the flag and running the installer again unloads the job.
+
+`_radonlog` is a hidden account with a disabled login shell. It owns `/Library/Radon/runner-logs`. The bot can send datagrams to `ingest.sock` and cannot read the stored logs or the deploy key. Lines are scrubbed before they are stored: credential shapes, assignments whose names are tokens, keys, or passwords, and values of environment variables with those names. The daemon pushes the store to the private repo named by `repo=` in `/usr/local/radon-runner/runner-logd.conf`. The installer writes `joemccann/radon-runner-logs` only when that file is absent. The key is mode 600 under `keys/` and only `_radonlog` can read it.
+
+`run_loop.sh` keeps the local log in the bot home either way. If the socket is missing, the run continues and the local log records `runner-logd: streaming unavailable`. Logging never blocks a run.
+
+Enable it on the Mac while every loop is idle:
+
+```bash
+sudo /opt/homebrew/bin/python3.13 -I -c 'import os; p="/usr/local/radon-runner/enable-runner-logd"; fd=os.open(p, os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_WRONLY, 0o644); os.close(fd); os.chown(p, 0, 0)'
+sudo /bin/bash /usr/local/radon-runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo cat /Library/Radon/runner-logs/keys/id_ed25519.pub
+```
+
+Add that public key as a write deploy key on the private repo named in the config. Pin the forge host key, then confirm the job and that the bot cannot read the private key:
+
+```bash
+sudo -u _radonlog /bin/sh -c 'umask 077; /usr/bin/ssh-keyscan -t ed25519 github.com > /Library/Radon/runner-logs/keys/known_hosts'
+sudo launchctl print system/com.radon.runner-logd
+sudo -u _radonbot test ! -r /Library/Radon/runner-logs/keys/id_ed25519
+```
+
 ## Set up a new Mac
 
 The whole install, start to finish, on a Mac that has never run Radon. Allow about 45 minutes. Everything runs in Terminal as the operator (an admin account); a step says when to switch to the bot shell. You never need to log in to the bot's desktop.
@@ -72,7 +96,10 @@ Where things live when you are done:
 | `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Library/Radon/model-gateway/identity` | root, 600 | Dedicated model-only SSH transport key; never a provider or operator key |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
-| `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
+| `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The local run log, kept 14 days. The bot can edit it |
+| `/usr/local/radon-runner/enable-runner-logd` | root, not group or world writable | Enable flag for the external log daemon. The installer never creates it |
+| `/Library/Radon/runner-logs` | `_radonlog` | Scrubbed run logs and the deploy key. Absent until the flag is enabled |
+| `/Library/LaunchDaemons/com.radon.runner-logd.plist` | root | `system/com.radon.runner-logd`, run as `_radonlog`. Absent until the flag is enabled |
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
 | `/Users/_radonbot/radon-runner/tmp` | bot, 700 | The daemons' `TMPDIR`, so the bot's temporary files never land in the shared, world-writable `/tmp` |
 | `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write deploy key for the private `joemccann/radon-security-reports`, used by the post-run hook. The agent runs as the same user and can read it, as it could read the old wrapper's key; a deploy key reaches only that one repository |

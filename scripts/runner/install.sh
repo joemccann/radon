@@ -16,6 +16,12 @@ set -euo pipefail
 BOT="${RADON_RUNNER_USER:-_radonbot}"
 BOT_HOME="/Users/$BOT"
 PREFIX="${RADON_RUNNER_PREFIX:-/usr/local/radon-runner}"
+# Off until a root-owned flag exists. install never creates the flag.
+LOGD_USER=_radonlog
+LOGD_GROUP=_radonlog_ingest
+LOGD_FLAG="${RADON_RUNNER_LOGD_FLAG:-$PREFIX/enable-runner-logd}"
+LOGD_ROOT="${RADON_RUNNER_LOGD_ROOT:-/Library/Radon/runner-logs}"
+LOGD_PLIST=/Library/LaunchDaemons/com.radon.runner-logd.plist
 # pwd -P, matching check_source: with a logical path the ancestor walk
 # validates one chain and the copies later read another.
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -545,6 +551,7 @@ install_runner() {
   atomic_install -o root -g wheel -m 755 "$SRC/lifecycle_gate.py" "$PREFIX/lifecycle_gate.py"
   atomic_install -o root -g wheel -m 755 "$SRC/update_installed.py" "$PREFIX/update_installed.py"
   atomic_install -o root -g wheel -m 755 "$SRC/perf_probe_helper.py" "$PREFIX/perf_probe_helper.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/runner_logd.py" "$PREFIX/runner_logd.py"
   [[ -e "$PREFIX/maintenance.lock" ]] || atomic_install -o root -g wheel -m 644 /dev/null "$PREFIX/maintenance.lock"
   atomic_install -o root -g wheel -m 644 "$SRC/toolchain-policy.json" "$PREFIX/toolchain-policy.json"
   install -d -o root -g wheel -m 755 "$PREFIX/toolchain"
@@ -690,8 +697,126 @@ os.replace(temporary, ready)
 PY_READY
 }
 
+# Hidden disabled-login account. The bot may write the ingest socket and
+# cannot read the store or the deploy key.
+ensure_logd_user() {
+  local gid next_uid membership
+  id "$BOT" >/dev/null || { echo "runner account $BOT is missing" >&2; return 1; }
+  if ! dscl . -read "/Groups/$LOGD_GROUP" >/dev/null 2>&1; then
+    gid=400
+    while dscl . -search /Groups PrimaryGroupID "$gid" | grep -q .; do
+      gid=$((gid + 1))
+      [[ "$gid" -lt 500 ]] || { echo "no reserved log group available" >&2; return 77; }
+    done
+    dscl . -create "/Groups/$LOGD_GROUP"
+    dscl . -create "/Groups/$LOGD_GROUP" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Groups/$LOGD_GROUP" PrimaryGroupID "$gid"
+    dscl . -create "/Groups/$LOGD_GROUP" Password '*'
+  fi
+  gid="$(dscl . -read "/Groups/$LOGD_GROUP" PrimaryGroupID | awk '{print $2}')"
+  [[ "$gid" =~ ^[0-9]+$ && "$gid" -gt 0 ]] || { echo "log group is invalid" >&2; return 77; }
+  if ! id "$LOGD_USER" >/dev/null 2>&1; then
+    next_uid=400
+    while dscl . -search /Users UniqueID "$next_uid" | grep -q .; do
+      next_uid=$((next_uid + 1))
+      [[ "$next_uid" -lt 500 ]] || { echo "no reserved log uid available" >&2; return 77; }
+    done
+    dscl . -create "/Users/$LOGD_USER"
+    dscl . -create "/Users/$LOGD_USER" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Users/$LOGD_USER" UniqueID "$next_uid"
+    dscl . -create "/Users/$LOGD_USER" PrimaryGroupID "$gid"
+    dscl . -create "/Users/$LOGD_USER" NFSHomeDirectory /var/empty
+    dscl . -create "/Users/$LOGD_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$LOGD_USER" Password '*'
+    dscl . -create "/Users/$LOGD_USER" IsHidden 1
+  fi
+  [[ "$(id -g "$LOGD_USER")" == "$gid" ]] || { echo "log account must use $LOGD_GROUP" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$LOGD_USER" UserShell)" == 'UserShell: /usr/bin/false' ]] \
+    || { echo "log account must have a disabled login shell" >&2; return 77; }
+  membership="$(dsmemberutil checkmembership -U "$LOGD_USER" -G admin)" \
+    || { echo "log account group membership is unverifiable" >&2; return 77; }
+  [[ "$membership" == *'is not a member'* ]] || { echo "log account must not be an administrator" >&2; return 77; }
+  dseditgroup -o edit -a "$LOGD_USER" -t user "$LOGD_GROUP"
+  dseditgroup -o edit -a "$BOT" -t user "$LOGD_GROUP"
+  [[ "$(id -u "$LOGD_USER")" != "$(id -u "$BOT")" ]] || { echo "log account must not be the bot" >&2; return 77; }
+}
+
+print_logd_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.runner-logd</string>
+<key>UserName</key><string>$LOGD_USER</string>
+<key>ProgramArguments</key><array>
+<string>$GUARD_PYTHON</string><string>-I</string>
+<string>$PREFIX/runner_logd.py</string><string>serve</string>
+<string>--root</string><string>$LOGD_ROOT</string>
+<string>--config</string><string>$PREFIX/runner-logd.conf</string>
+</array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>$LOGD_ROOT/daemon.log</string>
+<key>StandardErrorPath</key><string>$LOGD_ROOT/daemon.log</string>
+</dict></plist>
+EOF
+}
+
+write_logd_config() {
+  local dest="$PREFIX/runner-logd.conf"
+  [[ -e "$dest" || -L "$dest" ]] && return 0
+  cat > "$dest" <<'EOF'
+repo=joemccann/radon-runner-logs
+interval_secs=900
+EOF
+  chown root:wheel "$dest"
+  chmod 644 "$dest"
+}
+
+# Creates the account, directory, key and daemon only when the flag is enabled.
+# A missing or writable flag leaves every one of those absent and drops a
+# previously installed job so the six-hour updater cannot keep it active.
+install_log_daemon() {
+  local status label=com.radon.runner-logd
+  status="$("$GUARD_PYTHON" -I "$SRC/runner_logd.py" flag-status --flag "$LOGD_FLAG")" || status=disabled
+  if [[ "$status" != enabled ]]; then
+    if [[ -f "$LOGD_PLIST" && ! -L "$LOGD_PLIST" ]]; then
+      launchctl bootout "system/$label" 2>/dev/null || true
+      rm -f -- "$LOGD_PLIST"
+    fi
+    echo "runner-logd disabled"
+    return 0
+  fi
+  [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; return 1; }
+  check_source
+  ensure_logd_user
+  install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
+  install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 700 "$LOGD_ROOT/keys" "$LOGD_ROOT/repo"
+  [[ ! -L "$LOGD_ROOT/daemon.log" ]] || { echo "log daemon output is a symlink" >&2; return 77; }
+  if [[ ! -e "$LOGD_ROOT/daemon.log" ]]; then
+    sudo -u "$LOGD_USER" /usr/bin/touch "$LOGD_ROOT/daemon.log"
+  fi
+  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/daemon.log"
+  chmod 600 "$LOGD_ROOT/daemon.log"
+  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" && ! -L "$LOGD_ROOT/keys/id_ed25519" ]]; then
+    sudo -u "$LOGD_USER" /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-runner-logd -f "$LOGD_ROOT/keys/id_ed25519"
+  fi
+  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
+  chmod 600 "$LOGD_ROOT/keys/id_ed25519"
+  chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
+  write_logd_config
+  atomic_text "$LOGD_PLIST" 644 print_logd_plist
+  plutil -lint "$LOGD_PLIST" >/dev/null
+  launchctl bootout "system/$label" 2>/dev/null || true
+  launchctl bootstrap system "$LOGD_PLIST"
+  echo "installed $label"
+  echo "runner-logd public key: $LOGD_ROOT/keys/id_ed25519.pub"
+}
+
 main() {
-  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --print-logd-plist | --install-logd | --write-dotenv-path" >&2; exit 64; }
   if [[ "$1" == "--stage-gateway" ]]; then
     stage_gateway "${2:?destination}"
     return 0
@@ -712,6 +837,14 @@ main() {
   if [[ "$1" == "--print-update-plist" ]]; then
     print_update_plist
     return 0
+  fi
+  if [[ "$1" == "--print-logd-plist" ]]; then
+    print_logd_plist
+    return 0
+  fi
+  if [[ "$1" == "--install-logd" ]]; then
+    install_log_daemon
+    return
   fi
   if [[ "$1" == "--print-plist" ]]; then
     print_plist "${2:?loop}"
@@ -747,6 +880,7 @@ main() {
   write_maintenance_ready
   install_update_service
   install_native_update_service
+  install_log_daemon
 }
 
 main "$@"

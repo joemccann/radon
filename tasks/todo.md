@@ -1,3 +1,13 @@
+# Runner log daemon, off by default (2026-11-21)
+
+- [x] T1 depends_on: [] Scrubber, flag gate, and daemon-down fallback tests fail before the daemon exists.
+- [x] T2 depends_on: [T1] `_radonlog` daemon, socket follower, scrub-before-store, config-named private repo. Install creates nothing unless the root-owned flag exists.
+- [ ] T3 depends_on: [T2] Draft PR, CI green. Do not merge. Do not comment on #204 or #538.
+
+## Review
+
+Ships inactive. `install.sh` creates the account, directory, deploy key, and `com.radon.runner-logd` only when `/usr/local/radon-runner/enable-runner-logd` is a regular root-owned file that is not group- or world-writable. A down daemon leaves the local log in place and records `runner-logd: streaming unavailable`.
+
 # Probe journal liveness (2026-11-17)
 
 - [x] T1 depends_on: [] Failing tests: quiet book fresh; stale journal-sync stale; gap count > 0 stale; outside RTH unchanged.
