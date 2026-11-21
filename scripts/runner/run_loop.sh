@@ -436,10 +436,14 @@ arm_egress_proxy() {
   [[ -f "$py" && ! -L "$py" ]] || return 0
   "$RUNNER_PYTHON" -I "$py" gate >/dev/null 2>&1 || return 0
   "$RUNNER_PYTHON" -I "$py" probe >/dev/null 2>&1 || return 0
-  export http_proxy="http://localhost:8373" https_proxy="$http_proxy"
-  export HTTP_PROXY="$http_proxy" HTTPS_PROXY="$https_proxy"
-  export NO_PROXY="localhost,::1" no_proxy="$NO_PROXY"
-  log "egress: log-only proxy for this phase"
+  export http_proxy="http://localhost:8373"
+  export https_proxy="$http_proxy"
+  export HTTP_PROXY="$http_proxy"
+  export HTTPS_PROXY="$https_proxy"
+  export NO_PROXY="localhost,::1"
+  export no_proxy="$NO_PROXY"
+  [[ -n "${LOG:-}" ]] && log "egress: log-only proxy for this phase"
+  return 0
 }
 
 # Runs in the child, inside timeout's process group, with cwd = the clone.
