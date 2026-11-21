@@ -2,11 +2,20 @@
 
 - [x] T1 depends_on: [] Scrubber, flag gate, and daemon-down fallback tests fail before the daemon exists.
 - [x] T2 depends_on: [T1] `_radonlog` daemon, socket follower, scrub-before-store, config-named private repo. Install creates nothing unless the root-owned flag exists.
-- [ ] T3 depends_on: [T2] Draft PR, CI green. Do not merge. Do not comment on #204 or #538.
+- [x] T3 depends_on: [T2] Merged origin/main through the egress proxy. Three flags stay separate. Do not merge the PR.
 
 ## Review
 
-Ships inactive. `install.sh` creates the account, directory, deploy key, and `com.radon.runner-logd` only when `/usr/local/radon-runner/enable-runner-logd` is a regular root-owned file that is not group- or world-writable. A down daemon leaves the local log in place and records `runner-logd: streaming unavailable`.
+Ships inactive. `install.sh` creates the account, directory, deploy key, and `com.radon.runner-logd` only when `/usr/local/radon-runner/enable-runner-logd` is a regular root-owned file that is not group- or world-writable. A down daemon leaves the local log in place and records `runner-logd: streaming unavailable`. `enable-publisher` and `enable-egress` stay their own gates.
+
+# Runner egress proxy, log-only, off by default (2026-11-21)
+
+- [x] T1 depends_on: [] Failing tests: allowlist parse, flag gate, log-only forward, install.sh does not touch pf.
+- [x] T2 depends_on: [T1] Proxy, report, pf anchor text, install gate. Draft PR. Do not merge.
+
+## Review
+
+The enable flag must be root-owned, mode without group or world write, and every parent must be root-owned unless it is sticky. `install.sh` only calls `egress_proxy.py install` and does not name pfctl. A CONNECT to a host outside the allowlist returns 200 and appends `would_block`. `mode block` does not drop. Local tests: `scripts/tests/test_runner_egress.py` 30 passed, plus the runner loop, pushover, gateway, and install-trust files, 200 passed.
 
 # Probe journal liveness (2026-11-17)
 

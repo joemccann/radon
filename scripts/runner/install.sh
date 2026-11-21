@@ -560,6 +560,9 @@ install_runner() {
   atomic_install -o root -g wheel -m 755 "$SRC/update_installed.py" "$PREFIX/update_installed.py"
   atomic_install -o root -g wheel -m 755 "$SRC/perf_probe_helper.py" "$PREFIX/perf_probe_helper.py"
   atomic_install -o root -g wheel -m 755 "$SRC/runner_logd.py" "$PREFIX/runner_logd.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/egress_proxy.py" "$PREFIX/egress_proxy.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/egress_report.py" "$PREFIX/egress_report.py"
+  atomic_install -o root -g wheel -m 644 "$SRC/egress-allowlist.example" "$PREFIX/egress-allowlist.example"
   [[ -e "$PREFIX/maintenance.lock" ]] || atomic_install -o root -g wheel -m 644 /dev/null "$PREFIX/maintenance.lock"
   atomic_install -o root -g wheel -m 644 "$SRC/toolchain-policy.json" "$PREFIX/toolchain-policy.json"
   install -d -o root -g wheel -m 755 "$PREFIX/toolchain"
@@ -677,6 +680,13 @@ install_update_service() {
   if ! launchctl print "system/$label" >/dev/null 2>&1; then
     launchctl bootstrap system "$plist"
   fi
+}
+
+# Creates the egress account, daemon, and packet filter only when
+# /usr/local/radon-runner/enable-egress is a root-owned regular file the
+# runner account cannot write. Otherwise this is a no-op.
+install_egress() {
+  RADON_EGRESS_PYTHON="$GUARD_PYTHON" "$GUARD_PYTHON" -I "$SRC/egress_proxy.py" install
 }
 
 write_maintenance_ready() {
@@ -1031,6 +1041,7 @@ main() {
   install_native_update_service
   install_log_daemon
   install_publisher
+  install_egress
 }
 
 main "$@"
