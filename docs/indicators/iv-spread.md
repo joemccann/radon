@@ -285,19 +285,32 @@ environment variables: every path derives from the project directory.
 
 ## E. Scheduling
 
-`OnCalendar=*-*-* 22:15:00 UTC`, every calendar day, between
+Intraday: `OnCalendar=Mon..Fri *-*-* 09..16:00,05,...,55 America/New_York`.
+IB serves the in-progress session's `OPTION_IMPLIED_VOLATILITY` daily bar,
+so the current session's spread is live every 5 minutes (VIX P/C
+precedent). The partial row is upserted like any other; the merge lets the
+fetched bar win by date, so each later run restates it, and as the newest
+row it is an edge the bad-print gate never flags.
+
+Final: `OnCalendar=*-*-* 22:15:00 UTC`, every calendar day, between
 `radon-ivrank` at 22:10 UTC and `radon-dispersion` at 22:20 UTC.
 22:15 UTC is after the 16:00 ET close year-round
 (20:00/21:00 UTC), so both daily IV bars are final, and it sits between the
 two neighbouring IB daily pulls so the three never share a minute (each uses
 an auto client id anyway). Weekend and holiday runs are unchanged-data
-heartbeats.
+heartbeats. `23:15 UTC` is a recovery slot (dispersion precedent).
+
+Gateway blips: the job re-probes `/health` after each of
+`GATEWAY_RECHECK_DELAYS_S` (60s x 3) while `auth_state` is set and not
+`authenticated`, then falls back to the cache. On 2026-11-17 the gateway
+upstream died 22:16-22:18 UTC; the 22:16:54 run probed once, re-served
+2026-11-16 and the session was missing for a day.
 
 `cloud/services/radon-iv-spread.service` — copy `radon-ivrank.service` minus
 the `RADON_UW_CALLER` line (oneshot, `User=radon`,
 `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/etc/radon/env`,
 venv python directly, journald,
-`TimeoutStartSec=300`, `StartLimitIntervalSec=300` / `StartLimitBurst=5`).
+`TimeoutStartSec=420` (re-probe window + one fetch + persist budget), `StartLimitIntervalSec=300` / `StartLimitBurst=5`).
 `cloud/services/radon-iv-spread.timer` — `Persistent=true`,
 `RandomizedDelaySec=120`, comment naming the 22:15 UTC reasoning.
 
@@ -335,7 +348,11 @@ plus an `it("iv-spread ...")` case mirroring the ivrank one with
 
 ```ts
 /** cloud/services/radon-iv-spread.timer */
-export const IV_SPREAD_REFRESH: UtcSchedule = { cadence: "daily", hourUtc: 22, minuteUtc: 15 };
+export const IV_SPREAD_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  daily(22, 15),
+  daily(23, 15),
+];
 ```
 
 `web/tests/refresh-schedule.test.ts`: `it("IV spread mirrors
@@ -442,9 +459,9 @@ re-served.
 
 ### F.4 Hook — `web/lib/useIvSpread.ts`
 
-`useSyncHook({ endpoint: "/api/iv-spread", interval: 3_600_000, hasPost:
-false, extractTimestamp: d => d.scan_time }, true)` — hourly poll for a daily
-series. Types live in `web/lib/ivSpread.ts`.
+`useSyncHook({ endpoint: "/api/iv-spread", interval: 300_000, hasPost:
+false, extractTimestamp: d => d.scan_time }, true)` — 5-minute poll matching
+the intraday timer line. Types live in `web/lib/ivSpread.ts`.
 
 ---
 
