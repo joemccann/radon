@@ -1,3 +1,13 @@
+# Runner log daemon, off by default (2026-11-21)
+
+- [x] T1 depends_on: [] Scrubber, flag gate, and daemon-down fallback tests fail before the daemon exists.
+- [x] T2 depends_on: [T1] `_radonlog` daemon, socket follower, scrub-before-store, config-named private repo. Install creates nothing unless the root-owned flag exists.
+- [x] T3 depends_on: [T2] Merged origin/main through the egress proxy. Three flags stay separate. Do not merge the PR.
+
+## Review
+
+Ships inactive. `install.sh` creates the account, directory, deploy key, and `com.radon.runner-logd` only when `/usr/local/radon-runner/enable-runner-logd` is a regular root-owned file that is not group- or world-writable. A down daemon leaves the local log in place and records `runner-logd: streaming unavailable`. `enable-publisher` and `enable-egress` stay their own gates.
+
 # Runner egress proxy, log-only, off by default (2026-11-21)
 
 - [x] T1 depends_on: [] Failing tests: allowlist parse, flag gate, log-only forward, install.sh does not touch pf.

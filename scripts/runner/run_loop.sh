@@ -34,6 +34,52 @@ export RADON_MODEL_GATEWAY_SOCKET="${RADON_MODEL_GATEWAY_SOCKET:-/Library/Radon/
 # Every git the runner, its hooks and the agent run reads the root-owned
 # config install.sh writes, never the bot-writable ~/.gitconfig.
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="${RADON_RUNNER_GITCONFIG:-$RUNNER_DIR/gitconfig}"
+# Best-effort copy of the run log. A missing daemon never blocks the run.
+LOGD_SOCKET="${RADON_RUNNER_LOGD_SOCKET:-/Library/Radon/runner-logs/ingest.sock}"
+LOGD_PID=""
+
+on_exit() {
+  stop_log_follow
+  release_lock
+}
+
+stop_log_follow() {
+  [[ -z "${LOGD_PID:-}" ]] && return 0
+  local pid="$LOGD_PID" i=0 rc=0 state=""
+  LOGD_PID=""
+  kill -USR1 "$pid" 2>/dev/null || true
+  while (( i < 40 )); do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    # A finished follower is a zombie until wait. kill -0 is true for both.
+    if [[ -z "$state" || "$state" == Z* ]]; then
+      wait "$pid" 2>/dev/null || rc=$?
+      break
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  if [[ -n "$state" && "$state" != Z* ]]; then
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || rc=$?
+  fi
+  if [[ "$rc" == 1 ]] && ! grep -q 'runner-logd: streaming unavailable' "$LOG" 2>/dev/null; then
+    printf '[%s] %s\n' "$(date -u +%FT%TZ)" "runner-logd: streaming unavailable" >> "$LOG"
+  fi
+}
+
+# Tails the run log and sends each line to the log daemon. Agent output is
+# redirected into the same file, so it is streamed as it is written. The
+# follower exits on its own when the socket is missing and records that.
+start_log_follow() {
+  trap 'on_exit' EXIT
+  [[ -f "$RUNNER_DIR/runner_logd.py" ]] || {
+    printf '[%s] %s\n' "$(date -u +%FT%TZ)" "runner-logd: streaming unavailable" >> "$LOG"
+    return 0
+  }
+  "$RUNNER_PYTHON" -I "$RUNNER_DIR/runner_logd.py" follow \
+    --file "$LOG" --socket "$LOGD_SOCKET" --loop "$LOOP" &
+  LOGD_PID=$!
+}
 
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
 
@@ -81,6 +127,8 @@ load_config() {
   TIMEOUT_BIN="$(PATH="$RUNNER_PATH" command -v gtimeout || PATH="$RUNNER_PATH" command -v timeout || true)"
   mkdir -p "$RUN_DIR" "$LOOP_STATE"
   chmod 700 "$STATE_DIR/state" "$LOOP_STATE"
+  : >> "$LOG"
+  start_log_follow
   [[ -n "$TIMEOUT_BIN" ]] || { log "no timeout or gtimeout in $RUNNER_PATH"; exit 69; }
   export RADON_RUNNER_LOOP_STATE="$LOOP_STATE" RADON_RUNNER_PIDFILE="$LOOP_STATE/pids"
   apply_agent_env
@@ -317,7 +365,7 @@ acquire_lock() {
       exit 75
     fi
   fi
-  trap 'release_lock' EXIT
+  trap 'on_exit' EXIT
 }
 
 prune_logs() {
