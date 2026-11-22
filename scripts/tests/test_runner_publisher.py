@@ -541,3 +541,53 @@ def test_scrub_removes_an_assignment(tmp_path: Path) -> None:
     secret = "Z" + "value" + "998877"
     cleaned = publisher._scrub(f"note\nGH_TOKEN={secret}\n")
     assert secret not in cleaned
+
+
+def test_draft_title_and_body_are_scrubbed_before_gh_sees_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The draft body reaches a PUBLIC pull request. publish_report scrubs its
+    # text; the draft path must pass through the same chokepoint.
+    cfg = _cfg(tmp_path)
+    cfg.tmp.mkdir()
+    ops = publisher.RealOps(cfg)
+    secret = _plant()
+    seen: dict[str, object] = {}
+
+    def fake_gh(args: list[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        seen["args"] = list(args)
+        seen["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, stdout="https://github.com/joemccann/radon/pull/7\n", stderr="")
+
+    monkeypatch.setattr(ops, "_gh", fake_gh)
+    out = ops.open_draft("security", BRANCH, f"Nightly GH_TOKEN={secret}", f"## Summary\nGH_TOKEN={secret}\n")
+    assert out["url"].endswith("/pull/7")
+    argv = " ".join(seen["args"])  # type: ignore[arg-type]
+    assert secret not in argv and secret not in str(seen["body"])
+    assert "Nightly" in argv and "## Summary" in str(seen["body"])
+
+
+def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> None:
+    # One client that connects and sends nothing must not block every other
+    # loop's push, draft and notify behind it.
+    import socket
+
+    cfg = _cfg(tmp_path)
+    cfg.socket_path.parent.mkdir()
+    bundle = _owned(cfg.work_root("security") / "branch.bundle", "bundle\n")
+    ops = FakeOps()
+    before = os.umask(0)
+    os.umask(before)
+    thread = threading.Thread(target=publisher.serve, args=(cfg, ops), kwargs={"timeout": 0.5}, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not cfg.socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    idle = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        idle.connect(str(cfg.socket_path))
+        api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
+        response = _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": str(bundle)})
+    finally:
+        idle.close()
+        os.umask(before)
+    assert response["ok"] is True
+    assert response["pushed"] == BRANCH
