@@ -38,7 +38,7 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.card_screenshot import screenshot_card, shared_browser  # noqa: E402
 from utils.cta_history import (  # noqa: E402
     clean_underlying_name,
     derive_change_context,
@@ -1008,18 +1008,19 @@ def main():
                 f.write(open(html_path).read())
             card_paths.append(dest)
 
-        # Screenshot each
-        for i, html_path in enumerate(tmp_htmls, 1):
-            png_path = str(REPORTS_DIR / f"tweet-cta-{ds}-card-{i}.png")
-            ok = screenshot_card(html_path, png_path)
-            if not ok:
-                # Fallback: try the reports dir HTML
-                ok = screenshot_card(card_paths[i-1], png_path)
-            if not ok:
-                print(f"⚠ Screenshot failed for card {i}", file=sys.stderr)
-                # Create empty placeholder so we don't crash
-                png_path = card_paths[i-1]  # use HTML path as fallback marker
-            png_paths.append(png_path)
+        # Screenshot each (one Chromium for all four cards, PERF-063)
+        with shared_browser():
+            for i, html_path in enumerate(tmp_htmls, 1):
+                png_path = str(REPORTS_DIR / f"tweet-cta-{ds}-card-{i}.png")
+                ok = screenshot_card(html_path, png_path)
+                if not ok:
+                    # Fallback: try the reports dir HTML
+                    ok = screenshot_card(card_paths[i-1], png_path)
+                if not ok:
+                    print(f"⚠ Screenshot failed for card {i}", file=sys.stderr)
+                    # Create empty placeholder so we don't crash
+                    png_path = card_paths[i-1]  # use HTML path as fallback marker
+                png_paths.append(png_path)
 
     # Base64 encode PNGs
     cards_b64 = []
