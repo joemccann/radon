@@ -23,6 +23,23 @@ def test_publisher_comes_from_the_dropbox_folder():
     assert ident.publisher_source == "folder"
 
 
+@pytest.mark.parametrize("folder,expected", [
+    ("bofa", "BofA Global Research"),
+    ("baml", "BofA Global Research"),
+    ("merrill", "BofA Global Research"),
+    ("bofa securities", "BofA Global Research"),
+    ("bank of america", "BofA Global Research"),
+    ("ing", "ING"),
+    ("anz", "ANZ"),
+    ("zkb", "ZKB"),
+    ("socgen", "SocGen"),
+])
+def test_short_bank_folders_keep_canonical_publisher_casing(folder, expected):
+    ident = identify.identify({1: "Desk note 16 September 2026"}, meta("note.pdf", folder), FOLDER)
+    assert ident.publisher == expected
+    assert ident.publisher_source == "folder"
+
+
 @pytest.mark.parametrize("folder,text,expected", [
     ("nuclear", "**Global Research** ## ab Powered by 4 September 2026 UBS Evidence Lab", "UBS"),
     ("nuclear", "### Utilities # The Wolfe Power Trip August 31, 2026 ## A peek at the peaks", "Wolfe Research"),

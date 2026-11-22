@@ -49,7 +49,7 @@ import tempfile  # noqa: E402
 import time  # noqa: E402
 
 from api.db_http import DbHttpError  # noqa: E402
-from research import equity_admission, rendered_copy
+from research import equity_admission, force_include, rendered_copy
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox_writer import DropboxError  # noqa: E402
 from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
@@ -311,11 +311,12 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     existing = store.post_source(post_id)
     if existing is not None:  # crash between publish and ledger write: record, never re-publish
         current_copy = store.post_copy(post_id)
+        held_post = {**current_copy, 'source': existing} if current_copy else {}
         eligibility, reason, _ = (equity_admission.decide(
-            current_copy['title'], rendered_copy.content({**current_copy, 'source': existing}),
+            current_copy['title'], rendered_copy.content(held_post),
             book_tickers=deps.book_tickers)
             if current_copy else ('held', 'EXISTING_POST_NOT_VISIBLE', ()))
-        if eligibility != 'publish':
+        if eligibility != 'publish' and not force_include.skips_unresolved_subject_hold(held_post, eligibility, reason):
             store.record_admission_block(ref.article_id, eligibility, reason)
             counts[eligibility] += 1
             return
@@ -386,6 +387,9 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
             current['title'], rendered_copy.content(current), book_tickers=deps.book_tickers)
         review['final_equity_admission'] = {'outcome': eligibility, 'reason_code': reason, 'subjects': list(subjects)}
         if eligibility == 'publish':
+            return True
+        if review.get('always_publish') and eligibility == 'held' and reason == force_include.UNRESOLVED_SUBJECT_HOLD:
+            review['audit'].append({'always_publish_equity_hold_bypass': reason})
             return True
         store.record_admission_block(ref.article_id, eligibility, reason)
         review.update(outcome=eligibility, reason_code=reason)

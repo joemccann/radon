@@ -7,6 +7,13 @@ captions against the current canonical portfolio/watchlist before writing. Previ
 receive the same check; an eligibility refusal cancels pending siblings in that
 work batch, preserves their payloads and prior review, and records the terminal
 reason. Explicit operator re-review must pass the current gates again.
+An always-publish Hartnett desk (The Flow Show, a BofA Fund Manager Survey, or a
+Hartnett byline) skips only an unresolved-subject hold at that write. A resolved
+off-book issuer still refuses it.
+
+`research.identify` maps the MarketDesk folder names `BofA`, `BAML`, `Merrill`,
+and `BofA Securities` to BofA Global Research. `ING`, `ANZ`, `ZKB`, and `SocGen`
+keep that casing instead of title case.
 
 ## Components and data boundary
 
