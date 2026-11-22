@@ -132,11 +132,37 @@ async function retryOperation({
   throw new Error(`${phase} exhausted without a result`);
 }
 
+// The ATS venue-share universe meta counts the open-position book: the
+// portfolio tier directly, and every aggregate built from it (core, unique)
+// gives the same number back by subtraction from the public tiers. The whole
+// count block and the sibling core size are account-derived; the demo trial
+// tier keeps only the tier order and the cycle position. A payload that
+// cannot be parsed is dropped rather than copied unseen.
+export function stripAccountDerivedFields(table, row) {
+  if (table !== "scan_snapshots" || row?.service !== "equibles-ats-venue-share") return row;
+  let payload;
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {
+    return null;
+  }
+  const universe = payload?.universe;
+  if (universe && typeof universe === "object" && ("counts" in universe || "core" in universe)) {
+    delete universe.counts;
+    delete universe.core;
+    return { ...row, payload: JSON.stringify(payload) };
+  }
+  return row;
+}
+
 function upsertStatements(table, columns, rows) {
   const cols = columns.filter((c) => c !== "rn");
   const placeholders = cols.map(() => "?").join(", ");
   const sql = `INSERT OR REPLACE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`;
-  return rows.map((r) => ({ sql, args: cols.map((c) => r[c] ?? null) }));
+  return rows
+    .map((r) => stripAccountDerivedFields(table, r))
+    .filter((r) => r !== null)
+    .map((r) => ({ sql, args: cols.map((c) => r[c] ?? null) }));
 }
 
 async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
