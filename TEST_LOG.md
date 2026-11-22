@@ -1431,6 +1431,12 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-591 | DONE | Serial `PermissionError: '/opt/cursor'` after admission asserts (`/tmp/delta-pdfsim-serial.log`). Writes moved to `tmp_path`. Green 21 passed in `test_marketdesk_pdf_sim.py`. Product source unchanged. Closing rounds: same as T-590. |
 | T-592 | DONE | Serial 2 failed ×3: empty log fence vs `"Error: CLI crashed"` (`/tmp/delta-security-1.log`). Hook stderr `bad substitution` on bash 3.2 `${//$'\x60\x60\x60'/}`. Escaped backticks. Green 2 passed; file 201 passed. Closing rounds: same as T-590. |
 
+## 2026-11-17
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-593 | DONE | Chained URLError `assert 1 == 0`; cause-less TimeoutError text `assert 0 == 1` (`/tmp/t593-red.log`). `_is_transport_blip` uses `is_transport_error` on `__cause__`. Green 10 passed; file 104 passed ×3. Closing rounds: root pytest Darwin 5-red is T-591+T-592 on #1587; r3 credentials xdist flake then serial 2 passed; 19,866/19,866/19,865 passed / 10 skipped / 40 subtests. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud 58 failed / 4,288 passed / 23 skipped each round, 0 added / 0 removed against `8aaad84e9`. |
+
 ## 2026-11-18
 
 | ID | Status | Evidence |

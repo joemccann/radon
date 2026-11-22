@@ -200,8 +200,11 @@ _SPECIFIC_SCRUB_PATTERNS = [
         ),
         "[redacted-private-key]",
     ),
-    (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
-    (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    # The URL runs stop at a quote AND at the backslash escaping one, like the
+    # bearer rule below: eating the `\\` of `PASS="libsql://h/db\\" tail"` left
+    # the quote as the value's terminator and `tail` outside every span.
+    (re.compile(r"libsql://(?:[^\s'\"\\]|\\(?![\s'\"]))+", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"https://[a-z0-9.-]+\.turso\.io(?:[^\s'\"\\]|\\(?![\s'\"]))*", re.IGNORECASE), "[redacted-db-url]"),
     # "Bearer <token>" is the literal HTTP header value shape (space, not an
     # "=" / ":" assignment) and must run before the assignment pattern below,
     # which would otherwise treat the word "Bearer" itself as the value and
@@ -258,7 +261,8 @@ _SPECIFIC_SCRUB_PATTERNS = [
     # inspected (DS-2026-10-25-10).
     (
         re.compile(
-            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)[^\s&'\"]+",
+            # Stops at the backslash escaping a quote, like the bearer rule.
+            rf"([?&](?:t|[A-Za-z0-9_.-]{{0,32}}?{_SECRET_KEY}{_KEY_SUFFIX})=)(?:[^\s&'\"\\]|\\(?![\s'\"]))+",
             re.IGNORECASE,
         ),
         r"\1[redacted]",
@@ -560,10 +564,17 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
     same implicit continuation the trailing backslash gets below: the
     indentation rule alone published `TOKEN = (` followed by the value at
     column 0 (DS-2026-10-27-21).
+
+    A quoted (`> `) or commented (`# `) excerpt repeats its lead on EVERY
+    line, the same shape the block-scalar rule models. A continuation line
+    that repeats the key line's lead is measured after it: read from column
+    0 the marker made the value look level with its key (DS-2026-11-18-12).
+    A line carrying only the bare marker is blank.
     """
     indent = line_start
     while indent < len(text) and text[indent] in " \t":
         indent += 1
+    lead = _CONTINUATION_LEAD.match(text, indent)
     indent -= line_start
     depth = _bracket_depth(text, line_start, eol)
     end = cursor = eol
@@ -576,6 +587,19 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
         while first < len(text) and text[first] in " \t":
             first += 1
         line_end = _end_of_line(text, first)
+        deeper = first - start > indent
+        if lead is not None and first - start == indent:
+            mark = lead.group("mark")
+            if text.startswith(lead.group(0), first):
+                inner = first + len(lead.group(0))
+                while inner < len(text) and text[inner] in " \t":
+                    inner += 1
+                deeper = inner > first + len(lead.group(0))
+                first = inner
+            elif text.startswith(mark, first) and _end_of_line(
+                text, first + len(mark)
+            ) == first + len(mark) + _span_of(text, first + len(mark), " \t"):
+                first = line_end
         if line_end == first:
             if joined:
                 break
@@ -585,11 +609,25 @@ def _continuation_end(text: str, line_start: int, eol: int) -> int:
         # An unclosed bracket continues the value whatever the indentation;
         # a blank line inside one is still inside it, so the blank-line
         # branch above keeps deciding on the next non-blank line.
-        if first - start <= indent and not joined and depth <= 0:
+        if not deeper and not joined and depth <= 0:
             break
         depth = max(0, depth + _bracket_depth(text, first, line_end))
         end = cursor = line_end
     return end
+
+
+# The key line's comment, quote or bullet lead: the block-scalar rule's `mark`
+# and padding, bounded the same way (a marker run backtracks catastrophically
+# when nested). The padding is required so `--flag` is a value, not a lead.
+_CONTINUATION_LEAD = re.compile(r"(?P<mark>[#>*+\-](?:[#>*+\- \t]{0,22}[#>*+\-])?)[ \t]{1,23}")
+
+
+def _span_of(text: str, pos: int, chars: str) -> int:
+    """Length of the run of ``chars`` starting at ``pos``."""
+    end = pos
+    while end < len(text) and text[end] in chars:
+        end += 1
+    return end - pos
 
 
 _BRACKETS = {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}
@@ -922,7 +960,14 @@ def find_secret_assignments(text: str) -> list[str]:
             # A key inside an earlier continuation was already covered by it.
             eol = _end_of_line(text, body_start)
             continued_to = _continuation_end(text, line_start(head_start), eol)
-            if _quoted_value_is_secret(text[eol:continued_to]):
+            span_start = eol
+            # A next-line value in a quoted excerpt: the tokenizer read the
+            # repeated lead (`>`) as the value and the literal follows it on
+            # the same line (DS-2026-11-18-12).
+            padded = body_end + _span_of(text, body_end, " \t")
+            if _CONTINUATION_LEAD.fullmatch(text, body_start, padded) is not None:
+                span_start = body_end
+            if _quoted_value_is_secret(text[span_start:continued_to]):
                 return ["[redacted-secret]"]
         # The literal scanner bounds its value run at 1024, so a longer
         # unquoted literal (a session token) matched neither rule.

@@ -8,8 +8,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from http.client import RemoteDisconnected
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import URLError
 
 import pytest
 
@@ -573,9 +575,6 @@ def test_main_returns_nonzero_on_failure_and_zero_on_success(monkeypatch, capsys
 @pytest.mark.parametrize("exc", [
     TimeoutError("The read operation timed out"),
     ConnectionResetError("Connection reset by peer"),
-    DbHttpError("TimeoutError: The read operation timed out"),
-    DbHttpError("RemoteDisconnected: Remote end closed connection without response"),
-    DbHttpError("research transaction transport failed: TimeoutError"),
 ])
 def test_main_exits_zero_on_a_transport_timeout(monkeypatch, capsys, exc):
     # 2026-11-15 05:34:52 UTC: one Hrana read timeout exited 1, latched the unit failed and paged
@@ -593,6 +592,37 @@ def test_main_exits_zero_on_a_transport_timeout(monkeypatch, capsys, exc):
 ])
 def test_main_still_fails_on_non_transport_errors(monkeypatch, exc):
     monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(exc))
+    assert job.main() == 1
+
+
+def _chained_db_error(message, cause):
+    error = DbHttpError(message)
+    error.__cause__ = cause
+    return error
+
+
+@pytest.mark.parametrize("cause", [
+    TimeoutError("The read operation timed out"),
+    ConnectionResetError("Connection reset by peer"),
+    RemoteDisconnected("Remote end closed connection without response"),
+    URLError("timed out"),
+])
+def test_chained_db_http_transport_exits_zero(monkeypatch, capsys, cause):
+    """db_http wraps the wire error with `from exc`. The cause is the contract."""
+    error = _chained_db_error(
+        f"{type(cause).__name__}: {cause}", cause)
+    monkeypatch.setattr(job, "run_cycle", lambda **kw: (_ for _ in ()).throw(error))
+    assert job.main() == 0
+    assert "cycle deferred: transport" in capsys.readouterr().err
+
+
+def test_transport_message_without_cause_still_fails_the_oneshot(monkeypatch):
+    """A statement error can carry TimeoutError in the text. Cause is required."""
+    monkeypatch.setattr(
+        job, "run_cycle",
+        lambda **kw: (_ for _ in ()).throw(
+            DbHttpError("TimeoutError: The read operation timed out")),
+    )
     assert job.main() == 1
 
 
@@ -926,17 +956,21 @@ def test_unprocessed_article_waits_for_its_summary_without_spending_attempts(wor
     assert run(world)["published"] == 1
 
 
+def research_warnings(world):
+    return [h[2]["message"] for h in health_for(world, "marketdesk-research") if h[1] == "warn"]
+
+
 def test_summary_that_never_arrives_fails_after_the_wait(world, db):
     world.refs = [make_ref("Zzzzzzzz07", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
-    with pytest.raises(job.ArticlesFailed):
-        run(world)
+    assert run(world)["failed"] == 1
     assert ledger(db, "Zzzzzzzz07")["last_error"] == "no_summary"
     assert world.dests == []
 
 
-def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, capsys):
-    """A provider summary deadline is already the error row. Exit 1 pages P1."""
+def test_summary_deadline_writes_a_warn_row_and_exits_zero(world, db, monkeypatch, capsys):
+    """MarketDesk never summarising an item is provider-side and not actionable:
+    a warn row, not the P2 error row the daily digest pages on (27 in 7 days, 2026-11-21)."""
     world.refs = [make_ref("SummDead01", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
@@ -944,13 +978,14 @@ def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, cap
     saved = ledger(db, "SummDead01")
     assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
-    assert any("no_summary" in message for message in research_errors(world))
+    assert research_errors(world) == []
+    assert any("no_summary" in message for message in research_warnings(world))
     assert "no_summary" in capsys.readouterr().err
 
 
 def test_summary_deadline_retires_the_article_on_its_first_error_cycle(world, db, monkeypatch):
     """Past the wait the outcome is fixed (MarketDesk's summarizer replied with an apology, 2026-11-11):
-    one error row, then the writer is green again instead of red for MAX_ATTEMPTS cycles."""
+    one warn row, then the writer is green again instead of red for MAX_ATTEMPTS cycles."""
     world.refs = [make_ref("SummDead04", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
@@ -959,18 +994,17 @@ def test_summary_deadline_retires_the_article_on_its_first_error_cycle(world, db
     saved = ledger(db, "SummDead04")
     assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
-    assert len(research_errors(world)) == 1
+    assert research_errors(world) == [] and len(research_warnings(world)) == 1
     assert [c for c in world.calls if c == ("fetch_article", "SummDead04")] == [("fetch_article", "SummDead04")]
     assert health_for(world, "marketdesk-research")[-1][1] == "ok"
 
 
-def test_summary_deadline_retirement_is_reported_in_the_error_row(world, db):
+def test_summary_deadline_retirement_is_reported_in_the_warn_row(world, db):
     world.refs = [make_ref("SummDead05", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
-    with pytest.raises(job.ArticlesFailed) as failure:
-        run(world)
-    assert failure.value.provider_deadline
-    assert "1 retired" in str(failure.value) and "no_summary" in str(failure.value)
+    run(world)
+    [message] = research_warnings(world)
+    assert "1 retired" in message and "no_summary" in message
 
 
 def test_copy_failure_still_fails_the_oneshot(world, monkeypatch):
@@ -1429,6 +1463,42 @@ def test_pending_backlog_runs_after_it_leaves_latest_listing(world, db):
     counts = run(world)
     assert counts["published"] == 1
     assert ledger(db, old.article_id)["status"] == "published"
+
+
+def test_hartnett_flow_show_publishes_when_the_copy_keeps_equity_words(world, db):
+    macro = "Michael Hartnett. Hyperscaler capex leaves the index undervalued on an FCF valuation."
+    world.refs = [make_ref("Hartnett0001", title="The Flow Show")]
+    world.folders = ["2026", "November", "Nov 21", "BofA"]
+    world.publisher = "BofA"
+    world.summary = [macro]
+    deps = build_deps(world)
+
+    def write_copy(*, title, publisher, summary, body_text, images, finding=None):
+        image_ids = [label for label, _ in images]
+        return SimpleNamespace(title="Voice " + title, content=macro,
+                               captions={i: f"caption {i}" for i in image_ids},
+                               tags=["RATES", "MARKETDESK", "FED"],
+                               provider="fake", model="fake-1", source_text=macro,
+                               image_ids=tuple(image_ids))
+
+    deps.write_copy = write_copy
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts["published"] == 1 and counts["held"] == 0
+    assert ledger(db, "Hartnett0001")["status"] == "published"
+    assert world.published[0]["source"]["publisher"] == "BofA"
+    assert world.published[0]["source"]["fileName"] == "The Flow Show"
+
+
+def test_bofa_single_stock_without_a_ticker_still_holds_in_the_cycle(world, db):
+    text = "Acme looks undervalued on an FCF valuation after hyperscaler capex."
+    world.refs = [make_ref("BofaStock001", title="Acme initiation of coverage")]
+    world.folders = ["2026", "November", "Nov 21", "BofA"]
+    world.publisher = "BofA"
+    world.summary = [text]
+    counts = run(world)
+    saved = ledger(db, "BofaStock001")
+    assert counts["published"] == 0 and saved["status"] == "held"
+    assert saved["reason_code"] == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"
 
 
 @pytest.mark.parametrize('members,expected', [(frozenset({'MU'}), 'dropped'), (None, 'held')])

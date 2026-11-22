@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon IV SPREAD Indicator (NDX minus SPX 1M ATM implied volatility, daily)
+Description=Radon IV SPREAD Indicator (NDX minus SPX 1M ATM implied volatility, intraday + daily final)
 After=network.target
 
 StartLimitIntervalSec=300
@@ -13,7 +13,7 @@ EnvironmentFile=/etc/radon/env
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_iv_spread.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=300
+TimeoutStartSec=420
 
 [Install]
 WantedBy=multi-user.target

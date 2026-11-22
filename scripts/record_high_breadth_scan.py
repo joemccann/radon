@@ -35,6 +35,10 @@ NY = ZoneInfo("America/New_York")
 MAX_BARS = 5000
 COLLECTION_TIMEOUT = 180
 NORMALIZATION_BASE = 500
+# 18:15 ET is not provider finality. A one-session gap before this hour is a
+# warning so the oneshot does not page. The 20:15 ET calendar is the retry
+# that still fails if the expected session is missing.
+PUBLICATION_LAG_DEADLINE_HOUR_ET = 20
 
 
 def _number(value, *, count=False, percentage=False):
@@ -171,13 +175,49 @@ def persist_result(payload):
     atomic_save(str(CACHE_PATH), payload)
 
 
+def _previous_trading_session(date_iso):
+    probe = datetime.fromisoformat(date_iso).replace(hour=9, minute=0, tzinfo=NY)
+    return last_completed_session_date(probe)
+
+
+def incomplete_session_message(payload):
+    source = payload.get("source") or {}
+    return (
+        "latest expected session is incomplete; retained observations are degraded"
+        f" (expected {source.get('expected_session_date')}, latest {payload.get('data_date')})"
+    )
+
+
+def single_session_publication_lag(payload):
+    """True when the only gap is the session the 18:15 ET pass is too early to require."""
+    if not payload.get("degraded"):
+        return False
+    source = payload.get("source") or {}
+    expected = source.get("expected_session_date")
+    latest = payload.get("data_date")
+    scan_time = payload.get("scan_time")
+    if not isinstance(expected, str) or not isinstance(latest, str) or not isinstance(scan_time, str):
+        return False
+    if latest != _previous_trading_session(expected):
+        return False
+    collected = datetime.fromisoformat(scan_time)
+    if collected.tzinfo is None:
+        return False
+    return collected.astimezone(NY).hour < PUBLICATION_LAG_DEADLINE_HOUR_ET
+
+
 def run(*, client=None):
     with service_cycle(SERVICE, market_hours_class="daily") as cycle:
         payload = asyncio.run(collect(client))
         persist_result(payload)
         cycle.finished_at = payload["scan_time"]
         if payload["degraded"]:
-            raise RuntimeError("latest expected session is incomplete; retained observations are degraded")
+            message = incomplete_session_message(payload)
+            if single_session_publication_lag(payload):
+                cycle.warning = message
+                print(f"[{SERVICE}] {message}", file=sys.stderr)
+                return payload
+            raise RuntimeError(message)
         return payload
 
 

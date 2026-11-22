@@ -1286,6 +1286,70 @@ def test_stale_candidate_preserves_existing_feedback_marker(tmp_path, published)
     assert marker.read_bytes() == before
 
 
+# The controller opened a private validation PR per candidate and never closed
+# it, so superseded, rejected and published candidates piled up open in the
+# private archive. A PR is retired once its head marker is settled; the
+# immutable validation/fix and feedback refs are never touched.
+OTHER = "d" * 40
+
+
+def _validation_pr(number, head=HEAD, base=BASE):
+    return {"number": number, "head": {"sha": head, "ref": f"validation/fix/{base}/{head}"}, "base": {"sha": base}}
+
+
+def _closed_numbers(github):
+    return [path.rsplit("/", 1)[-1] for path, args in github.calls
+            if path.startswith(f"repos/{PRIVATE}/pulls/") and "PATCH" in args]
+
+
+@pytest.mark.parametrize("settled", [
+    {"feedback_published": "e" * 40},
+    {"public_pr": f"https://github.com/{PUBLIC}/pull/1118"},
+], ids=("feedback-delivered", "published-publicly"))
+def test_settled_validation_pr_is_closed(tmp_path, settled):
+    github = FakeGitHub(private_prs=[_validation_pr(17)])
+    bridge = _bridge(tmp_path, github=github)
+    bridge._save_marker(bridge.directory / f"{HEAD}.json", {"base_sha": BASE, "head_sha": HEAD, "status": "x", **settled})
+    bridge.close_settled_validation_prs()
+    assert _closed_numbers(github) == ["17"]
+    payloads = [kwargs for path, kwargs in github.call_kwargs if path == f"repos/{PRIVATE}/pulls/17"]
+    assert payloads == [{"payload": {"state": "closed"}}]
+
+
+def test_in_flight_validation_pr_stays_open(tmp_path):
+    github = FakeGitHub(private_prs=[_validation_pr(17), _validation_pr(18, head=OTHER)])
+    bridge = _bridge(tmp_path, github=github)
+    bridge._terminal_marker(bridge.directory / f"{OTHER}.json", BASE, OTHER, "private-checks-failed")
+    bridge.close_settled_validation_prs()
+    assert _closed_numbers(github) == []
+
+
+def test_unrelated_or_mismatched_private_prs_are_never_closed(tmp_path):
+    rows = [
+        {"number": 21, "head": {"sha": HEAD, "ref": "report/2026-11-18"}, "base": {"sha": BASE}},
+        {"number": 22, "head": {"sha": OTHER, "ref": f"validation/fix/{BASE}/{HEAD}"}, "base": {"sha": BASE}},
+        {"number": 23, "head": {"sha": HEAD, "ref": f"validation/fix/{BASE}/{HEAD}/x"}, "base": {"sha": BASE}},
+    ]
+    github = FakeGitHub(private_prs=rows)
+    bridge = _bridge(tmp_path, github=github)
+    bridge._save_marker(bridge.directory / f"{HEAD}.json", {"base_sha": BASE, "head_sha": HEAD, "feedback_published": "e" * 40})
+    bridge.close_settled_validation_prs()
+    assert _closed_numbers(github) == []
+
+
+def test_closed_validation_pr_is_not_reopened_by_the_next_tick(tmp_path):
+    github = FakeGitHub(refs=[_ref()], private_prs=[_validation_pr(17)])
+    bridge = _bridge(tmp_path, github=github)
+    marker = bridge.directory / f"{HEAD}.json"
+    bridge._terminal_marker(marker, BASE, HEAD, "private-review-rejected")
+    bridge._replace_marker(marker, {**json.loads(marker.read_text()), "feedback_published": "e" * 40})
+    bridge.close_settled_validation_prs()
+    assert _closed_numbers(github) == ["17"]
+    github.private_prs = []
+    bridge.run_once()
+    assert not [path for path, args in github.calls if path == f"repos/{PRIVATE}/pulls" and "POST" in args]
+
+
 # DS-2026-10-29-05: the local assignment rule required the credential name to
 # be followed directly by `:` or `=`, so a JSON or dict key put its closing
 # quote in between and never matched. _validate_feedback re-applies the same
