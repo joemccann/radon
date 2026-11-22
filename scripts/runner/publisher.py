@@ -45,6 +45,8 @@ REPORTS_WEB = "https://github.com/joemccann/radon-security-reports/blob/main"
 GITHUB_HOSTKEY = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 MAX_REQUEST = 256 * 1024
+# Per-connection bound in the long-lived serve loop (serve_once takes its own).
+CONNECTION_TIMEOUT = 30.0
 MAX_BUNDLE = 20 * 1024 * 1024
 MAX_REPORT = 1024 * 1024
 MAX_SECRET = 16 * 1024
@@ -582,8 +584,7 @@ class RealOps:
     def open_draft(self, caller: str, branch: str, title: str, body: str) -> dict:
         del caller
         return self._gh_draft(
-            ["pr", "create", "--repo", RADON_REPO, "--draft", "--base", "main", "--head", branch, "--title", title],
-            body,
+            ["pr", "create", "--repo", RADON_REPO, "--draft", "--base", "main", "--head", branch], title, body
         )
 
     def edit_draft(self, caller: str, branch: str, pr: str, title: str, body: str) -> dict:
@@ -595,16 +596,20 @@ class RealOps:
             raise Rejected("pr_state") from exc
         if payload.get("isDraft") is not True or payload.get("headRefName") != branch:
             raise Rejected("not_draft")
-        return self._gh_draft(["pr", "edit", pr, "--repo", RADON_REPO, "--title", title], body)
+        return self._gh_draft(["pr", "edit", pr, "--repo", RADON_REPO], title, body)
 
-    def _gh_draft(self, args: list[str], body: str) -> dict:
+    def _gh_draft(self, args: list[str], title: str, body: str) -> dict:
+        # The draft reaches a PUBLIC pull request: the same scrub the private
+        # report path applies, at the one place both draft actions pass.
+        title = _scrub(title)
+        body = _scrub(body)
         fd, name = tempfile.mkstemp(prefix="body-", dir=self.cfg.tmp)
         os.close(fd)
         path = Path(name)
         try:
             path.write_text(body, encoding="utf-8")
             os.chmod(path, 0o600)
-            proc = self._gh([*args, "--body-file", str(path)], stdin=None)
+            proc = self._gh([*args, "--title", title, "--body-file", str(path)], stdin=None)
         finally:
             path.unlink(missing_ok=True)
         url = proc.stdout.strip()
@@ -850,8 +855,13 @@ def _answer(conn: socket.socket, cfg: Config, ops: object) -> None:
     conn.sendall(json.dumps(response).encode() + b"\n")
 
 
-def serve(cfg: Config, ops: object) -> None:
-    """One listening socket for the life of the daemon. Callers never see a gap between requests."""
+def serve(cfg: Config, ops: object, *, timeout: float = CONNECTION_TIMEOUT) -> None:
+    """One listening socket for the life of the daemon. Callers never see a gap between requests.
+
+    Each accepted connection is bounded by ``timeout``: a client that connects
+    and sends nothing would otherwise hold every loop's push, draft and notify
+    behind it for as long as it stayed open.
+    """
     os.umask(0o077)
     cfg.tmp.mkdir(parents=True, exist_ok=True)
     cfg.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -870,7 +880,10 @@ def serve(cfg: Config, ops: object) -> None:
             except OSError:
                 continue
             try:
+                conn.settimeout(timeout)
                 _answer(conn, cfg, ops)
+            except OSError:
+                pass
             finally:
                 conn.close()
     finally:
