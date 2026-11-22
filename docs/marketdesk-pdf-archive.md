@@ -189,11 +189,14 @@ It flags the eligible active backlog when its oldest `published_at` is older
 than 24 hours or its depth is growing past 48 rows. `oldest_h` is that
 publication age, not `first_seen_at` (a backfill can first see an old report
 within the hour). The message is
-`PDF archive backlog: pending=N oldest_h=H growing=0|1 stalled=0|1`.
+`PDF archive backlog: pending=N oldest_h=H growing=0|1 stalled=0|1 capped=0|1`.
 A backlog that is still being admitted reports `warn`, which never pages
 (2026-11-17: 588 rows admitted oldest-first every ~48 min held the row red).
-It reports `error` and pages when the depth is growing, no row was admitted in
-the last 6 hours (`stalled=1`), or the oldest row is older than 14 days.
+It reports `error` and pages when the depth is growing while the rolling 24h
+cap still has room, no row was admitted in the last 6 hours (`stalled=1`), or
+the oldest row is older than 14 days. Growth with the cap full (`capped=1`)
+warns: intake above the ~74/day allowance grows the queue by design and the age
+window retires the excess (2026-11-21: 70/day admitted, `growing=1` paged daily).
 Only `marketdesk-pdf` reports this breach. `marketdesk-dropbox` reflects the Dropbox
 outbox alone (2026-11-16): one condition on two rows read as a Dropbox fault, and the
 second caller overwrote `observed_pending` minutes apart, so `growing` compared two
