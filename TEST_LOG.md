@@ -1436,3 +1436,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-593 | DONE | Chained URLError `assert 1 == 0`; cause-less TimeoutError text `assert 0 == 1` (`/tmp/t593-red.log`). `_is_transport_blip` uses `is_transport_error` on `__cause__`. Green 10 passed; file 104 passed ×3. Closing rounds: root pytest Darwin 5-red is T-591+T-592 on #1587; r3 credentials xdist flake then serial 2 passed; 19,866/19,866/19,865 passed / 10 skipped / 40 subtests. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud 58 failed / 4,288 passed / 23 skipped each round, 0 added / 0 removed against `8aaad84e9`. |
+
+## 2026-11-22
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
+| T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
