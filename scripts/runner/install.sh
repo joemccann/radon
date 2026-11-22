@@ -5,6 +5,8 @@
 #   scripts/runner/install.sh --print-plist documentation     (no root; for review/tests)
 #   scripts/runner/install.sh --print-guard security          (no root; the gh shim a GH_GUARD=1 loop gets)
 #   scripts/runner/install.sh --print-gitconfig               (no root; the git config every runner git reads)
+#   scripts/runner/install.sh --print-publisher-plist         (no root; the off-by-default publisher job)
+#   scripts/runner/install.sh --publisher-plan                (no root; prints enabled or disabled, creates nothing)
 #   scripts/runner/install.sh --write-dotenv-path             (no root; writes $PREFIX/dotenv-path from RADON_RUNNER_DOTENV)
 #
 # Idempotent. Creates the unprivileged runner user on first use, installs the
@@ -16,6 +18,12 @@ set -euo pipefail
 BOT="${RADON_RUNNER_USER:-_radonbot}"
 BOT_HOME="/Users/$BOT"
 PREFIX="${RADON_RUNNER_PREFIX:-/usr/local/radon-runner}"
+# Off until a root-owned flag exists. install never creates the flag.
+LOGD_USER=_radonlog
+LOGD_GROUP=_radonlog_ingest
+LOGD_FLAG="${RADON_RUNNER_LOGD_FLAG:-$PREFIX/enable-runner-logd}"
+LOGD_ROOT="${RADON_RUNNER_LOGD_ROOT:-/Library/Radon/runner-logs}"
+LOGD_PLIST=/Library/LaunchDaemons/com.radon.runner-logd.plist
 # pwd -P, matching check_source: with a logical path the ancestor walk
 # validates one chain and the copies later read another.
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -48,6 +56,12 @@ GW_CONTROL="$GW_ROOT/control/control.sock"
 # are not in that login at the same time. Nested calls inside one loop still
 # use this cap.
 GW_CONCURRENCY=16
+# Off until /usr/local/radon-runner/enable-publisher exists. The flag and its
+# parent must be root-owned and not group/world-writable, so _radonbot cannot
+# replace the flag. install_publisher copies no credential.
+PUB_USER="${RADON_PUBLISHER_USER:-_radonpub}"
+PUB_CONNECT_GROUP="${RADON_PUBLISHER_CONNECT_GROUP:-_radonpub_connect}"
+PUB_ROOT="${RADON_PUBLISHER_ROOT:-/Library/Radon/publisher}"
 
 # Root installs from $SRC, so every path it reads must be one only root or the
 # operator can change: each directory from / down to the clone owned by one of
@@ -545,6 +559,10 @@ install_runner() {
   atomic_install -o root -g wheel -m 755 "$SRC/lifecycle_gate.py" "$PREFIX/lifecycle_gate.py"
   atomic_install -o root -g wheel -m 755 "$SRC/update_installed.py" "$PREFIX/update_installed.py"
   atomic_install -o root -g wheel -m 755 "$SRC/perf_probe_helper.py" "$PREFIX/perf_probe_helper.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/runner_logd.py" "$PREFIX/runner_logd.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/egress_proxy.py" "$PREFIX/egress_proxy.py"
+  atomic_install -o root -g wheel -m 755 "$SRC/egress_report.py" "$PREFIX/egress_report.py"
+  atomic_install -o root -g wheel -m 644 "$SRC/egress-allowlist.example" "$PREFIX/egress-allowlist.example"
   [[ -e "$PREFIX/maintenance.lock" ]] || atomic_install -o root -g wheel -m 644 /dev/null "$PREFIX/maintenance.lock"
   atomic_install -o root -g wheel -m 644 "$SRC/toolchain-policy.json" "$PREFIX/toolchain-policy.json"
   install -d -o root -g wheel -m 755 "$PREFIX/toolchain"
@@ -664,6 +682,13 @@ install_update_service() {
   fi
 }
 
+# Creates the egress account, daemon, and packet filter only when
+# /usr/local/radon-runner/enable-egress is a root-owned regular file the
+# runner account cannot write. Otherwise this is a no-op.
+install_egress() {
+  RADON_EGRESS_PYTHON="$GUARD_PYTHON" "$GUARD_PYTHON" -I "$SRC/egress_proxy.py" install
+}
+
 write_maintenance_ready() {
   "$GUARD_PYTHON" -I - "$PREFIX" <<'PY_READY'
 import json, os, pathlib, plistlib, tempfile, subprocess
@@ -690,8 +715,259 @@ os.replace(temporary, ready)
 PY_READY
 }
 
+# Hidden disabled-login account. The bot may write the ingest socket and
+# cannot read the store or the deploy key.
+ensure_logd_user() {
+  local gid next_uid membership
+  id "$BOT" >/dev/null || { echo "runner account $BOT is missing" >&2; return 1; }
+  if ! dscl . -read "/Groups/$LOGD_GROUP" >/dev/null 2>&1; then
+    gid=400
+    while dscl . -search /Groups PrimaryGroupID "$gid" | grep -q .; do
+      gid=$((gid + 1))
+      [[ "$gid" -lt 500 ]] || { echo "no reserved log group available" >&2; return 77; }
+    done
+    dscl . -create "/Groups/$LOGD_GROUP"
+    dscl . -create "/Groups/$LOGD_GROUP" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Groups/$LOGD_GROUP" PrimaryGroupID "$gid"
+    dscl . -create "/Groups/$LOGD_GROUP" Password '*'
+  fi
+  gid="$(dscl . -read "/Groups/$LOGD_GROUP" PrimaryGroupID | awk '{print $2}')"
+  [[ "$gid" =~ ^[0-9]+$ && "$gid" -gt 0 ]] || { echo "log group is invalid" >&2; return 77; }
+  if ! id "$LOGD_USER" >/dev/null 2>&1; then
+    next_uid=400
+    while dscl . -search /Users UniqueID "$next_uid" | grep -q .; do
+      next_uid=$((next_uid + 1))
+      [[ "$next_uid" -lt 500 ]] || { echo "no reserved log uid available" >&2; return 77; }
+    done
+    dscl . -create "/Users/$LOGD_USER"
+    dscl . -create "/Users/$LOGD_USER" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Users/$LOGD_USER" UniqueID "$next_uid"
+    dscl . -create "/Users/$LOGD_USER" PrimaryGroupID "$gid"
+    dscl . -create "/Users/$LOGD_USER" NFSHomeDirectory /var/empty
+    dscl . -create "/Users/$LOGD_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$LOGD_USER" Password '*'
+    dscl . -create "/Users/$LOGD_USER" IsHidden 1
+  fi
+  [[ "$(id -g "$LOGD_USER")" == "$gid" ]] || { echo "log account must use $LOGD_GROUP" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$LOGD_USER" UserShell)" == 'UserShell: /usr/bin/false' ]] \
+    || { echo "log account must have a disabled login shell" >&2; return 77; }
+  membership="$(dsmemberutil checkmembership -U "$LOGD_USER" -G admin)" \
+    || { echo "log account group membership is unverifiable" >&2; return 77; }
+  [[ "$membership" == *'is not a member'* ]] || { echo "log account must not be an administrator" >&2; return 77; }
+  dseditgroup -o edit -a "$LOGD_USER" -t user "$LOGD_GROUP"
+  dseditgroup -o edit -a "$BOT" -t user "$LOGD_GROUP"
+  [[ "$(id -u "$LOGD_USER")" != "$(id -u "$BOT")" ]] || { echo "log account must not be the bot" >&2; return 77; }
+}
+
+print_logd_plist() {
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.runner-logd</string>
+<key>UserName</key><string>$LOGD_USER</string>
+<key>ProgramArguments</key><array>
+<string>$GUARD_PYTHON</string><string>-I</string>
+<string>$PREFIX/runner_logd.py</string><string>serve</string>
+<string>--root</string><string>$LOGD_ROOT</string>
+<string>--config</string><string>$PREFIX/runner-logd.conf</string>
+</array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>$LOGD_ROOT/daemon.log</string>
+<key>StandardErrorPath</key><string>$LOGD_ROOT/daemon.log</string>
+</dict></plist>
+EOF
+}
+
+# A hidden, disabled-login account. It is the only reader of the publisher
+# secrets directory. _radonbot is in the connect group so it can use the
+# socket, and that directory is mode 700 so the group cannot read secrets.
+ensure_publisher_user() {
+  local gid next_uid membership
+  if ! dscl . -read "/Groups/$PUB_CONNECT_GROUP" >/dev/null 2>&1; then
+    gid=400
+    while dscl . -search /Groups PrimaryGroupID "$gid" | grep -q .; do
+      gid=$((gid + 1))
+      [[ "$gid" -lt 500 ]] || { echo "no reserved publisher group available" >&2; return 77; }
+    done
+    dscl . -create "/Groups/$PUB_CONNECT_GROUP"
+    dscl . -create "/Groups/$PUB_CONNECT_GROUP" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Groups/$PUB_CONNECT_GROUP" PrimaryGroupID "$gid"
+    dscl . -create "/Groups/$PUB_CONNECT_GROUP" Password '*'
+  fi
+  gid="$(dscl . -read "/Groups/$PUB_CONNECT_GROUP" PrimaryGroupID | awk '{print $2}')"
+  [[ "$gid" =~ ^[0-9]+$ && "$gid" -gt 0 ]] || { echo "publisher group is invalid" >&2; return 77; }
+  if ! id "$PUB_USER" >/dev/null 2>&1; then
+    next_uid=400
+    while dscl . -search /Users UniqueID "$next_uid" | grep -q .; do
+      next_uid=$((next_uid + 1))
+      [[ "$next_uid" -lt 500 ]] || { echo "no reserved publisher uid available" >&2; return 77; }
+    done
+    dscl . -create "/Users/$PUB_USER"
+    dscl . -create "/Users/$PUB_USER" GeneratedUID "$(/usr/bin/uuidgen)"
+    dscl . -create "/Users/$PUB_USER" UniqueID "$next_uid"
+    dscl . -create "/Users/$PUB_USER" PrimaryGroupID "$gid"
+    dscl . -create "/Users/$PUB_USER" NFSHomeDirectory /var/empty
+    dscl . -create "/Users/$PUB_USER" UserShell /usr/bin/false
+    dscl . -create "/Users/$PUB_USER" Password '*'
+    dscl . -create "/Users/$PUB_USER" IsHidden 1
+  fi
+  [[ "$(id -g "$PUB_USER")" == "$gid" ]] || { echo "publisher account must use $PUB_CONNECT_GROUP" >&2; return 77; }
+  [[ "$(dscl . -read "/Users/$PUB_USER" UserShell)" == 'UserShell: /usr/bin/false' ]] \
+    || { echo "publisher account must have a disabled login shell" >&2; return 77; }
+  membership="$(dsmemberutil checkmembership -U "$PUB_USER" -G admin)" \
+    || { echo "publisher group membership is unverifiable" >&2; return 77; }
+  [[ "$membership" == *'is not a member'* ]] || { echo "publisher account must not be an administrator" >&2; return 77; }
+  [[ "$(id -u "$PUB_USER")" != "$(id -u "$BOT")" ]] || { echo "publisher uid must differ from $BOT" >&2; return 77; }
+  dseditgroup -o edit -a "$PUB_USER" -t user "$PUB_CONNECT_GROUP"
+  dseditgroup -o edit -a "$BOT" -t user "$PUB_CONNECT_GROUP"
+}
+
+print_publisher_gitconfig() {
+  cat <<EOF
+[credential "https://github.com"]
+	helper = !$GUARD_PYTHON -I $PREFIX/publisher.py credential
+	useHttpPath = false
+[user]
+	name = radon-publisher
+	email = radon-publisher@users.noreply.github.com
+EOF
+}
+
+print_publisher_plist() {
+  local uid
+  if [[ $EUID -eq 0 ]]; then
+    uid="$(id -u "$BOT")"
+  else
+    uid="${RADON_PUBLISHER_CLIENT_UID:?}"
+  fi
+  [[ "$uid" =~ ^[0-9]+$ ]] || { echo "publisher client uid is invalid" >&2; return 64; }
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.radon.publisher</string>
+<key>UserName</key><string>$PUB_USER</string>
+<key>GroupName</key><string>$PUB_CONNECT_GROUP</string>
+<key>ProgramArguments</key><array>
+<string>$GUARD_PYTHON</string><string>-I</string><string>$PREFIX/publisher.py</string><string>serve</string>
+<string>--socket</string><string>$PUB_ROOT/run/publisher.sock</string>
+<string>--secrets</string><string>$PUB_ROOT/secrets</string>
+<string>--log</string><string>$PUB_ROOT/log/requests.log</string>
+<string>--tmp</string><string>$PUB_ROOT/tmp</string>
+<string>--gitconfig</string><string>$PREFIX/publisher-gitconfig</string>
+<string>--client-uid</string><string>$uid</string>
+<string>--bot-home</string><string>$BOT_HOME</string>
+</array>
+<key>EnvironmentVariables</key><dict>
+<key>HOME</key><string>/var/empty</string>
+<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>
+<key>TMPDIR</key><string>$PUB_ROOT/tmp/</string>
+<key>RADON_PUBLISHER_SECRETS</key><string>$PUB_ROOT/secrets</string>
+</dict>
+<key>KeepAlive</key><true/>
+<key>RunAtLoad</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>StandardOutPath</key><string>$PUB_ROOT/log/daemon.log</string>
+<key>StandardErrorPath</key><string>$PUB_ROOT/log/daemon.log</string>
+</dict></plist>
+EOF
+}
+
+write_logd_config() {
+  local dest="$PREFIX/runner-logd.conf"
+  [[ -e "$dest" || -L "$dest" ]] && return 0
+  cat > "$dest" <<'EOF'
+repo=joemccann/radon-runner-logs
+interval_secs=900
+EOF
+  chown root:wheel "$dest"
+  chmod 644 "$dest"
+}
+
+# Creates the account, directory, key and daemon only when the flag is enabled.
+# A missing or writable flag leaves every one of those absent and drops a
+# previously installed job so the six-hour updater cannot keep it active.
+install_log_daemon() {
+  local status label=com.radon.runner-logd
+  status="$("$GUARD_PYTHON" -I "$SRC/runner_logd.py" flag-status --flag "$LOGD_FLAG")" || status=disabled
+  if [[ "$status" != enabled ]]; then
+    if [[ -f "$LOGD_PLIST" && ! -L "$LOGD_PLIST" ]]; then
+      launchctl bootout "system/$label" 2>/dev/null || true
+      rm -f -- "$LOGD_PLIST"
+    fi
+    echo "runner-logd disabled"
+    return 0
+  fi
+  [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; return 1; }
+  check_source
+  ensure_logd_user
+  install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
+  install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 700 "$LOGD_ROOT/keys" "$LOGD_ROOT/repo"
+  [[ ! -L "$LOGD_ROOT/daemon.log" ]] || { echo "log daemon output is a symlink" >&2; return 77; }
+  if [[ ! -e "$LOGD_ROOT/daemon.log" ]]; then
+    sudo -u "$LOGD_USER" /usr/bin/touch "$LOGD_ROOT/daemon.log"
+  fi
+  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/daemon.log"
+  chmod 600 "$LOGD_ROOT/daemon.log"
+  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" && ! -L "$LOGD_ROOT/keys/id_ed25519" ]]; then
+    sudo -u "$LOGD_USER" /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-runner-logd -f "$LOGD_ROOT/keys/id_ed25519"
+  fi
+  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
+  chmod 600 "$LOGD_ROOT/keys/id_ed25519"
+  chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
+  write_logd_config
+  atomic_text "$LOGD_PLIST" 644 print_logd_plist
+  plutil -lint "$LOGD_PLIST" >/dev/null
+  launchctl bootout "system/$label" 2>/dev/null || true
+  launchctl bootstrap system "$LOGD_PLIST"
+  echo "installed $label"
+  echo "runner-logd public key: $LOGD_ROOT/keys/id_ed25519.pub"
+}
+
+# Prints one line and creates nothing. Root install uses the same gate.
+publisher_plan() {
+  if "$GUARD_PYTHON" -I "$SRC/publisher.py" gate --flag "$PREFIX/enable-publisher"; then
+    printf '%s\n' "publisher: enabled"
+  else
+    printf '%s\n' "publisher: disabled"
+  fi
+}
+
+# No account, directory, job, or credential unless the flag gate passes.
+# The secrets directory is created empty. Existing bot credentials are not read.
+install_publisher() {
+  local flag="$PREFIX/enable-publisher" label=com.radon.publisher
+  local plist="/Library/LaunchDaemons/$label.plist"
+  if ! "$GUARD_PYTHON" -I "$SRC/publisher.py" gate --flag "$flag"; then
+    echo "publisher: disabled" >&2
+    return 0
+  fi
+  if sudo -u "$BOT" test -w "$flag" || sudo -u "$BOT" test -w "$PREFIX"; then
+    echo "publisher: disabled (writable by $BOT)" >&2
+    return 0
+  fi
+  ensure_publisher_user
+  if [[ ! -d /Library/Radon ]]; then
+    install -d -o root -g wheel -m 755 /Library/Radon
+  fi
+  install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT"
+  install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 700 "$PUB_ROOT/secrets" "$PUB_ROOT/log" "$PUB_ROOT/tmp"
+  install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT/run"
+  atomic_install -o root -g wheel -m 755 "$SRC/publisher.py" "$PREFIX/publisher.py"
+  atomic_text "$PREFIX/publisher-gitconfig" 644 print_publisher_gitconfig
+  atomic_text "$plist" 644 print_publisher_plist
+  plutil -lint "$plist" >/dev/null
+  launchctl bootout "system/$label" 2>/dev/null || true
+  launchctl bootstrap system "$plist"
+  echo "installed $label"
+}
+
 main() {
-  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --write-dotenv-path" >&2; exit 64; }
+  [[ $# -gt 0 ]] || { echo "usage: $0 <loop>... | --print-plist <loop> | --print-guard <loop> | --print-gitconfig | --print-logd-plist | --install-logd | --print-publisher-plist | --publisher-plan | --write-dotenv-path" >&2; exit 64; }
   if [[ "$1" == "--stage-gateway" ]]; then
     stage_gateway "${2:?destination}"
     return 0
@@ -713,6 +989,14 @@ main() {
     print_update_plist
     return 0
   fi
+  if [[ "$1" == "--print-logd-plist" ]]; then
+    print_logd_plist
+    return 0
+  fi
+  if [[ "$1" == "--install-logd" ]]; then
+    install_log_daemon
+    return
+  fi
   if [[ "$1" == "--print-plist" ]]; then
     print_plist "${2:?loop}"
     return 0
@@ -723,6 +1007,14 @@ main() {
   fi
   if [[ "$1" == "--print-gitconfig" ]]; then
     print_gitconfig
+    return 0
+  fi
+  if [[ "$1" == "--print-publisher-plist" ]]; then
+    print_publisher_plist
+    return
+  fi
+  if [[ "$1" == "--publisher-plan" ]]; then
+    publisher_plan
     return 0
   fi
   if [[ "$1" == "--write-dotenv-path" ]]; then
@@ -747,6 +1039,9 @@ main() {
   write_maintenance_ready
   install_update_service
   install_native_update_service
+  install_log_daemon
+  install_publisher
+  install_egress
 }
 
 main "$@"

@@ -12459,6 +12459,40 @@ Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node 
 | 2 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (156.49s) | 11,631 passed / 21 skipped / 1,209 files (101.16s) | 58 failed / 4,285 passed / 23 skipped (981.70s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,822 passed / 10 skipped / 40 subtests (152.75s) | 11,631 passed / 21 skipped / 1,209 files (102.79s) | 58 failed / 4,285 passed / 23 skipped (972.75s) | 0 added / 0 removed |
 
+## Delta audit 2026-11-17
+
+Range `8aaad84e999430839ec8b3979b3d6a82bf661c1d..b40788e1ac5f10745726d7960ca8b51cd96d2a53`: 87 commits / 48 paths. Newest trusted checkpoint on issue #83 is `audited-through: 8aaad84e999430839ec8b3979b3d6a82bf661c1d` (2026-11-16). It carried no open verified finding. Open `testing/` PR #1587 already holds T-590, T-591, T-592 (CI green); tonight skipped those. Highest merged id T-589. Next id T-593.
+
+`ci.yml` is unchanged in the range. Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-588 / T-589 remain DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta-touched files 3×: Python 396 passed (three `/opt/cursor` sim dumps excluded; those are T-591 on #1587); cloud 72 passed. No Vitest files in the range.
+
+Not filed: PDF sim dumps under `/opt/cursor` (T-591) and bash 3.2 empty crash-report tails (T-592) — both on #1587. Post-batch `_report_backlog` after a non-empty claim is the empty-batch path with a second call site; the warn/error contract is already pinned.
+
+### T-593 — P1 — article-cycle transport tests treated a TimeoutError string as a wire blip
+
+`scripts/research/marketdesk_job.py:671-674` (pre-fix) classified `DbHttpError` with `_DB_TRANSPORT_RE` on `str(exc)`. `scripts/tests/test_marketdesk_job.py:575-578` injected cause-less `DbHttpError("TimeoutError: …")` and required exit 0. Sibling PDF job `scripts/research/marketdesk_pdf_job.py:123-135` and `scripts/db/hrana_http.py:230-231` inspect types, never message text. `api/db_http.py:318` wraps urllib as `DbHttpError(f"{type(exc).__name__}: {exc}") from exc`, so a Turso timeout is often `URLError`. Red: chained `URLError` exited 1 (`/tmp/t593-red.log`); cause-less `TimeoutError:` text exited 0.
+
+Acceptance: chained `DbHttpError` with `TimeoutError` / `ConnectionResetError` / `RemoteDisconnected` / `URLError` cause exits 0. Cause-less `DbHttpError("TimeoutError: The read operation timed out")` exits 1. A statement error and missing-creds `DbHttpError` still exit 1.
+
+Audited through: b40788e1ac5f10745726d7960ca8b51cd96d2a53 on 2026-11-17 — 1 new finding
+
+## Remediation 2026-11-17
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-593 | DONE | Chained URLError exited 1; cause-less TimeoutError text exited 0 (`/tmp/t593-red.log`, 2 failed). `_is_transport_blip` now uses `is_transport_error` on `__cause__`. Green: 10 passed (`/tmp/t593-green.log`); file 104 passed ×3. |
+
+### Closing gates 2026-11-17
+
+Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest Darwin 5-red is T-591 (`/opt/cursor`) plus T-592 (empty crash tail), both on #1587; r3 also had the credentials xdist clock flake, serial 2 passed. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as `8aaad84e9` (0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs r1 |
+|---|---|---|---|---|
+| 1 | 5 failed (T-591×3 + T-592×2) / 19,866 passed / 10 skipped / 40 subtests (110.14s) | 11,631 passed / 21 skipped / 1,209 files (50.25s) | 58 failed / 4,288 passed / 23 skipped (975.85s) | — |
+| 2 | 5 failed (same T-591+T-592) / 19,866 passed / 10 skipped / 40 subtests (177.40s) | 11,631 passed / 21 skipped / 1,209 files (128.55s) | 58 failed / 4,288 passed / 23 skipped (1037.57s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 5 Darwin T-591+T-592 / 19,865 passed / 10 skipped / 40 subtests (159.14s) | 11,631 passed / 21 skipped / 1,209 files (100.69s) | 58 failed / 4,288 passed / 23 skipped (984.57s) | 0 added / 0 removed |
+
 ## Delta audit 2026-11-19
 
 Range `6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c..45660cd1c9e352ee799ea4f721e3c7933ee4f6a3`: 22 commits / 45 paths. Newest trusted checkpoint on issue #83 is `audited-through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c` (2026-11-18). It carried no open verified finding. Open `testing/` PRs: #1606 (T-594, all checks green) and #1598 (T-593, all checks green). Highest id in ledgers T-592; PRs hold T-593/T-594. Next id T-595.
