@@ -122,5 +122,5 @@ def skips_unresolved_subject_hold(post, outcome, reason):
     folder = folders[3] if len(folders) > 3 and isinstance(folders[3], str) else ''
     identity = SimpleNamespace(publisher=source.get('publisher') or '', series='', publisher_folder=folder)
     return always_publish(identity, filename=source.get('fileName') or post.get('title') or '',
-                          page_text=post.get('title') or '')
+                          page_text=post.get('content') or post.get('title') or '')
 

@@ -510,6 +510,37 @@ def test_publication_rechecks_current_book_even_with_valid_editorial_certificate
     assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
 
 
+UNRESOLVED_EQUITY = (
+    "Acme looks undervalued on an FCF valuation after hyperscaler capex. No ticker is named."
+)
+
+
+def test_hartnett_byline_publishes_through_an_unresolved_subject_hold(db, post, monkeypatch):
+    from research import book, equity_admission
+    monkeypatch.setattr(book, "current_tickers", lambda: frozenset())
+    body = "Michael Hartnett. " + UNRESOLVED_EQUITY
+    post = certify({**post, "title": "The Biggest Picture", "content": body})
+    post["source"]["publisher"] = "BofA"
+    post["source"]["folders"] = ["2026", "November", "Nov 21", "BofA"]
+    post["source"]["fileName"] = "The Biggest Picture"
+    assert equity_admission.decide(post["title"], post["content"], book_tickers=frozenset())[:2] == (
+        "held", "EQUITY_RESEARCH_SUBJECT_UNRESOLVED")
+    assert publish.publish(post) == post["id"]
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 1
+
+
+def test_bofa_note_without_a_hartnett_desk_still_holds_unresolved_subjects(db, post, monkeypatch):
+    from research import book
+    monkeypatch.setattr(book, "current_tickers", lambda: frozenset())
+    post = certify({**post, "title": "Acme initiation of coverage", "content": UNRESOLVED_EQUITY})
+    post["source"]["publisher"] = "BofA"
+    post["source"]["folders"] = ["2026", "November", "Nov 21", "BofA"]
+    post["source"]["fileName"] = "Acme initiation of coverage"
+    with pytest.raises(publish.PublicationAdmissionError, match="EQUITY_RESEARCH_SUBJECT_UNRESOLVED"):
+        publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize('caption,current,blocked', [
     ('Meta (META): Buy, price target $850.', {'HOOD'}, True),
     ('Robinhood (HOOD): Buy, price target $150.', {'HOOD'}, False),
