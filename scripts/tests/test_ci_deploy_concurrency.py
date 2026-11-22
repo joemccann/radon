@@ -373,12 +373,18 @@ def test_vitest_coverage_uses_text_reporter_only() -> None:
 
 
 def test_unit_pytest_uses_xdist_loadfile() -> None:
-    commands = _job_commands(_workflow()["jobs"]["py-tests"])
-    assert "-n auto" in commands
-    assert "--dist loadfile" in commands
+    py_tests = _workflow()["jobs"]["py-tests"]
+    commands = _job_commands(py_tests)
+    assert "matrix.xdist" in commands
     assert "--cov-fail-under=0" in commands
     assert "--cov-branch" not in commands
     assert "term-missing" not in commands
+    rows = {str(row["shard"]): row for row in py_tests["strategy"]["matrix"]["include"]}
+    assert rows["rest"]["xdist"] == "-n auto --dist load"
+    for name, row in rows.items():
+        if name == "rest":
+            continue
+        assert row["xdist"] == "-n auto --dist loadfile", name
 
 
 def test_pytest_shards_then_combines_coverage_ratchet() -> None:

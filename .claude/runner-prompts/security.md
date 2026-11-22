@@ -373,7 +373,10 @@ Before every run:
    and the sanitized dead-man endpoint. Package-registry access is allowed
    only during separately authorized bootstrap. If advisory freshness cannot
    be checked within that allowlist, use the last locally cached database and
-   mark freshness incomplete.
+   mark freshness incomplete. The host allowlist the log-only proxy reads is
+   `/usr/local/radon-runner/egress-allowlist`. It is root-owned and is not in
+   this repository. Do not create `/usr/local/radon-runner/enable-egress` and
+   do not edit either file.
 6. Apply an outer wall-clock deadline, a provider hard-spend ceiling on the
    API-key path (a claude.ai subscription session has no dollar cap — the
    wall clock is its bound), process group, memory/CPU bounds, and cleanup

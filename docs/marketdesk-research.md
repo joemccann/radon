@@ -57,16 +57,22 @@ issuer-research sections cannot be admitted under a broad desk-note title.
    data holds publication; local JSON fallbacks cannot establish eligibility.
    A resolved off-book issuer is dropped; unresolved subjects or mixed report
    scope remain held. Every issuer in a resolved recommendation list must qualify.
-   Desk force-inclusion and operator notes cannot override this gate.
+   Desk force-inclusion and operator notes cannot override this gate, except an
+   always-publish Hartnett desk (The Flow Show, a BofA Fund Manager Survey, or a
+   note authored by Hartnett). That desk skips only the unresolved-subject hold
+   and the 24h hold expiry. A resolved off-book issuer still drops. Other
+   force-included desks stay on this gate.
 4. Novelty drops `DUPLICATE_OF_PUBLISHED`, retaining the existing cross-publisher
    always-publish desk exception. This exception does not override eligibility.
 5. The source summary and images proceed to grounded copy generation without
    a generic model relevance SELECT. The final generated title, body and rendered figure captions are checked for
-   equity eligibility again, then pass the existing numerical/ticker/source
+   equity eligibility again, with the same Hartnett unresolved-subject exception,
+   then pass the existing numerical/ticker/source
    validation and exact-copy Humanizer certification. Source bullet lists are
    input facts and are never appended to the article.
 6. The shared `research.publish` boundary checks the exact certified final copy
-   against the current canonical book immediately before its database write. A
+   against the current canonical book immediately before its database write.
+   The Hartnett unresolved-subject exception applies at this write too. A
    saved certificate or queued payload cannot retain eligibility after an issuer
    leaves the book. MarketDesk records a terminal eligibility outcome; the legacy
    Dropbox outbox parks the affected batch with payload/history preserved.
@@ -175,7 +181,8 @@ fetched with a cookie-less opener that never follows redirects.
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
    than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). A retry cannot change that
    outcome, so the deadline retires the row to `failed` at once (every attempt
-   spent), writes one `marketdesk-research` error row, and the oneshot exits 0.
+   spent), writes one `marketdesk-research` warn row (provider-side, not
+   actionable, so it stays out of the error digest), and the oneshot exits 0.
    The next cycle is green again. One other bad item never aborts the rest of the cycle. No new item
    starts after 150 seconds of the cycle; the rest wait for the next one.
 7. Drain the outbox again when something was just published, held or dropped and write the

@@ -10,6 +10,11 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 - HTTP 200 is transport truth only. `/api/service-health`, `/api/probe/freshness`,
   and `:8330/status` all return 200 during real outages — judge the BODY.
+- Journal freshness on `/api/probe/freshness` during RTH is pipeline liveness:
+  `journal-sync` still ok inside its open window, and no live `journal-gap-sli`
+  row with `missing_exec_id_count>0`. Last-fill `age_secs` is informational.
+  One error cycle, a gap-sli self-error, or a stale gap-sli heartbeat does
+  not page. A missing row still fails the leg.
 - An anonymous 401/404 on a protected route is the auth perimeter, not an outage.
   Liveness curls use the public `/sign-in` route only.
 - A bounded-probe timeout is `unknown`, never `down`. Off-hours quiet is normal
@@ -2929,7 +2934,9 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   sync-libsql hang, a different class. A statement error (not a read
   timeout) on the history upsert still fails the oneshot.
   `Expecting value: line 1 column 1 (char 0)` on an empty Cboe body is
-  `calm-streak-empty-cboe-body`.
+  `calm-streak-empty-cboe-body`. `HTTP Error 403: Forbidden` on the
+  historical JSON, cleared by `Referer: https://www.cboe.com/`, is
+  `calm-streak-cloudflare-referer`.
 - **Remediation (code):** `_record_ok_heartbeat` catches the ok
   heartbeat, logs `service_health heartbeat failed`, and still writes
   `data/calm_streak.json`. The oneshot exits 0. No ok heartbeat is
@@ -2985,6 +2992,9 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   a different outage: stand down. `TimeoutError: The read operation
   timed out` is `calm-streak-hrana-read-timeout`. `no such table:
   calm_streak_history` is `calm-streak-shadowed-migration`.
+  `HTTP Error 403: Forbidden` on the historical JSON, while the same
+  GET with `Referer: https://www.cboe.com/` is HTTP 200, is
+  `calm-streak-cloudflare-referer`.
   `Result=signal` or exit 143 inside a deploy window is
   `deploy-stop-clean-oneshot-signal`. A statement error on the
   history upsert still fails the oneshot. HTTP 5xx still fails the
@@ -3002,6 +3012,69 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `test_empty_body_without_a_cache_still_fails`,
   `test_http_error_still_fails_the_oneshot`.
 - **Code:** `scripts/fetch_calm_streak.py` (`run`).
+
+---
+
+## calm-streak-cloudflare-referer
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when Cloudflare 403s `_SPX.json` for a request with
+no Referer.** Peak: 2026-11-20 02:40Z, page
+`5061ba0b8fb9030ac87d717e218a2892`.
+
+- **Mechanism:** `Type=oneshot`, no `Restart=`. The 02:40 UTC timer
+  started at 02:40:34Z and Python exited 1 in the same second
+  (`ExecMainStatus=1`, `CPUUsageNSec` about 118ms). That span is one
+  rejected GET, not `FETCH_TIMEOUT_S=30` and not
+  `TimeoutStartSec=300`.
+  `cdn.cboe.com/.../historical/_SPX.json` returns HTTP 403
+  `text/html` (Cloudflare "Sorry, you have been blocked") for
+  User-Agent `radon/2.0`, a browser UA, and curl, with or without
+  `Origin`. The same GET with `Referer: https://www.cboe.com/` and
+  UA `radon/2.0` is HTTP 200 `application/json`, about 1.7 MB,
+  `Last-Modified: Fri, 20 Nov 2026 02:09:40 GMT`, last row
+  `2026-11-19`. A conditional GET with that stamp is 304.
+  `SPX_History.csv` is HTTP 200 but `DATE,SPX` only, so it cannot
+  compute the band. `_fetch_source` sent User-Agent and Accept only.
+  urllib raised `HTTP Error 403: Forbidden`. `main` printed
+  `run failed` and exited 1. The responder account cannot read the
+  journal; the exception is the live reproduction of that GET.
+  `requires_ib` is false. `:8321/health/lite` answered 401 to an
+  anonymous GET, so the API process was up. Sibling `radon-vixcor`
+  (CSV) exited 0 at 02:35Z. This is not
+  `calm-streak-empty-cboe-body` (no `JSONDecodeError`; the body is
+  an HTML 403). This is not `calm-streak-hrana-read-timeout` (no
+  `TimeoutError`). This is not `calm-streak-shadowed-migration`
+  (the fetch never reaches the table).
+- **Detection:** `systemctl show` → `exit-code` / `0` / `1`. Exec
+  span is the same second. CPU under 200ms. A direct urllib GET of
+  the historical URL is `HTTP Error 403: Forbidden`. The same GET
+  with the Cboe Referer is 200 JSON.
+- **Discriminating check:** urllib (and `curl` without a Referer)
+  get HTTP 403 HTML. Adding `Referer: https://www.cboe.com/` while
+  keeping UA `radon/2.0` gets HTTP 200 whose last `date` is a
+  completed session, and `If-Modified-Since` of that
+  `Last-Modified` gets 304. A CSV 200 does not clear this case.
+  A 403 that remains after the Referer is set still fails the
+  oneshot. Do not keep last-good for it, and do not impersonate a
+  browser User-Agent. `Expecting value: line 1 column 1 (char 0)`
+  on an empty 200 is `calm-streak-empty-cboe-body`.
+  `TimeoutError: The read operation timed out` is
+  `calm-streak-hrana-read-timeout`. `no such table:
+  calm_streak_history` is `calm-streak-shadowed-migration`.
+  `Result=signal` or exit 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`. `/health/lite` down, or a
+  Turso canary failure, is a different outage: stand down.
+- **Remediation (code):** send `Referer: https://www.cboe.com/` on
+  the historical JSON GET. Keep UA `radon/2.0`. HTTP 403 and 5xx
+  still fail the oneshot. Do not `reset-failed` as the fix. The
+  unit is not on `RERUNNABLE_ONESHOT_UNITS`. After deploy, the next
+  timer (02:40 or 14:30 UTC) clears the latch.
+- **Regression:**
+  `scripts/tests/test_calm_streak.py::TestCloudflareReferer::test_historical_json_403_without_cboe_referer_still_exits_zero`,
+  `test_http_403_still_fails_when_the_referer_does_not_clear_it`.
+- **Code:** `scripts/fetch_calm_streak.py` (`_fetch_source`,
+  `CBOE_REFERER`).
 
 ---
 
@@ -5709,7 +5782,7 @@ The article path must not request a PDF. It persists every discovered reference 
 - **Observed:** page `d1d7c1bdcd60158b96f79b87ea3d82f1` at 2026-10-29T09:00:00Z. The oneshot started 2026-10-29T08:59:41Z and went inactive at 2026-10-29T08:59:47Z, `ExecMainStatus=1`, `NRestarts=0`. `marketdesk-research` `last_error` was `1 of 1 articles failed; last error: no_summary`. `marketdesk-dropbox` stayed `ok`. `marketdesk-pdf` was `ok` on its 09:02Z fire. Edge `/status` was `up` and `/sign-in` was HTTP 200. The health read succeeded, so this was not a Turso platform outage. IB gateway was down and is unused by this job. No deploy was in progress: the green marker was `e3b7788145d5c9e19fe71d5d926b5638b1a7f4a9` at 02:11Z. Journal text was not readable from this account. The pending row's provider time was 2026-10-29T02:55:14Z, first seen 02:59Z, and this was attempt 1, just past the 6 hour wait. A newer sibling was still `summary_pending` with zero attempts. The 09:04Z and 09:09Z fires failed the same way. At 09:09:48Z the health message was `2 of 2 articles failed; last error: no_summary`, with attempts 3 and 2. Both rows were still `pending`.
 - **Mechanism:** an item with an empty summary is parked as `summary_pending` and spends no attempt. After `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6) it is `no_summary`, spends an attempt, and `ArticlesFailed` is raised when nothing else published. `service_cycle` writes the error row, then `main` returned 1. The timer is `*:04/5:41`, so each fire is a new `InactiveEnterTimestamp`. The unit watchdog treats that as a fresh P1. The error row is the designed visibility signal. The P2 error bucket fires through hysteresis. Five attempts retire the row to `failed`.
 - **Discriminating check:** the health message ends in `last error: no_summary`, the oneshot span is a few seconds rather than `TimeoutStartSec`, and `marketdesk-dropbox` is `ok`. A younger item still on `summary_pending` is the same provider delay and is not an error. `Result=signal` or exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`. A copy failure, transport error, listing gap, parked outage, or a mix of those with `no_summary` still exits 1. A Turso read failure in the same minute is a platform outage: stand down, do not restart-flap.
-- **Remediation (code):** a cycle whose only article failures are `no_summary` still logs the message and keeps the error row, and the oneshot exits 0. Other failures still exit 1. Do not `reset-failed` as the fix. The provider summary itself is unchanged. Since 2026-11-11 the deadline retires the ledger row to `failed` in that one cycle (all attempts spent), so the writer is red for one cycle, not five.
+- **Remediation (code):** a cycle whose only article failures are `no_summary` still logs the message and keeps the error row, and the oneshot exits 0. Other failures still exit 1. Do not `reset-failed` as the fix. The provider summary itself is unchanged. Since 2026-11-11 the deadline retires the ledger row to `failed` in that one cycle (all attempts spent), so the writer is red for one cycle, not five. Since 2026-11-21 that cycle writes a `warn` row instead of the error row, so it no longer reaches the P2 digest.
 - **Regression:** `scripts/tests/test_marketdesk_job.py::test_summary_deadline_keeps_error_and_exits_zero`, `test_repeated_summary_deadline_exits_zero_until_retired`, `test_copy_failure_still_fails_the_oneshot`, `test_summary_deadline_does_not_hide_another_article_failure`, `test_listing_gap_still_fails_the_oneshot_beside_a_summary_deadline`.
 - **Code:** `scripts/research/marketdesk_job.py` (`SUMMARY_DEADLINE`, `_summary_deadline_only`, `main`). The owner doc is `docs/marketdesk-research.md`.
 
@@ -5778,3 +5851,14 @@ The article path must not request a PDF. It persists every discovered reference 
 - **Remediation (code):** a libsql `ValueError` whose text is HTTP 502, 503, or 504, or `connect to upstream failed` / `upstream forward failed`, still keeps the error row and the oneshot exits 0. Stderr prints `cycle transport non-fatal` and the exception type only. Do not retry the uncertain insert in the failed process. The next timer retries. Statement errors still exit 1.
 - **Regression:** `scripts/tests/test_credit_vix_persist_transport.py::test_hrana_502_on_history_upsert_exits_zero`, `test_sqlite_statement_error_on_upsert_still_fails`.
 - **Code:** `scripts/fetch_credit_vix.py` (`_is_persist_transport`, `main`).
+
+## record-high-breadth-publication-lag
+
+**`radon-record-high-breadth.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when the 18:15 ET pass has not yet joined the expected session.**
+
+- **Observed:** page `b7c7322e70246c12439794a51524a3f6` at 2026-11-19T23:20:02Z. The timer started 2026-11-19T23:15:43Z and exited 1 at 23:15:48Z. Journal: `latest expected session is incomplete; retained observations are degraded`. The snapshot was persisted before the raise. `:8321/health/lite` stayed up (`database=up`, IB authenticated). Sibling `radon-imbalance.service` collected session 2026-11-19 at 23:26:08Z and exited 0, so this was not a TradingView auth failure or a platform outage.
+- **Mechanism:** `Type=oneshot` has no `Restart=`. `last_completed_session_date(now - 2h)` at 18:15 ET is today. `run` persisted the lagging snapshot, then raised, so `main` returned 1. systemd recorded `Result=exit-code` / `NRestarts=0`. The unit watchdog pages that first `InactiveEnterTimestamp` as P1. The 18:15 calendar is not a finality guarantee, and there was no same-evening retry, so a few minutes of unpublished breadth became a latched failed unit until the next day.
+- **Discriminating check:** stderr is the incomplete-session sentence, not `TV_NOT_CONFIGURED`, `TV_AUTH_FAILED`, or a Turso/statement error. `persist_result` already ran (a missing join raises `no aligned completed-session observations` instead). A sibling TradingView collector in the same half hour that exits 0 means the OAuth store is fine. A hole older than one session, or the same one-session gap at or after 20:00 ET, still exits 1. `Result=signal` or exit 143 inside a deploy window is deploy stop-clean. A Python Turso `SELECT 1` failure in the same minute, with siblings also failing, is a platform outage: stand down, do not restart-flap. Missing credentials remain an operator secret fix, not this case.
+- **Remediation (code):** a one-session gap before 20:00 ET records a warning, keeps the retained snapshot, and exits 0. The 20:15 ET calendar retries. That pass still exits 1 if the expected session is missing, as does any hole older than one session. Do not `reset-failed` as the fix.
+- **Regression:** `scripts/tests/test_record_high_breadth.py::test_18_15_et_single_session_lag_does_not_fail_the_oneshot`, `test_20_15_et_single_session_lag_still_fails`, `test_multi_session_hole_fails_at_18_15_et`.
+- **Code:** `scripts/record_high_breadth_scan.py` (`single_session_publication_lag`, `run`), `cloud/services/radon-record-high-breadth.timer`.

@@ -20,8 +20,8 @@ MarketDesk lists an item before it has summarised it (empty summary, MarketDesk'
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
 against the per-cycle cap, and fails as ``no_summary`` once it is older than MARKETDESK_SUMMARY_WAIT_HOURS.
 A retry cannot change that outcome (MarketDesk's summarizer can answer with an apology instead of bullets), so
-the deadline retires the article at once: one error row, and the oneshot exits 0 so the 5-minute timer does
-not page P1. An operator re-queue revives it. Any other article failure still exits 1.
+the deadline retires the article at once: one warn row (not actionable, so not the P2 error row), and the
+oneshot exits 0. An operator re-queue revives it. Any other article failure is an error row and exits 1.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ import tempfile  # noqa: E402
 import time  # noqa: E402
 
 from api.db_http import DbHttpError  # noqa: E402
-from research import equity_admission, rendered_copy
+from research import equity_admission, force_include, rendered_copy
 from research.assets import URL_PREFIX  # noqa: E402
 from research.dropbox_writer import DropboxError  # noqa: E402
 from research.marketdesk_auth import PREVIEW_QUOTA  # noqa: E402
@@ -103,8 +103,8 @@ class SummaryPending(RuntimeError):
 class ArticlesFailed(RuntimeError):
     """Raised after a cycle where nothing published but something failed, or an article was retired.
 
-    ``provider_deadline`` means every failure was the summary wait. The oneshot
-    exits 0. The error row is already written, and other failures still exit 1.
+    ``provider_deadline`` means every failure was the summary wait. run_cycle records
+    that as a warn row instead of raising; every other failure raises and exits 1.
     """
 
     def __init__(self, message: str, *, provider_deadline: bool = False) -> None:
@@ -311,11 +311,12 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
     existing = store.post_source(post_id)
     if existing is not None:  # crash between publish and ledger write: record, never re-publish
         current_copy = store.post_copy(post_id)
+        held_post = {**current_copy, 'source': existing} if current_copy else {}
         eligibility, reason, _ = (equity_admission.decide(
-            current_copy['title'], rendered_copy.content({**current_copy, 'source': existing}),
+            current_copy['title'], rendered_copy.content(held_post),
             book_tickers=deps.book_tickers)
             if current_copy else ('held', 'EXISTING_POST_NOT_VISIBLE', ()))
-        if eligibility != 'publish':
+        if eligibility != 'publish' and not force_include.skips_unresolved_subject_hold(held_post, eligibility, reason):
             store.record_admission_block(ref.article_id, eligibility, reason)
             counts[eligibility] += 1
             return
@@ -386,6 +387,9 @@ def _process(ref, *, session, workdir: Path, deps: Deps, counts: dict, summary_w
             current['title'], rendered_copy.content(current), book_tickers=deps.book_tickers)
         review['final_equity_admission'] = {'outcome': eligibility, 'reason_code': reason, 'subjects': list(subjects)}
         if eligibility == 'publish':
+            return True
+        if review.get('always_publish') and eligibility == 'held' and reason == force_include.UNRESOLVED_SUBJECT_HOLD:
+            review['audit'].append({'always_publish_equity_hold_bypass': reason})
             return True
         store.record_admission_block(ref.article_id, eligibility, reason)
         review.update(outcome=eligibility, reason_code=reason)
@@ -650,7 +654,9 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
             if failure is not None:
                 raise _sanitized(failure) from None
             problem = _articles_failed(counts, notes)
-            if problem is not None:
+            if problem is not None and problem.provider_deadline:
+                cycle.warning = str(problem)  # provider never summarised it: visible, not paging
+            elif problem is not None:
                 raise problem
             if notes.get("gap"):
                 raise ListingGap("listing_gap: the library listing does not reach the newest known article; "
@@ -661,17 +667,20 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
     return counts
 
 
-# db_http wraps a socket failure as DbHttpError("<ExcType>: ...") or
-# "research transaction transport failed: <ExcType>". Statement errors and
-# missing credentials carry no such prefix and still fail the unit.
-_TRANSPORT_TYPES = r"(?:TimeoutError|socket\.timeout|ConnectionResetError|ConnectionAbortedError|RemoteDisconnected|IncompleteRead)"
-_DB_TRANSPORT_RE = re.compile(rf"^(?:{_TRANSPORT_TYPES}:|research transaction transport failed: {_TRANSPORT_TYPES}$)")
-
-
 def _is_transport_blip(exc: BaseException) -> bool:
+    """True only for a wire blip. Message text is not evidence.
+
+    service_cycle has already written the error row. Exit 0 lets the next
+    timer retry. A statement error has no transport cause and stays fatal.
+    """
     if isinstance(exc, (TimeoutError, ConnectionResetError, ConnectionAbortedError)):
         return True
-    return isinstance(exc, DbHttpError) and bool(_DB_TRANSPORT_RE.match(str(exc).strip()))
+    from db.hrana_http import HranaHttpError, is_transport_error
+    if isinstance(exc, HranaHttpError):
+        return is_transport_error(exc)
+    if not isinstance(exc, DbHttpError) or exc.__cause__ is None:
+        return False
+    return is_transport_error(exc.__cause__)
 
 
 def _terminate(signum, frame):  # noqa: ARG001 - signal handler signature
@@ -688,9 +697,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_STOPPED
     except ArticlesFailed as exc:  # service_cycle already wrote the error row
         _log(f"cycle failed: {_safe_error(exc)}")
-        # A summary deadline is the P2 error row. Exit 1 makes every 5-minute
-        # fire a new InactiveEnterTimestamp and a P1 page.
-        return 0 if exc.provider_deadline else 1
+        # A summary deadline never reaches here; run_cycle records it as a warn row.
+        return 1
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
         if _is_transport_blip(exc):
             # The error row is the P2 signal and the next 5-minute fire retries. Exit 1 latched the

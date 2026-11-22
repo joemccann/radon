@@ -81,7 +81,10 @@ Only after rechecking CI and refs does it publish the identical Git objects as
 a public maintenance PR. The published commit object's headers must be
 `tree`, then any number of `parent` lines, then `author` and `committer`.
 Any other header, or a line with no space, is refused before the push.
-Public CI and the ordinary release sequence still
+Each controller tick closes an open private validation PR once its head is
+settled: published as a public PR, or its private feedback delivered. Closing
+never deletes the `validation/fix/` or feedback refs, and a head with a marker
+is never reopened. Public CI and the ordinary release sequence still
 apply. P0 findings remain under explicit incident coordination. Source contents
 and raw findings never belong in public controller status or notifications.
 

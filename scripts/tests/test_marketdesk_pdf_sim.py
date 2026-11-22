@@ -473,6 +473,34 @@ def test_a_growing_backlog_pages(db):
     assert breach.paging is True
 
 
+def test_a_growing_backlog_held_at_the_daily_cap_warns(db, monkeypatch):
+    """Intake above the provider allowance grows the queue by design; aging retires
+    the excess. A full rolling-24h cap is not actionable, so growth there warns."""
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Capd{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    for i in range(70):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES(?,?)",
+                   (f"a{i}", (NOW - timedelta(minutes=10 * i)).isoformat()))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0 capped=1" in str(breach)
+    assert breach.paging is False
+
+
+def test_a_growing_backlog_under_the_daily_cap_still_pages(db, monkeypatch):
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Undr{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    for i in range(69):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES(?,?)",
+                   (f"a{i}", (NOW - timedelta(minutes=10 * i)).isoformat()))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0 capped=0" in str(breach)
+    assert breach.paging is True
+
+
 def _disposition(db, article_id):
     return db.execute(
         "SELECT status,disposition,disposition_reason FROM marketdesk_pdf_queue WHERE article_id=?",

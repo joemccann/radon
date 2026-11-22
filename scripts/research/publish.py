@@ -288,7 +288,7 @@ def publish(post: dict) -> str:
     except ValueError as error:
         raise HumanizerCertificateError(str(error)) from error
     outcome, reason, subjects = equity_admission.decide(title, rendered_copy.content(post), book_tickers=book.current_tickers)
-    if outcome != 'publish':
+    if outcome != 'publish' and not force_include.skips_unresolved_subject_hold(post, outcome, reason):
         raise PublicationAdmissionError(outcome, reason, subjects)
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)

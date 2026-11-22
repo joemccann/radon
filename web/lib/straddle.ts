@@ -5,6 +5,8 @@
  * (Cboe SPX + VIX1D daily series). Spec: docs/indicators/straddle.md.
  */
 
+import { mostRecentSessionDate, previousTradingDay } from "./marketCalendar";
+
 export interface StraddleEntry {
   date: string;
   spx_close: number;
@@ -116,6 +118,24 @@ export function buildStraddleChartRows(
  */
 export function impliedStraddlePctFromVix1d(vix1d: number): number {
   return Math.sqrt(2 / Math.PI) * (vix1d / 100) * Math.sqrt(1 / 252) * 100;
+}
+
+/**
+ * The session close the live SPX spot is measured from: the trading day before
+ * the session SPX is trading in (or last traded in, after the bell and on
+ * weekends). Null when that row has not landed yet — measuring from an older
+ * close would divide a multi-session move by a one-day straddle.
+ */
+export function liveReferenceSessionDate(now: Date = new Date()): string {
+  return previousTradingDay(mostRecentSessionDate(now));
+}
+
+export function liveReferenceEntry(
+  series: ReadonlyArray<StraddleEntry>,
+  now: Date = new Date(),
+): StraddleEntry | null {
+  const reference = liveReferenceSessionDate(now);
+  return series.find((entry) => entry.date === reference) ?? null;
 }
 
 /**
