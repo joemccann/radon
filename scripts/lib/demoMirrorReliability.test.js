@@ -483,3 +483,48 @@ describe("equibles per-ticker decks reach the demo database", () => {
     expect(read.some((s) => /PARTITION BY ticker ORDER BY as_of DESC/.test(s))).toBe(true);
   });
 });
+
+describe("account-derived fields never reach the demo database", () => {
+  // The ATS venue-share universe meta counts the open-position book
+  // (universe.counts.portfolio). The demo trial tier must never learn it.
+  it("strips every portfolio-derived count from the mirrored ATS venue-share payload", async () => {
+    // The production shape: the portfolio tier, and the core / unique
+    // aggregates that return it by subtraction from the public tiers.
+    const payload = JSON.stringify({
+      universe: {
+        order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"],
+        counts: { portfolio: 7, watchlist: 40, ndx100: 100, r2k: 0, sp500: 0, unique: 147, core: 47 },
+        core: 47,
+        this_cycle: 12,
+        index_offset: 3,
+      },
+      series: {},
+    });
+    const src = {
+      execute: vi.fn().mockResolvedValue({
+        columns: ["service", "scan_time", "payload", "rn"],
+        rows: [
+          { service: "equibles-ats-venue-share", scan_time: "2026-08-21T21:00:00Z", payload, rn: 1 },
+          { service: "gex", scan_time: "2026-08-21T21:00:00Z", payload: JSON.stringify({ counts: { portfolio: 3 } }), rn: 1 },
+        ],
+      }),
+    };
+    const dst = { execute: vi.fn().mockResolvedValue({ rows: [] }), batch: vi.fn().mockResolvedValue(undefined) };
+
+    await runMarketMirror({
+      src,
+      dst,
+      tables: { latestOne: [], perKey: [PER_KEY.find((e) => e.table === "scan_snapshots")], history: [], purgedAccountTables: [] },
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      runId: "strip-portfolio",
+    });
+
+    const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
+    const byService = Object.fromEntries(statements.map((s) => [s.args[0], JSON.parse(s.args[2])]));
+    const universe = byService["equibles-ats-venue-share"].universe;
+    expect(universe).toEqual({ order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"], this_cycle: 12, index_offset: 3 });
+    expect(JSON.stringify(universe)).not.toMatch(/\b(?:47|147|7)\b/);
+    expect(byService.gex).toEqual({ counts: { portfolio: 3 } });
+  });
+});
