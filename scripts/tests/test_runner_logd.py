@@ -5,9 +5,11 @@ import importlib.util
 import os
 import plistlib
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -171,22 +173,27 @@ def test_push_uses_the_private_key_and_drops_parent_secrets(logd, tmp_path, monk
 
 
 def test_socket_is_group_writable_only_and_not_a_symlink(logd, tmp_path):
-    path = tmp_path / "ingest.sock"
-    sock = logd.bind_ingest_socket(path)
+    # AF_UNIX paths are capped near 104 bytes on macOS; pytest tmp_path is too long.
+    root = Path(tempfile.mkdtemp(prefix="rl", dir="/tmp"))
+    path = root / "s"
     try:
-        assert stat.S_ISSOCK(path.lstat().st_mode)
-        assert stat.S_IMODE(path.stat().st_mode) & 0o007 == 0
-        assert stat.S_IMODE(path.stat().st_mode) & 0o020
+        sock = logd.bind_ingest_socket(path)
+        try:
+            assert stat.S_ISSOCK(path.lstat().st_mode)
+            assert stat.S_IMODE(path.stat().st_mode) & 0o007 == 0
+            assert stat.S_IMODE(path.stat().st_mode) & 0o020
+        finally:
+            sock.close()
+        path.unlink()
+        outside = tmp_path / "elsewhere.sock"
+        outside.touch()
+        link = root / "s"
+        link.symlink_to(outside)
+        with pytest.raises(OSError):
+            logd.bind_ingest_socket(link)
+        assert outside.read_text() == ""
     finally:
-        sock.close()
-    path.unlink()
-    outside = tmp_path / "elsewhere.sock"
-    outside.touch()
-    link = tmp_path / "ingest.sock"
-    link.symlink_to(outside)
-    with pytest.raises(OSError):
-        logd.bind_ingest_socket(link)
-    assert outside.read_text() == ""
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_install_creates_nothing_without_a_root_owned_flag(tmp_path):

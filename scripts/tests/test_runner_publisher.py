@@ -10,8 +10,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -327,35 +329,48 @@ def _call(api: publisher_client.PublisherClient, payload: dict) -> dict:
     raise last
 
 
+def _short_socket(cfg: publisher.Config) -> Path:
+    # AF_UNIX paths are capped near 104 bytes on macOS; pytest tmp_path is too long.
+    root = Path(tempfile.mkdtemp(prefix="rp", dir="/tmp"))
+    cfg.socket_path = root / "s"
+    return root
+
+
 def test_socket_rejects_force_push_and_records_nothing(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
-    cfg.socket_path.parent.mkdir()
+    root = _short_socket(cfg)
     ops = FakeOps()
     thread = threading.Thread(target=publisher.serve_once, args=(cfg, ops), daemon=True)
     thread.start()
-    api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
-    with pytest.raises(publisher_client.PublisherError) as caught:
-        _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": "/tmp/x", "force": True})
-    thread.join(2)
-    assert caught.value.code == "force_push"
-    assert ops.calls == []
-    assert "reason=force_push" in cfg.log_path.read_text(encoding="utf-8")
-    assert stat.S_IMODE(cfg.socket_path.stat().st_mode) == 0o660
+    try:
+        api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
+        with pytest.raises(publisher_client.PublisherError) as caught:
+            _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": "/tmp/x", "force": True})
+        thread.join(2)
+        assert caught.value.code == "force_push"
+        assert ops.calls == []
+        assert "reason=force_push" in cfg.log_path.read_text(encoding="utf-8")
+        assert stat.S_IMODE(cfg.socket_path.stat().st_mode) == 0o660
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_client_round_trip(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
-    cfg.socket_path.parent.mkdir()
+    root = _short_socket(cfg)
     bundle = _owned(cfg.work_root("security") / "branch.bundle", "bundle\n")
     ops = FakeOps()
     thread = threading.Thread(target=publisher.serve_once, args=(cfg, ops), daemon=True)
     thread.start()
-    api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
-    response = _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": str(bundle)})
-    thread.join(2)
-    assert response["ok"] is True
-    assert response["pushed"] == BRANCH
-    assert publisher_client.DEFAULT_SOCKET == publisher.DEFAULT_SOCKET
+    try:
+        api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
+        response = _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": str(bundle)})
+        thread.join(2)
+        assert response["ok"] is True
+        assert response["pushed"] == BRANCH
+        assert publisher_client.DEFAULT_SOCKET == publisher.DEFAULT_SOCKET
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_child_env_drops_caller_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

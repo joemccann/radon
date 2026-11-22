@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -1746,7 +1747,9 @@ def test_a_missing_log_daemon_keeps_the_local_log_and_records_it(rig, tmp_path):
 
 def test_a_live_log_socket_gets_each_line_with_secrets_removed(rig, tmp_path):
     secret = "ghp_" + "B" * 36
-    sock_path = tmp_path / "ingest.sock"
+    # AF_UNIX paths are capped near 104 bytes on macOS; pytest tmp_path is too long.
+    sock_root = Path(tempfile.mkdtemp(prefix="rr", dir="/tmp"))
+    sock_path = sock_root / "s"
     got = tmp_path / "got"
     server = r"""
 import socket, sys
@@ -1777,6 +1780,7 @@ with open(dest, "ab", buffering=0) as handle:
     finally:
         proc_server.kill()
         proc_server.wait(timeout=5)
+        shutil.rmtree(sock_root, ignore_errors=True)
     body = got.read_text(encoding="utf-8", errors="replace")
     assert "starting grok" in body
     assert secret not in body
