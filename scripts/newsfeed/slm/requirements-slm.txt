@@ -1,5 +1,5 @@
 # Train-only lock. Never install into the runtime / production venv.
-# pip install -r scripts/newsfeed/slm/requirements-slm.txt
+# pip install --no-deps -r scripts/newsfeed/slm/requirements-slm.txt
 #
 # Resolved with uv 0.12.9, Python 3.13, x86_64-manylinux_2_28, against
 # LLaMA-Factory 0.9.5's declared ranges intersected with
@@ -13,11 +13,31 @@
 #   accelerate>=1.3.0,<=1.11.0
 #   datasets>=2.16.0,<=4.0.0
 #   torch>=2.4.0
+#   gradio>=4.38.0,<=5.50.0
+#
+# Security overrides (OSV scan of main @ 194f62060, 2026-11-22). A normal
+# resolver rejects them, so install with --no-deps.
+#   transformers==5.17.0
+#     GHSA-xrqw-3rrv-vx5w fixed in 5.10.0
+#     GHSA-x9r9-c232-4q39 last affected 5.8.1
+#   fsspec[http]==2026.9.0
+#     GHSA-27vj-qcqg-25rc fixed in 2026.6.0
+#     datasets==4.0.0 still caps fsspec<=2025.3.0
+#   pillow==13.0.0
+#     GHSA-xcvg-w56q-r89m fixed in 13.0.0
+#   starlette>=1.6.0 and fastapi>=0.164.0 (resolved 1.10.0 and 0.165.0)
+#     GHSA-86qp-5c8j-p5mr fixed in 1.0.1
+#     GHSA-wqp7-x3pw-xc5r fixed in 1.1.0
+#     GHSA-82w8-qh3p-5jfq fixed in 1.3.1
+# gradio is excluded. llamafactory-cli train does not import it (webui and
+# webchat do), and nothing else in this env does. Gradio 5.50.0 held
+# starlette<1 and pillow<12. 0.9.5 refuses gradio>=6, so removal is the fix
+# for GHSA-j36p-7w88-g82j, GHSA-7hp7-4p35-3cx2, and GHSA-jmh7-g254-2cq9.
 #
 # Isolated from requirements.txt. The fleet pins tokenizers==0.23.1 and
 # huggingface-hub==1.24.0 for fastembed. This lock resolves
-# tokenizers==0.22.2 (transformers 5.6.0 requires tokenizers<=0.23.0) and
-# huggingface-hub==1.33.0. pandas, numpy, fastapi, and torch also diverge.
+# tokenizers==0.23.3 (transformers 5.17.0 requires tokenizers>=0.23.1,<0.24)
+# and huggingface-hub==1.33.0. pandas, numpy, fastapi, and torch also diverge.
 # requirements-forecasting.txt keeps its own torch pin.
 #
 accelerate==1.11.0
@@ -26,8 +46,6 @@ accelerate==1.11.0
     #   llamafactory
     #   peft
     #   trl
-aiofiles==24.1.0
-    # via gradio
 aiohappyeyeballs==2.7.1
     # via aiohttp
 aiohttp==3.14.4
@@ -44,20 +62,16 @@ antlr4-python3-runtime==4.9.3
     # via omegaconf
 anyio==4.15.1
     # via
-    #   gradio
+    #   fastapi
     #   httpx
     #   sse-starlette
     #   starlette
 attrs==26.1.0
     # via aiohttp
-audioop-lts==0.2.2
-    # via gradio
 av==16.0.0
     # via llamafactory
 bitsandbytes==0.50.2
     # via -r /tmp/slm-qlora.in
-brotli==1.2.1
-    # via gradio
 certifi==2026.10.19
     # via
     #   httpcore
@@ -96,12 +110,10 @@ docstring-parser==0.18.0
     # via tyro
 einops==0.8.2
     # via llamafactory
-fastapi==0.142.2
+fastapi==0.165.0
     # via
-    #   gradio
+    #   --override /tmp/slm-overrides.txt
     #   llamafactory
-ffmpy==1.0.0
-    # via gradio
 filelock==4.2.1
     # via
     #   datasets
@@ -117,18 +129,12 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2025.3.0
+fsspec==2026.9.0
     # via
+    #   --override /tmp/slm-overrides.txt
     #   datasets
-    #   gradio-client
     #   huggingface-hub
     #   torch
-gradio==5.50.0
-    # via llamafactory
-gradio-client==1.14.0
-    # via gradio
-groovy==0.1.2
-    # via gradio
 h11==0.16.0
     # via
     #   httpcore
@@ -140,17 +146,11 @@ hf-xet==1.7.0
 httpcore==1.0.9
     # via httpx
 httpx==0.28.1
-    # via
-    #   gradio
-    #   gradio-client
-    #   huggingface-hub
-    #   safehttpx
+    # via huggingface-hub
 huggingface-hub==1.33.0
     # via
     #   accelerate
     #   datasets
-    #   gradio
-    #   gradio-client
     #   peft
     #   tokenizers
     #   transformers
@@ -161,9 +161,7 @@ idna==3.20
     #   requests
     #   yarl
 jinja2==3.1.6
-    # via
-    #   gradio
-    #   torch
+    # via torch
 kiwisolver==1.5.1
     # via matplotlib
 llamafactory==0.9.5
@@ -171,9 +169,7 @@ llamafactory==0.9.5
 markdown-it-py==4.2.0
     # via rich
 markupsafe==3.0.4
-    # via
-    #   gradio
-    #   jinja2
+    # via jinja2
 matplotlib==3.11.2
     # via llamafactory
 mdurl==0.1.2
@@ -198,7 +194,6 @@ numpy==2.5.3
     #   bitsandbytes
     #   contourpy
     #   datasets
-    #   gradio
     #   llamafactory
     #   matplotlib
     #   pandas
@@ -251,15 +246,11 @@ omegaconf==2.3.1
     # via llamafactory
 opentelemetry-api==1.45.2
     # via fastapi
-orjson==3.13.0
-    # via gradio
 packaging==26.3
     # via
     #   accelerate
     #   bitsandbytes
     #   datasets
-    #   gradio
-    #   gradio-client
     #   huggingface-hub
     #   llamafactory
     #   matplotlib
@@ -269,15 +260,14 @@ packaging==26.3
 pandas==2.3.3
     # via
     #   datasets
-    #   gradio
     #   llamafactory
 peft==0.18.1
     # via
     #   -r /tmp/slm-qlora.in
     #   llamafactory
-pillow==11.3.0
+pillow==13.0.0
     # via
-    #   gradio
+    #   --override /tmp/slm-overrides.txt
     #   matplotlib
     #   torchvision
 propcache==0.5.4
@@ -297,12 +287,9 @@ pycparser==3.0
 pydantic==2.12.3
     # via
     #   fastapi
-    #   gradio
     #   llamafactory
 pydantic-core==2.41.4
     # via pydantic
-pydub==0.25.1
-    # via gradio
 pygments==2.21.0
     # via rich
 pyparsing==3.3.3
@@ -311,15 +298,12 @@ python-dateutil==2.9.0.post0
     # via
     #   matplotlib
     #   pandas
-python-multipart==0.0.32
-    # via gradio
 pytz==2026.5
     # via pandas
 pyyaml==6.0.3
     # via
     #   accelerate
     #   datasets
-    #   gradio
     #   huggingface-hub
     #   llamafactory
     #   omegaconf
@@ -340,10 +324,6 @@ rich==15.0.0
     # via
     #   typer
     #   tyro
-ruff==0.16.10
-    # via gradio
-safehttpx==0.1.7
-    # via gradio
 safetensors==0.8.0
     # via
     #   accelerate
@@ -352,8 +332,6 @@ safetensors==0.8.0
     #   transformers
 scipy==1.18.1
     # via llamafactory
-semantic-version==2.10.0
-    # via gradio
 sentencepiece==0.2.2
     # via llamafactory
 setuptools==84.1.0
@@ -368,10 +346,10 @@ six==1.17.0
     # via python-dateutil
 sse-starlette==3.5.0
     # via llamafactory
-starlette==0.52.1
+starlette==1.10.0
     # via
+    #   --override /tmp/slm-overrides.txt
     #   fastapi
-    #   gradio
     #   sse-starlette
 sympy==1.14.0
     # via torch
@@ -379,10 +357,8 @@ termcolor==3.3.0
     # via fire
 tiktoken==0.14.0
     # via llamafactory
-tokenizers==0.22.2
+tokenizers==0.23.3
     # via transformers
-tomlkit==0.13.3
-    # via gradio
 torch==2.14.1
     # via
     #   -r /tmp/slm-qlora.in
@@ -412,8 +388,9 @@ tqdm==4.70.1
     #   modelscope-hub
     #   peft
     #   transformers
-transformers==5.6.0
+transformers==5.17.0
     # via
+    #   --override /tmp/slm-overrides.txt
     #   -r /tmp/slm-qlora.in
     #   llamafactory
     #   peft
@@ -425,15 +402,11 @@ trl==0.24.0
     #   -r /tmp/slm-qlora.in
     #   llamafactory
 typer==0.27.3
-    # via
-    #   gradio
-    #   transformers
+    # via transformers
 typing-extensions==4.16.0
     # via
     #   anyio
     #   fastapi
-    #   gradio
-    #   gradio-client
     #   huggingface-hub
     #   opentelemetry-api
     #   pydantic
@@ -456,11 +429,7 @@ urllib3==2.8.0
     #   requests
     #   torchdata
 uvicorn==0.54.0
-    # via
-    #   gradio
-    #   llamafactory
-websockets==15.0.1
-    # via gradio-client
+    # via llamafactory
 xxhash==4.0.1
     # via datasets
 yarl==1.25.1
