@@ -615,7 +615,13 @@ class IBClient:
 
                 unbind = bind_event(getattr(self._ib, "positionEndEvent", None), _on_end)
                 try:
+                    # The blocking request returns only once the wrapper has
+                    # seen positionEnd (or raises on timeout/disconnect), so
+                    # a normal return IS the end marker. The pinned ib_insync
+                    # has no positionEndEvent for bind_event to install
+                    # (DS-2026-11-20-01); the hook stays for a build that does.
                     self._ib.reqPositions()
+                    ended = True
 
                     def _ready() -> bool:
                         if not ended:
@@ -892,7 +898,10 @@ class IBClient:
 
         unbind = bind_event(getattr(self._ib, "openOrderEndEvent", None), _on_end)
         try:
+            # Blocking until openOrderEnd; a normal return proves the end
+            # (DS-2026-11-20-01, see get_positions).
             self._ib.reqAllOpenOrders()
+            ended = True
             self.wait_until(lambda: ended, timeout=0.5)
             self._open_orders_snapshot_ended = ended
         finally:

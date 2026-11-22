@@ -63,7 +63,11 @@ export const IV_RANK_REFRESH: RefreshSchedule = [
 ];
 
 /** cloud/services/radon-iv-spread.timer */
-export const IV_SPREAD_REFRESH: RefreshSchedule = [daily(22, 15)];
+export const IV_SPREAD_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", weekdays: MON_FRI, hours: range(9, 16), minutes: every(5) },
+  daily(22, 15),
+  daily(23, 15),
+];
 
 /** cloud/services/radon-ma-ratio.timer */
 export const MA_RATIO_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [16], minutes: [20] }];
@@ -133,7 +137,7 @@ export const VIX_PC_REFRESH: RefreshSchedule = [
 ];
 
 /** cloud/services/radon-straddle.timer */
-export const STRADDLE_REFRESH: RefreshSchedule = [daily(2, 15)];
+export const STRADDLE_REFRESH: RefreshSchedule = [daily(3, 25)];
 
 /** cloud/services/radon-msr.timer */
 export const MSR_REFRESH: RefreshSchedule = [daily(3, 0)];
@@ -199,7 +203,10 @@ export const DIV_YIELD_REFRESH: RefreshSchedule = [daily(22, 40)];
 export const HY_AD_REFRESH: RefreshSchedule = [{ weekdays: TUE_SAT, hours: [11], minutes: [0] }];
 
 /** cloud/services/radon-record-high-breadth.timer */
-export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [15] }];
+export const RECORD_HIGH_BREADTH_REFRESH: RefreshSchedule = [
+  { tz: "America/New_York", hours: [18], minutes: [15] },
+  { tz: "America/New_York", hours: [20], minutes: [15] },
+];
 
 /** cloud/services/radon-imbalance.timer */
 export const IMBALANCE_REFRESH: RefreshSchedule = [{ tz: "America/New_York", hours: [18], minutes: [25] }];

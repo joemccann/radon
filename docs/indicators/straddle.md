@@ -203,8 +203,10 @@ Panel:
 - `cloud/services/radon-straddle.{service,timer}` — oneshot venv-python direct
   (`ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_straddle.py`),
   `EnvironmentFile=/etc/radon/env`;
-  timer `OnCalendar=*-*-* 02:15:00 UTC` (Cboe appends the session row ~20:00 ET
-  ≈ 00:00-01:00 UTC; 02:15 UTC clears both DST regimes), `RandomizedDelaySec=300`,
+  timer `OnCalendar=*-*-* 03:25:00 UTC` (Cboe stamps `SPX_History.csv`
+  ~21:10-21:31 ET ≈ 01:11-01:31 UTC EDT, 02:10-02:31 UTC EST; the original
+  02:15 slot raced the EST publish and left the tab a session behind —
+  moved 2026-11-20), `RandomizedDelaySec=300`,
   `Persistent=true`. Runs daily including weekends: weekend runs are 304
   heartbeats that keep `service_health` fresh inside the 48h window.
 - `cloud/scripts/setup-vps.sh` `SERVICE_FILES` += both units;
