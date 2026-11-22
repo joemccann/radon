@@ -1465,6 +1465,42 @@ def test_pending_backlog_runs_after_it_leaves_latest_listing(world, db):
     assert ledger(db, old.article_id)["status"] == "published"
 
 
+def test_hartnett_flow_show_publishes_when_the_copy_keeps_equity_words(world, db):
+    macro = "Michael Hartnett. Hyperscaler capex leaves the index undervalued on an FCF valuation."
+    world.refs = [make_ref("Hartnett0001", title="The Flow Show")]
+    world.folders = ["2026", "November", "Nov 21", "BofA"]
+    world.publisher = "BofA"
+    world.summary = [macro]
+    deps = build_deps(world)
+
+    def write_copy(*, title, publisher, summary, body_text, images, finding=None):
+        image_ids = [label for label, _ in images]
+        return SimpleNamespace(title="Voice " + title, content=macro,
+                               captions={i: f"caption {i}" for i in image_ids},
+                               tags=["RATES", "MARKETDESK", "FED"],
+                               provider="fake", model="fake-1", source_text=macro,
+                               image_ids=tuple(image_ids))
+
+    deps.write_copy = write_copy
+    counts = job.run_cycle(env=dict(ENV), deps=deps)
+    assert counts["published"] == 1 and counts["held"] == 0
+    assert ledger(db, "Hartnett0001")["status"] == "published"
+    assert world.published[0]["source"]["publisher"] == "BofA"
+    assert world.published[0]["source"]["fileName"] == "The Flow Show"
+
+
+def test_bofa_single_stock_without_a_ticker_still_holds_in_the_cycle(world, db):
+    text = "Acme looks undervalued on an FCF valuation after hyperscaler capex."
+    world.refs = [make_ref("BofaStock001", title="Acme initiation of coverage")]
+    world.folders = ["2026", "November", "Nov 21", "BofA"]
+    world.publisher = "BofA"
+    world.summary = [text]
+    counts = run(world)
+    saved = ledger(db, "BofaStock001")
+    assert counts["published"] == 0 and saved["status"] == "held"
+    assert saved["reason_code"] == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"
+
+
 @pytest.mark.parametrize('members,expected', [(frozenset({'MU'}), 'dropped'), (None, 'held')])
 def test_off_book_single_name_stops_before_images_copy_and_certification(world, db, members, expected):
     world.refs = [make_ref('Offbook001', title='Acme Corp (ACME) initiation')]
