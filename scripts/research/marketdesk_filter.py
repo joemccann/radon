@@ -94,8 +94,13 @@ def decide(*, article_id: str, title: str, folders: list[str], folder_date: str,
         metadata["name"], text, doc_type=ident.doc_type, book_tickers=book_tickers)
     review["equity_admission"] = {"outcome": eligibility, "reason_code": reason, "subjects": list(subjects)}
     if eligibility != "publish":
-        review["audit"].append({eligibility: reason})
-        return done(eligibility, reason)
+        # Always-publish desks skip only the no-subject hold. Off-book issuers still drop,
+        # and other must-include desks (DB positioning) stay on the equity gate.
+        if always and eligibility == "held" and reason == force_include.UNRESOLVED_SUBJECT_HOLD:
+            review["audit"].append({"always_publish_equity_hold_bypass": reason})
+        else:
+            review["audit"].append({eligibility: reason})
+            return done(eligibility, reason)
 
     others = {k: v for k, v in index.items() if k != "marketdesk:" + article_id}
     duplicate = novelty.duplicate_of(fp, {k: v[0] for k, v in others.items()})

@@ -27,6 +27,9 @@ TOPIC_FOLDERS = {'nuclear', 'other', 'week ahead', 'misc', 'unknown', 'unidentif
 
 PUBLISHER_DISPLAY = {
     'goldman sachs': 'Goldman Sachs', 'jp morgan': 'J.P. Morgan', 'bank of america': 'BofA Global Research',
+    'bofa': 'BofA Global Research', 'baml': 'BofA Global Research', 'merrill': 'BofA Global Research',
+    'bofa securities': 'BofA Global Research',
+    'ing': 'ING', 'anz': 'ANZ', 'zkb': 'ZKB', 'socgen': 'SocGen',
     'deutsche bank': 'Deutsche Bank Research', 'ubs': 'UBS', 'citi': 'Citi Research', 'societe generale': 'Societe Generale',
     'ts lombard': 'TS Lombard', 'zero hedge': 'Tyler Durden', 'nomura (mcelligott)': 'Nomura', 'nomura': 'Nomura',
     'wolfe': 'Wolfe Research', 'barclays': 'Barclays', 'btig': 'BTIG', 'canaccord': 'Canaccord Genuity', 'mizuho': 'Mizuho',

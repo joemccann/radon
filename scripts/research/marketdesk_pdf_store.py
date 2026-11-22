@@ -12,7 +12,7 @@ import json
 import re
 import uuid
 
-from api.db_http import hrana_execute, hrana_transaction
+from api.db_http import hrana_execute, hrana_execute_many, hrana_transaction
 from research import marketdesk_pdf_policy as policy
 from research.marketdesk_pdf_rate import (
     FLOOR_SECONDS, daily_cap, hourly_cap, jittered_delay, load_state, max_age_days, on_quota, on_soft, on_success,
@@ -206,31 +206,35 @@ def _rate_row():
     return state, int(jitter or 0)
 
 
-def _sync_disposition(context_hash, now):
+def _disposition_statements(context_hash, now):
     """Policy rejects leave the active backlog. A later eligible decision comes back. Exhausted rows do not."""
     stamp = _stamp(now)
-    hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET disposition='filtered',disposition_reason=("
-        "SELECT reason_code FROM marketdesk_pdf_selection x WHERE x.article_id=marketdesk_pdf_queue.article_id),"
-        "disposition_at=? WHERE disposition='active' AND status!='downloaded' AND article_id IN ("
-        "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
-        "JOIN posts p ON p.id=a.post_id WHERE x.eligible=0 AND x.context_hash=? AND x.post_updated_at IS p.updated_at)",
-        (stamp, context_hash))
-    hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET disposition='active',disposition_reason=NULL,disposition_at=NULL "
-        "WHERE disposition='filtered' AND article_id IN ("
-        "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
-        "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at)",
-        (context_hash,))
-    hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='attempts_exhausted',disposition_at=? "
-        "WHERE disposition='active' AND (attempts - attempts_baseline)>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
-        "OR julianday(lease_until)<=julianday(?))",
-        (stamp, MAX_ITEM_ATTEMPTS, stamp))
-    _retire_aged(context_hash, now)
+    return [
+        (
+            "UPDATE marketdesk_pdf_queue SET disposition='filtered',disposition_reason=("
+            "SELECT reason_code FROM marketdesk_pdf_selection x WHERE x.article_id=marketdesk_pdf_queue.article_id),"
+            "disposition_at=? WHERE disposition='active' AND status!='downloaded' AND article_id IN ("
+            "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
+            "JOIN posts p ON p.id=a.post_id WHERE x.eligible=0 AND x.context_hash=? AND x.post_updated_at IS p.updated_at)",
+            (stamp, context_hash),
+        ),
+        (
+            "UPDATE marketdesk_pdf_queue SET disposition='active',disposition_reason=NULL,disposition_at=NULL "
+            "WHERE disposition='filtered' AND article_id IN ("
+            "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
+            "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at)",
+            (context_hash,),
+        ),
+        (
+            "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='attempts_exhausted',disposition_at=? "
+            "WHERE disposition='active' AND (attempts - attempts_baseline)>=? AND status!='downloaded' AND (status='pending' OR lease_until IS NULL "
+            "OR julianday(lease_until)<=julianday(?))",
+            (stamp, MAX_ITEM_ATTEMPTS, stamp),
+        ),
+    ] + _retire_aged_statements(context_hash, now)
 
 
-def _retire_aged(context_hash, now):
+def _retire_aged_statements(context_hash, now):
     """Ordinary passing rows past the window leave the backlog.
 
     Age is published_at. Preferred-desk and book/watchlist rows are a higher
@@ -241,32 +245,40 @@ def _retire_aged(context_hash, now):
     """
     days = max_age_days()
     if days <= 0:
-        return
+        return []
     current = _time(now)
     stamp = _stamp(current)
     cutoff = _stamp(current - timedelta(days=days))
-    hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
-        "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
-        f"AND article_id IN ({_selected()}) AND article_id NOT IN ("
-        "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
-        "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
-        f"AND x.reason_code IN ({_PROTECTED_SQL}))",
-        (stamp, cutoff, context_hash, context_hash))
-    hrana_execute(
-        "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
-        "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
-        "AND article_id IN (SELECT x.article_id FROM marketdesk_pdf_selection x "
-        "JOIN marketdesk_articles a ON a.article_id=x.article_id JOIN posts p ON p.id=a.post_id "
-        "WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
-        f"AND x.reason_code IN ({_PROTECTED_SQL})) "
-        "AND NOT EXISTS (SELECT 1 FROM marketdesk_pdf_queue o "
-        "JOIN marketdesk_pdf_selection xo ON xo.article_id=o.article_id "
-        "JOIN marketdesk_articles ao ON ao.article_id=o.article_id JOIN posts po ON po.id=ao.post_id "
-        "WHERE o.disposition='active' AND o.status='pending' AND julianday(o.published_at)>=julianday(?) "
-        "AND xo.eligible=1 AND xo.context_hash=? AND xo.post_updated_at IS po.updated_at "
-        f"AND xo.reason_code NOT IN ({_PROTECTED_SQL}))",
-        (stamp, cutoff, context_hash, cutoff, context_hash))
+    return [
+        (
+            "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
+            "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
+            f"AND article_id IN ({_selected()}) AND article_id NOT IN ("
+            "SELECT x.article_id FROM marketdesk_pdf_selection x JOIN marketdesk_articles a ON a.article_id=x.article_id "
+            "JOIN posts p ON p.id=a.post_id WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
+            f"AND x.reason_code IN ({_PROTECTED_SQL}))",
+            (stamp, cutoff, context_hash, context_hash)),
+        (
+            "UPDATE marketdesk_pdf_queue SET disposition='exhausted',disposition_reason='aged_out',disposition_at=? "
+            "WHERE disposition='active' AND status='pending' AND julianday(published_at) < julianday(?) "
+            "AND article_id IN (SELECT x.article_id FROM marketdesk_pdf_selection x "
+            "JOIN marketdesk_articles a ON a.article_id=x.article_id JOIN posts p ON p.id=a.post_id "
+            "WHERE x.eligible=1 AND x.context_hash=? AND x.post_updated_at IS p.updated_at "
+            f"AND x.reason_code IN ({_PROTECTED_SQL})) "
+            "AND NOT EXISTS (SELECT 1 FROM marketdesk_pdf_queue o "
+            "JOIN marketdesk_pdf_selection xo ON xo.article_id=o.article_id "
+            "JOIN marketdesk_articles ao ON ao.article_id=o.article_id JOIN posts po ON po.id=ao.post_id "
+            "WHERE o.disposition='active' AND o.status='pending' AND julianday(o.published_at)>=julianday(?) "
+            "AND xo.eligible=1 AND xo.context_hash=? AND xo.post_updated_at IS po.updated_at "
+            f"AND xo.reason_code NOT IN ({_PROTECTED_SQL}))",
+            (stamp, cutoff, context_hash, cutoff, context_hash)),
+    ]
+
+
+def _retire_aged(context_hash, now):
+    """Run the aged-row retirement on its own (backlog health path)."""
+    for sql, params in _retire_aged_statements(context_hash, now):
+        hrana_execute(sql, params)
 
 
 def _due_sql():
@@ -301,18 +313,28 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
 
     Both caps are inside this statement. A second worker sees the admission
     rows the first worker's trigger just wrote. 0 on either cap disables it.
+    One /v2/pipeline POST with the disposition writes and the lease
+    (PERF-059). `limit is None` reads persisted batch_size in SQL so
+    claim_batch does not pay a separate throttle SELECT.
     """
-    if jitter_bps is not None:
-        hrana_execute("UPDATE marketdesk_pdf_throttle SET jitter_bps=? WHERE singleton=1",
-                      (max(0, min(1000, int(jitter_bps))),))
     stamp = _stamp(current)
     token = uuid.uuid4().hex
     order = _due_sql()
     daily_value = _cap_value(daily_cap_value)
     hourly_value = _cap_value(hourly_cap_value)
-    # One UPDATE. SQLite materializes the IN (SELECT ... LIMIT) list before any
-    # row trigger, so the admit trigger cannot shrink this batch.
-    rows = hrana_execute(
+    if limit is None:
+        limit_sql = "(SELECT batch_size FROM marketdesk_pdf_throttle WHERE singleton=1)"
+        limit_params: tuple = ()
+    else:
+        limit_sql = "?"
+        limit_params = (int(limit),)
+    statements = list(_disposition_statements(context_hash, current))
+    if jitter_bps is not None:
+        statements.append((
+            "UPDATE marketdesk_pdf_throttle SET jitter_bps=? WHERE singleton=1",
+            (max(0, min(1000, int(jitter_bps))),),
+        ))
+    statements.append((
         "UPDATE marketdesk_pdf_queue SET status='downloading',attempts=attempts+1,lease_token=?||article_id,"
         "lease_until=?,updated_at=? WHERE article_id IN (SELECT article_id FROM marketdesk_pdf_queue "
         f"WHERE article_id IN ({ELIGIBLE_IDS}) AND article_id IN ({_selected()}) AND {_priority_gate()} "
@@ -321,17 +343,23 @@ def _lease(current, context_hash, *, limit, jitter_bps, daily_cap_value, hourly_
         "AND ((status='pending' AND julianday(next_attempt_at)<=julianday(?)) "
         "OR (status='downloading' AND julianday(lease_until)<=julianday(?))) "
         f"ORDER BY {order} LIMIT ("
-        "SELECT MIN(?,"
-        "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
+        "SELECT MIN(" + limit_sql + ","
+        "CASE WHEN ?=0 THEN " + limit_sql + " ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
         "WHERE julianday(admitted_at)>julianday(?)-1)) END,"
-        "CASE WHEN ?=0 THEN ? ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
+        "CASE WHEN ?=0 THEN " + limit_sql + " ELSE MAX(0, ?-(SELECT COUNT(*) FROM marketdesk_pdf_admissions "
         "WHERE julianday(admitted_at)>julianday(?)-(1.0/24))) END))) "
         "RETURNING article_id,article_url,title,published_at,lease_token",
         (token, _stamp(current + timedelta(seconds=LEASE_SECONDS)), stamp,
          context_hash, stamp, context_hash, MAX_ITEM_ATTEMPTS, stamp, stamp, stamp,
          stamp, context_hash,
-         int(limit), daily_value, int(limit), daily_value, stamp,
-         hourly_value, int(limit), hourly_value, stamp))
+         *limit_params, daily_value, *limit_params, daily_value, stamp,
+         hourly_value, *limit_params, hourly_value, stamp),
+    ))
+    results = hrana_execute_many(statements)
+    for result in results:
+        if isinstance(result, Exception):
+            raise result
+    rows = results[-1]
     work = []
     for key, url, title, published, leased in rows:
         if not ID.fullmatch(key) or url != ARTICLE_BASE + key:
@@ -344,11 +372,9 @@ def claim_batch(*, now=None, jitter_bps=0, daily_cap_value=None, hourly_cap_valu
     """One shared window. A second caller at the same instant gets nothing."""
     current = _time(now)
     context_hash = prepare_selection(now=current)
-    _sync_disposition(context_hash, current)
-    state, _jitter = _rate_row()
     cap = daily_cap() if daily_cap_value is None else int(daily_cap_value)
     hour = hourly_cap() if hourly_cap_value is None else int(hourly_cap_value)
-    return _lease(current, context_hash, limit=state.batch_size, jitter_bps=jitter_bps,
+    return _lease(current, context_hash, limit=None, jitter_bps=jitter_bps,
                   daily_cap_value=cap, hourly_cap_value=hour)
 
 
@@ -357,7 +383,6 @@ def claim_next(*, now=None, interval_seconds=MIN_INTERVAL_SECONDS):
     del interval_seconds  # persisted interval_seconds is the rate. Callers cannot lower it.
     current = _time(now)
     context_hash = prepare_selection(now=current)
-    _sync_disposition(context_hash, current)
     rows = _lease(
         current, context_hash, limit=1, jitter_bps=0, daily_cap_value=daily_cap(), hourly_cap_value=hourly_cap())
     return rows[0] if rows else None
@@ -511,9 +536,23 @@ def backlog_breach(*, now=None):
     if not ((oldest and age > OLDEST_SLA_SECONDS) or growing):
         return None
     stalled = _admission_stalled(current)
+    capped = _daily_cap_full(current)
     message = (f"PDF archive backlog: pending={depth} oldest_h={age // 3600} "
-               f"growing={int(bool(growing))} stalled={int(stalled)}")
-    return BacklogBreach(message, paging=bool(growing) or stalled or age > PAGING_AGE_SECONDS)
+               f"growing={int(bool(growing))} stalled={int(stalled)} capped={int(capped)}")
+    # Intake above the provider allowance grows the queue by design and the age
+    # window retires the excess. Growth while the rolling 24h cap is full is
+    # not actionable, so it warns; a stall or the 14-day ceiling still pages.
+    return BacklogBreach(message, paging=(bool(growing) and not capped) or stalled or age > PAGING_AGE_SECONDS)
+
+
+def _daily_cap_full(current):
+    cap = daily_cap()
+    if not cap:
+        return False
+    rows = hrana_execute(
+        "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at)>julianday(?)-1",
+        (_stamp(current),))
+    return bool(rows) and int(rows[0][0] or 0) >= cap
 
 
 def _admission_stalled(current):

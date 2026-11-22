@@ -228,6 +228,8 @@ def db(monkeypatch):
         conn.executescript((ROOT / name).read_text())
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -238,6 +240,7 @@ def db(monkeypatch):
             conn.execute("ROLLBACK")
             raise
     monkeypatch.setattr(store, "hrana_execute", execute)
+    monkeypatch.setattr(store, "hrana_execute_many", execute_many)
     monkeypatch.setattr(store, "hrana_transaction", transaction)
     box = type("Box", (), {})()
     box.ctx_key = ctx.key
@@ -467,6 +470,34 @@ def test_a_growing_backlog_pages(db):
     db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES('x',?)", (NOW.isoformat(),))
     breach = store.backlog_breach(now=NOW)
     assert "growing=1 stalled=0" in str(breach)
+    assert breach.paging is True
+
+
+def test_a_growing_backlog_held_at_the_daily_cap_warns(db, monkeypatch):
+    """Intake above the provider allowance grows the queue by design; aging retires
+    the excess. A full rolling-24h cap is not actionable, so growth there warns."""
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Capd{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    for i in range(70):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES(?,?)",
+                   (f"a{i}", (NOW - timedelta(minutes=10 * i)).isoformat()))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0 capped=1" in str(breach)
+    assert breach.paging is False
+
+
+def test_a_growing_backlog_under_the_daily_cap_still_pages(db, monkeypatch):
+    monkeypatch.setenv("MARKETDESK_PDF_DAILY_CAP", "70")
+    for i in range(store.GROWTH_FLOOR):
+        _add(db, f"Undr{i:05d}", NOW - timedelta(hours=1))
+    db.execute("UPDATE marketdesk_pdf_throttle SET observed_pending=1 WHERE singleton=1")
+    for i in range(69):
+        db.execute("INSERT INTO marketdesk_pdf_admissions(article_id,admitted_at) VALUES(?,?)",
+                   (f"a{i}", (NOW - timedelta(minutes=10 * i)).isoformat()))
+    breach = store.backlog_breach(now=NOW)
+    assert "growing=1 stalled=0 capped=0" in str(breach)
     assert breach.paging is True
 
 
@@ -797,6 +828,9 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch, tmp_path):
     def execute(sql, args=(), **kwargs):
         return [tuple(row) for row in conn.execute(sql, args).fetchall()]
 
+    def execute_many(statements, **kwargs):
+        return [execute(sql, args) for sql, args in statements]
+
     def transaction(statements):
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -807,9 +841,11 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch, tmp_path):
             conn.execute("ROLLBACK")
             raise
 
-    previous_execute, previous_transaction = store.hrana_execute, store.hrana_transaction
+    previous_execute, previous_many, previous_transaction = (
+        store.hrana_execute, store.hrana_execute_many, store.hrana_transaction)
     previous_context = store.policy.load_context
     store.hrana_execute = execute
+    store.hrana_execute_many = execute_many
     store.hrana_transaction = transaction
     store.policy.load_context = lambda: ctx
     try:
@@ -863,6 +899,7 @@ def test_fourteen_day_sim_drains_1300_and_keeps_up(monkeypatch, tmp_path):
         print("SIM", json.dumps(report))
     finally:
         store.hrana_execute = previous_execute
+        store.hrana_execute_many = previous_many
         store.hrana_transaction = previous_transaction
         store.policy.load_context = previous_context
         conn.close()
