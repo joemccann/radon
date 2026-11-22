@@ -1436,3 +1436,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-593 | DONE | Chained URLError `assert 1 == 0`; cause-less TimeoutError text `assert 0 == 1` (`/tmp/t593-red.log`). `_is_transport_blip` uses `is_transport_error` on `__cause__`. Green 10 passed; file 104 passed ×3. Closing rounds: root pytest Darwin 5-red is T-591+T-592 on #1587; r3 credentials xdist flake then serial 2 passed; 19,866/19,866/19,865 passed / 10 skipped / 40 subtests. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud 58 failed / 4,288 passed / 23 skipped each round, 0 added / 0 removed against `8aaad84e9`. |
+
+## 2026-11-20
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-597 | DONE | shareBody mutation: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/regime/share` with no body while the hero is live). Restored both props. Green 2 passed ×3. Product source unchanged. Closing rounds: root pytest r1 19,956 passed / 11 skipped; r2 credentials xdist flake then serial 2 passed; r3 19,956 passed / 11 skipped. Vitest 11,678 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,292 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `1ef4fdff5`. |
