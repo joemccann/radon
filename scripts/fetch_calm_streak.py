@@ -38,6 +38,9 @@ from utils.market_calendar import last_completed_session_date  # noqa: E402
 
 SERVICE = "calm-streak"
 CBOE_SPX_URL = "https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json"
+# Cloudflare 403s this JSON unless the request names the Cboe site.
+# UA stays radon/2.0. Do not impersonate a browser (page 5061ba0b).
+CBOE_REFERER = "https://www.cboe.com/"
 THRESHOLD_PCT = 1.0
 SERIES_START = "1985-01-01"
 WINDOW_START = "1996-01-01"
@@ -154,7 +157,11 @@ def build_output(rows: list[dict[str, Any]], *, scan_time: str,
 
 def _fetch_source(if_modified_since: Optional[str]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """(payload, Last-Modified); payload None means HTTP 304."""
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+        "Referer": CBOE_REFERER,
+    }
     if if_modified_since:
         headers["If-Modified-Since"] = if_modified_since
     try:

@@ -923,11 +923,12 @@ each is evidenced in the PR body with the fragment shown:
 at 16:01 ET (13:01 PT) plus the existing 13:15 UTC slot, replacing the 02:50 UTC slot. The
 official Cboe CSV row still lands on the first fire after Cboe publishes it.
 
-Each run also reads VIX, VIX3M, VVIX and SKEW from one live source for all inputs
+Each run also reads VIX, VIX3M, VVIX and SKEW from one live source
 (`scripts/utils/index_live.py`): IB pool daily bars unless `/health` names a
 non-authenticated state, else Cboe 15-minute delayed quotes
-(`https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_<SYMBOL>.json`),
-all on one session date or nothing. The row reruns the join, 252-session z, level and delta math over the last 260 official sessions plus the live inputs, and the `current` card is built against the full official series so the 10-year delta ranks stay exact. The UW 25d overlay is not available live and stays null. A provisional row never triggers the record-decline alert.
+(`https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/_<SYMBOL>.json`).
+VIX, VIX3M and VVIX must share one session date; SKEW is a carry symbol and
+is held at its last official close until Cboe posts it. The row reruns the join, 252-session z, level and delta math over the last 260 official sessions plus the live inputs, and the `current` card is built against the full official series so the 10-year delta ranks stay exact. The UW 25d overlay is not available live and stays null. A provisional row never triggers the record-decline alert.
 
 The row is written only to the `panic-index:live` scan snapshot, never to history,
 and `/api/panic-index` appends it with `provisional {source, quote_time,
