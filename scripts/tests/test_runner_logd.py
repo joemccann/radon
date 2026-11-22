@@ -312,3 +312,17 @@ def _store(tmp_path: Path) -> Path:
     os.chmod(known, 0o600)
     (logs / "2026-01-01.log").write_text("plain line\n")
     return root
+
+
+def test_ingest_keeps_an_embedded_line_break_from_forging_a_second_line(logd, tmp_path):
+    # The store is append-only evidence of what the agent printed. A payload
+    # carrying its own line breaks must land as ONE line, not as extra
+    # timestamped entries nobody emitted.
+    root = tmp_path / "runner-logs"
+    (root / "repo").mkdir(parents=True)
+    logd.ingest_payload(b"security\tfirst\n2026-01-01T00:00:00Z forged\r\nmore\n", root)
+    stored = list((root / "repo" / "logs").rglob("*.log"))
+    assert len(stored) == 1
+    lines = stored[0].read_text().splitlines()
+    assert len(lines) == 1
+    assert "first" in lines[0] and "forged" in lines[0] and "more" in lines[0]

@@ -170,7 +170,7 @@ pr_number_in_repo() {
 # absence.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
-  local tok n fields state branch cross head rollup names conclusion expected count=0
+  local tok n fields state branch cross head rollup names conclusion expected tip floor count=0
   if [[ "${2:-}" == 0 ]]; then
     no_loop_pr_exists
     return
@@ -181,6 +181,13 @@ deliver_urls_verified() {
   [[ -n "${3:-}" ]] || return 1
   expected="$(expected_check_names "$3")" || return 1
   [[ -n "$expected" ]] || return 1
+  # The head's own files are a floor the agent's branch could lower by
+  # deleting a job, so the names origin/main promises are required as well.
+  tip="$(covgit rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}' 2>/dev/null)"
+  [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+  floor="$(expected_check_names "$tip")" || return 1
+  [[ -n "$floor" ]] || return 1
+  expected="$(printf '%s\n%s\n' "$expected" "$floor" | sort -u)"
   for tok in $1; do
     case "$tok" in
       http://*|https://*)

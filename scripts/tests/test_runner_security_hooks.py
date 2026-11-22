@@ -1194,3 +1194,25 @@ def test_an_agent_exit_75_is_incomplete(rig):
     out = rig.post(rc=75, output=f"{rig.marker} audit run_id=r1\n")
     assert out["status"].startswith("INCOMPLETE (exit 75)")
     assert "exit=75" in rig.comment()
+
+
+def test_a_branch_that_drops_a_workflow_job_cannot_lower_the_check_floor(rig):
+    # The expected suite is read from the verified head, which the agent's
+    # branch defines. A branch that deletes a job would make its own shorter
+    # rollup read as the whole suite; the floor must also carry every name
+    # the workflow files at origin/main promise.
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    _git("commit", "-qam", "drop a job", cwd=rig.work)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rig.work, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _record(rig, head_sha=head)
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {head} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
