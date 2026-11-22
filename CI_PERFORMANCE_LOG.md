@@ -2962,3 +2962,56 @@ higher. Status `VALIDATING`.
 passed). Related shard contracts 64 passed; path filter and gate
 integrity 68 passed. YAML parses. Full suites, Vitest, Docker builds,
 and workflow lint are left to PR CI.
+
+## CIP-037 - rest steals leftover tests across workers (2026-11-22) - VALIDATING
+
+Warm mixed deploys still wait on `pytest (rest)` before coverage and
+prestage. CIP-031 switched rest to `--dist load` so two runner modules
+could split; load still left them on two workers. CIP-032..036 (open
+#1617, #1629) target image jobs, which finish before this python gate.
+
+Evidence, attempt-1 mixed warm rest jobs (`gh run view --json jobs`
+plus junit from run 44979169331 artifact `pytest-coverage-rest`).
+Queue 3s is excluded from the gain:
+
+| Run | Clock | Rest job | Pytest step | run_loop | security_hooks |
+|---|---|---|---|---|---|
+| [44979169331](https://github.com/joemccann/radon/actions/runs/44979169331) | 427s | 175s (job 137075708225) | 159.67s / 2597 passed | 90.17s | 69.83s |
+| [44966227759](https://github.com/joemccann/radon/actions/runs/44966227759) | 447s | 165s | — | — | — |
+| [44881154065](https://github.com/joemccann/radon/actions/runs/44881154065) | 374s | 151s | — | — | — |
+| [44880631751](https://github.com/joemccann/radon/actions/runs/44880631751) | 378s | 147s | — | — | — |
+
+Newest clean mixed-warm p50 clock is 430s (n=10; 10% is 43s). On
+44979169331 junit sum is 275.1s across 4 workers (balanced wall ≈69s)
+plus 22s collection, but load serialized 90s + 70s. Switching rest to
+`--dist worksteal` (pytest-xdist 3.8.0) is expected to cut the rest
+job toward ~110s (22s collect + ~69-90s exec). Letter shards stay
+loadfile. No new shard (CIP-009 slot cap). Runner minutes fall with
+the shorter rest job. If rest falls to the scripts-ac / scripts-rs
+wall (~128s jobs, collection-bound), the python gate drops from 216s
+toward ~165s.
+
+**Change.** `py-tests` rest `xdist` is `-n auto --dist worksteal`.
+The other eight shards stay `-n auto --dist loadfile`. Shard globs,
+lead modules, coverage combine, deploy `needs`, health, recovery,
+rollback, and the 40-second stability window stay.
+
+**Safety and revert trigger.** Revert if rest flakes from xdist
+worksteal in the first five main runs, if any letter shard loses
+loadfile, or if the shard union no longer equals recursive
+collection.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| pytest (rest) | 175s | pending | TBD until 5 samples |
+
+Before is the rest job wall on run 44979169331 (job 137075708225).
+Acceptance remains five comparable mixed-warm deploys before and after:
+same-class p50 at least 10% and 15s faster; p95 no worse than 5% or
+15s; cold p50 no worse than 10%; runner minutes no more than 20%
+higher. Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip037_rest_worksteal.py` was red
+(1 failed: rest still load) then green (4 passed). Related shard
+contracts 136 passed. YAML parses. Full suites, Vitest, Docker builds,
+and workflow lint are left to PR CI.
