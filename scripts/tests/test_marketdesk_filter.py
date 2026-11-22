@@ -130,3 +130,55 @@ def test_fx_reports_bypass_book_and_model_relevance(pages, title, book):
 def test_all_suitable_policy_cannot_admit_empty_source_material(pages, summary):
     decision = decide(pages=pages, summary=summary)
     assert decision.outcome == 'held' and decision.reason_code == 'SOURCE_MATERIAL_MISSING'
+
+
+HARTNETT = (
+    "Michael Hartnett. Hyperscaler capex leaves the index undervalued on an FCF valuation. "
+    "Positioning is the story, not a single-name rating."
+)
+BOFA_FOLDERS = ["2026", "November", "Nov 21", "BofA"]
+
+
+@pytest.mark.parametrize("title", [
+    "The Flow Show",
+    "Global Fund Manager Survey",
+    "European Fund Manager Survey",
+    "LatAm Fund Manager Survey",
+    "BofA Global FMS",
+])
+def test_hartnett_series_publish_with_equity_words_and_no_ticker(title):
+    decision = decide(title=title, folders=BOFA_FOLDERS, pages={1: title + "\n" + HARTNETT},
+                      summary=[HARTNETT], book=frozenset())
+    assert decision.outcome == "publish" and decision.reason_code is None
+    assert decision.identity.publisher == "BofA Global Research"
+    assert decision.review["always_publish"] is True
+    assert decision.review["equity_admission"]["reason_code"] == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"
+
+
+def test_hartnett_byline_on_bofa_publishes_without_the_series_title():
+    decision = decide(title="The Biggest Picture", folders=BOFA_FOLDERS,
+                      pages={1: "The Biggest Picture\n" + HARTNETT}, summary=[HARTNETT], book=frozenset())
+    assert decision.outcome == "publish" and decision.review["always_publish"] is True
+
+
+def test_flow_show_with_an_off_book_ticker_still_drops():
+    text = "The Flow Show\nAcme Corp (ACME) Rating: BUY Price Target $50. Shares look undervalued."
+    decision = decide(title="The Flow Show", folders=BOFA_FOLDERS, pages={1: text}, summary=[text],
+                      book=frozenset({"MU"}))
+    assert decision.outcome == "dropped" and decision.reason_code == "EQUITY_RESEARCH_NOT_IN_BOOK"
+    assert decision.review["always_publish"] is True
+
+
+def test_bofa_single_stock_without_a_ticker_still_holds():
+    text = "Acme looks undervalued on an FCF valuation after hyperscaler capex. No ticker is named."
+    decision = decide(title="Acme initiation of coverage", folders=BOFA_FOLDERS,
+                      pages={1: text}, summary=[text], book=frozenset())
+    assert decision.outcome == "held" and decision.reason_code == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"
+    assert decision.review["always_publish"] is False
+
+
+def test_db_positioning_still_holds_unresolved_equity_research():
+    decision = decide(title="DB Positioning Data", folders=["2026", "November", "Nov 21", "Deutsche Bank"],
+                      pages={1: "DB positioning data\n" + HARTNETT}, summary=[HARTNETT], book=frozenset())
+    assert decision.review["force_include"] is True and decision.review["always_publish"] is False
+    assert decision.outcome == "held" and decision.reason_code == "EQUITY_RESEARCH_SUBJECT_UNRESOLVED"

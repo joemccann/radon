@@ -1,3 +1,14 @@
+# Always publish Hartnett (2026-11-22)
+
+- [x] T1 depends_on: [] Failing tests: MarketDesk folder `BofA` canonical publisher; ING/ANZ/ZKB/SocGen casing.
+- [x] T2 depends_on: [T1] Failing tests: Flow Show, FMS (Global/European/LatAm), Hartnett byline publish through equity words with no ticker; normal BofA single-stock still holds; HELD_EXPIRED skips the desk; PDF preferred desk.
+- [x] T3 depends_on: [T2] Alias table, always-publish desks, equity-hold bypass for those desks only. No production replay.
+- [ ] T4 depends_on: [T3] PR, CI green. Do not merge.
+
+## Review
+
+Folder `BofA` now maps to BofA Global Research, so Flow Show, FMS, and a Hartnett byline are always-publish desks. They skip only `EQUITY_RESEARCH_SUBJECT_UNRESOLVED` and `HELD_EXPIRED`. A resolved off-book ticker still drops. DB positioning stays must-include without the exemption. No ledger replay.
+
 # Runner log daemon, off by default (2026-11-21)
 
 - [x] T1 depends_on: [] Scrubber, flag gate, and daemon-down fallback tests fail before the daemon exists.
