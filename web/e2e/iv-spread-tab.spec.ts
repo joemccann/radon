@@ -90,17 +90,17 @@ const MISSING_IV_SPREAD = {
 };
 
 // The instant the freshness-rail assertions are written against, shared with
-// web/tests/freshness-rail.test.ts: 2026-08-26 is a Wednesday and 21:00 UTC is
-// 17:00 ET, after the close and before the 22:15 UTC radon-iv-spread.timer slot.
-const RAIL_NOW = "2026-08-26T21:00:00Z";
-// The session the panel holds: Tuesday, one behind the close that just printed.
-const RAIL_AS_OF = "2026-08-25";
+// computeFreshnessRail: 2026-08-26 is a Wednesday and 15:02 UTC is 11:02 ET,
+// inside radon-iv-spread.timer's 5-minute ET line (last fire 11:00, next 11:05).
+const RAIL_NOW = "2026-08-26T15:02:00Z";
+// The session the panel holds: today's in-progress bar from the 11:00 fire.
+const RAIL_AS_OF = "2026-08-26";
 
 const RAIL_PAYLOAD = {
   ...IV_SPREAD_MOCK,
-  scan_time: RAIL_NOW,
+  scan_time: "2026-08-26T15:00:30Z",
   as_of: RAIL_AS_OF,
-  expected_session: "2026-08-26",
+  expected_session: "2026-08-25",
   current: { ...IV_SPREAD_MOCK.current, date: RAIL_AS_OF },
 };
 
@@ -212,20 +212,18 @@ test.describe("/regime/iv-spread - NDX vs SPX 1M IV spread tab", () => {
     const countdown = page.getByTestId("iv-spread-freshness-rail-countdown");
     await expect(countdown).not.toHaveText("--", { timeout: 15_000 });
 
-    // radon-iv-spread.timer fires 22:15 UTC. 21:00 UTC is 1h15m short of it,
-    // and any other schedule constant lands on a different number.
-    await expect(countdown).toHaveText("1h 15m");
+    // The 5-minute ET line fires next at 11:05 ET, 3m out; the daily-only
+    // schedule would land on 7h 13m.
+    await expect(countdown).toHaveText("3m 00s");
 
-    // 17:00 ET Wednesday: Wednesday's close has printed and the panel holds
-    // Tuesday, so the rail is BEHIND - not "current", and not yet "overdue",
-    // because the run that owes the session has not fired.
-    await expect(rail).toHaveAttribute("data-state", "behind");
-    await expect(rail).toContainText("Awaiting 2026-08-26");
+    // The panel holds today's in-progress session, so the rail is current.
+    await expect(rail).toHaveAttribute("data-state", "current");
+    await expect(rail).toContainText("Current");
 
-    // 22h45m of the 24h interval has elapsed since the 2026-08-25 22:15 run.
+    // 2m of the 5m interval has elapsed since the 11:00 ET fire.
     await expect(page.getByTestId("iv-spread-freshness-rail-fill")).toHaveAttribute(
       "data-fill-pct",
-      "94.79",
+      "40.00",
     );
   });
 

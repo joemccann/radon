@@ -352,16 +352,17 @@ describe("IvSpreadPanel — summary strip", () => {
 
 describe("IvSpreadPanel — freshness rail", () => {
   it("shows the payload date and counts down to the 22:15 UTC slot", () => {
-    // 21:00 UTC on a Wednesday: 1h15m short of radon-iv-spread.timer's
-    // 22:15 UTC slot. Any other schedule constant lands on a different number.
+    // 21:00 UTC (17:00 ET) on a Wednesday, after the 16:55 ET intraday fire
+    // landed today's session: 1h15m short of radon-iv-spread.timer's 22:15
+    // UTC final slot. Any other schedule constant lands on a different number.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-26T21:00:00Z"));
     mockUseIvSpread.mockReturnValue(
       hookState({
         data: buildData({
-          scan_time: "2026-08-26T21:00:00Z",
-          as_of: "2026-08-25",
-          current: { ...buildData().current!, date: "2026-08-25" },
+          scan_time: "2026-08-26T20:55:00Z",
+          as_of: "2026-08-26",
+          current: { ...buildData().current!, date: "2026-08-26" },
         }),
       }),
     );
@@ -370,9 +371,29 @@ describe("IvSpreadPanel — freshness rail", () => {
       vi.advanceTimersByTime(0);
     });
     expect(screen.getByTestId("iv-spread-freshness-rail")).toBeTruthy();
-    expect(screen.getByTestId("iv-spread-strip-asof").textContent).toBe("2026-08-25");
+    expect(screen.getByTestId("iv-spread-strip-asof").textContent).toBe("2026-08-26");
     expect(screen.getByTestId("iv-spread-freshness-rail-countdown").textContent).toBe("1h 15m");
     expect(screen.getByTestId("iv-spread-freshness-rail").textContent).toContain("Next sample");
+  });
+
+  it("counts down to the next 5-minute ET slot during the session", () => {
+    // 15:02 UTC (11:02 ET) Wednesday: the intraday line fires at 11:05 ET.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T15:02:00Z"));
+    mockUseIvSpread.mockReturnValue(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T15:00:30Z",
+          as_of: "2026-08-26",
+          current: { ...buildData().current!, date: "2026-08-26" },
+        }),
+      }),
+    );
+    render(<IvSpreadPanel />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("iv-spread-freshness-rail-countdown").textContent).toBe("3m 00s");
   });
 });
 
