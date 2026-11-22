@@ -3,13 +3,13 @@
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { IvSpreadData } from "./ivSpread";
 
-// GET-only: the NDX vs SPX 1M IV spread updates once per session
-// (radon-iv-spread.timer runs scripts/fetch_iv_spread.py directly), so there
-// is no manual-scan POST and an hourly poll is already generous. Types + pure
+// GET-only: radon-iv-spread.timer runs scripts/fetch_iv_spread.py every 5
+// minutes in ET trading hours (IB serves the in-progress session bar), so the
+// poll matches that cadence. There is no manual-scan POST. Types + pure
 // helpers live in lib/ivSpread.ts; the route never transforms the payload.
 const IV_SPREAD_SYNC_CONFIG = {
   endpoint: "/api/iv-spread",
-  interval: 3_600_000,
+  interval: 300_000,
   hasPost: false,
   extractTimestamp: (d: IvSpreadData) => d.scan_time,
 };
