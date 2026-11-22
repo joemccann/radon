@@ -20,8 +20,8 @@ MarketDesk lists an item before it has summarised it (empty summary, MarketDesk'
 placeholder). Such an item is parked as ``summary_pending`` without spending an attempt, does not count
 against the per-cycle cap, and fails as ``no_summary`` once it is older than MARKETDESK_SUMMARY_WAIT_HOURS.
 A retry cannot change that outcome (MarketDesk's summarizer can answer with an apology instead of bullets), so
-the deadline retires the article at once: one error row, and the oneshot exits 0 so the 5-minute timer does
-not page P1. An operator re-queue revives it. Any other article failure still exits 1.
+the deadline retires the article at once: one warn row (not actionable, so not the P2 error row), and the
+oneshot exits 0. An operator re-queue revives it. Any other article failure is an error row and exits 1.
 """
 from __future__ import annotations
 
@@ -103,8 +103,8 @@ class SummaryPending(RuntimeError):
 class ArticlesFailed(RuntimeError):
     """Raised after a cycle where nothing published but something failed, or an article was retired.
 
-    ``provider_deadline`` means every failure was the summary wait. The oneshot
-    exits 0. The error row is already written, and other failures still exit 1.
+    ``provider_deadline`` means every failure was the summary wait. run_cycle records
+    that as a warn row instead of raising; every other failure raises and exits 1.
     """
 
     def __init__(self, message: str, *, provider_deadline: bool = False) -> None:
@@ -650,7 +650,9 @@ def run_cycle(*, env=os.environ, deps: Deps | None = None) -> dict:
             if failure is not None:
                 raise _sanitized(failure) from None
             problem = _articles_failed(counts, notes)
-            if problem is not None:
+            if problem is not None and problem.provider_deadline:
+                cycle.warning = str(problem)  # provider never summarised it: visible, not paging
+            elif problem is not None:
                 raise problem
             if notes.get("gap"):
                 raise ListingGap("listing_gap: the library listing does not reach the newest known article; "
@@ -691,9 +693,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_STOPPED
     except ArticlesFailed as exc:  # service_cycle already wrote the error row
         _log(f"cycle failed: {_safe_error(exc)}")
-        # A summary deadline is the P2 error row. Exit 1 makes every 5-minute
-        # fire a new InactiveEnterTimestamp and a P1 page.
-        return 0 if exc.provider_deadline else 1
+        # A summary deadline never reaches here; run_cycle records it as a warn row.
+        return 1
     except Exception as exc:  # noqa: BLE001 - service_cycle already wrote the error row
         if _is_transport_blip(exc):
             # The error row is the P2 signal and the next 5-minute fire retries. Exit 1 latched the
