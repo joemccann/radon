@@ -487,9 +487,17 @@ describe("equibles per-ticker decks reach the demo database", () => {
 describe("account-derived fields never reach the demo database", () => {
   // The ATS venue-share universe meta counts the open-position book
   // (universe.counts.portfolio). The demo trial tier must never learn it.
-  it("strips the portfolio count from the mirrored ATS venue-share payload", async () => {
+  it("strips every portfolio-derived count from the mirrored ATS venue-share payload", async () => {
+    // The production shape: the portfolio tier, and the core / unique
+    // aggregates that return it by subtraction from the public tiers.
     const payload = JSON.stringify({
-      universe: { order: ["portfolio", "watchlist"], counts: { portfolio: 7, watchlist: 40, unique: 47 }, core: 47 },
+      universe: {
+        order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"],
+        counts: { portfolio: 7, watchlist: 40, ndx100: 100, r2k: 0, sp500: 0, unique: 147, core: 47 },
+        core: 47,
+        this_cycle: 12,
+        index_offset: 3,
+      },
       series: {},
     });
     const src = {
@@ -514,8 +522,9 @@ describe("account-derived fields never reach the demo database", () => {
 
     const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
     const byService = Object.fromEntries(statements.map((s) => [s.args[0], JSON.parse(s.args[2])]));
-    expect(byService["equibles-ats-venue-share"].universe.counts).toEqual({ watchlist: 40, unique: 47 });
-    expect(byService["equibles-ats-venue-share"].universe.order).toEqual(["portfolio", "watchlist"]);
+    const universe = byService["equibles-ats-venue-share"].universe;
+    expect(universe).toEqual({ order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"], this_cycle: 12, index_offset: 3 });
+    expect(JSON.stringify(universe)).not.toMatch(/\b(?:47|147|7)\b/);
     expect(byService.gex).toEqual({ counts: { portfolio: 3 } });
   });
 });

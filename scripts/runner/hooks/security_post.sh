@@ -182,8 +182,13 @@ deliver_urls_verified() {
   expected="$(expected_check_names "$3")" || return 1
   [[ -n "$expected" ]] || return 1
   # The head's own files are a floor the agent's branch could lower by
-  # deleting a job, so the names origin/main promises are required as well.
-  tip="$(covgit rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}' 2>/dev/null)"
+  # deleting a job, so the names main promises are required as well. The
+  # tip comes from the forge by the configured URL: the clone's tracking
+  # ref and remote config are agent-writable, and an object the agent
+  # fetched cannot stand in for the commit the forge named.
+  [[ -n "${REPO_URL:-}" ]] || return 1
+  tip="$(net_bounded git --no-pager -c core.hooksPath=/dev/null -C "$WORK" \
+    ls-remote --exit-code "$REPO_URL" refs/heads/main 2>/dev/null | awk 'NR==1{print $1}')"
   [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
   floor="$(expected_check_names "$tip")" || return 1
   [[ -n "$floor" ]] || return 1

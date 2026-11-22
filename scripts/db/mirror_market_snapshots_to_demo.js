@@ -132,10 +132,12 @@ async function retryOperation({
   throw new Error(`${phase} exhausted without a result`);
 }
 
-// The ATS venue-share universe meta counts the open-position book
-// (universe.counts.portfolio). It is the one account-derived field inside an
-// otherwise market-only snapshot; the demo trial tier must never learn it. A
-// payload that cannot be parsed is dropped rather than copied unseen.
+// The ATS venue-share universe meta counts the open-position book: the
+// portfolio tier directly, and every aggregate built from it (core, unique)
+// gives the same number back by subtraction from the public tiers. The whole
+// count block and the sibling core size are account-derived; the demo trial
+// tier keeps only the tier order and the cycle position. A payload that
+// cannot be parsed is dropped rather than copied unseen.
 export function stripAccountDerivedFields(table, row) {
   if (table !== "scan_snapshots" || row?.service !== "equibles-ats-venue-share") return row;
   let payload;
@@ -144,9 +146,10 @@ export function stripAccountDerivedFields(table, row) {
   } catch {
     return null;
   }
-  const counts = payload?.universe?.counts;
-  if (counts && typeof counts === "object" && "portfolio" in counts) {
-    delete counts.portfolio;
+  const universe = payload?.universe;
+  if (universe && typeof universe === "object" && ("counts" in universe || "core" in universe)) {
+    delete universe.counts;
+    delete universe.core;
     return { ...row, payload: JSON.stringify(payload) };
   }
   return row;
