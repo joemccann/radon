@@ -1196,13 +1196,14 @@ def test_an_agent_exit_75_is_incomplete(rig):
     assert "exit=75" in rig.comment()
 
 
-@pytest.mark.parametrize("repoint", ["none", "tracking-ref", "remote-url"])
+@pytest.mark.parametrize("repoint", ["none", "tracking-ref", "remote-url", "insteadof-config", "global-config"])
 def test_a_branch_that_drops_a_workflow_job_cannot_lower_the_check_floor(rig, repoint):
     # The expected suite is read from the verified head, which the agent's
     # branch defines. A branch that deletes a job would make its own shorter
     # rollup read as the whole suite; the floor must also carry every name
-    # the workflow files at main promise. The clone's tracking ref and remote
-    # config are the agent's too, so repointing either must not move the floor.
+    # the workflow files at main promise. The clone's tracking ref, its remote
+    # config, a url rewrite in the clone's config and one in the bot's global
+    # config are all the agent's too, so none of them may move the floor.
     dropped = "Perimeter smoke (next start + curl)"
     ci = rig.work / ".github" / "workflows" / "ci.yml"
     text = ci.read_text()
@@ -1213,11 +1214,16 @@ def test_a_branch_that_drops_a_workflow_job_cannot_lower_the_check_floor(rig, re
                           text=True, check=True).stdout.strip()
     if repoint == "tracking-ref":
         _git("update-ref", "refs/remotes/origin/main", head, cwd=rig.work)
-    elif repoint == "remote-url":
+    elif repoint in ("remote-url", "insteadof-config", "global-config"):
         forged = rig.work.parent / "forged.git"
         _git("clone", "-q", "--bare", str(rig.work), str(forged), cwd=rig.work.parent)
         _git("--git-dir", str(forged), "update-ref", "refs/heads/main", head, cwd=rig.work.parent)
-        _git("remote", "set-url", "origin", str(forged), cwd=rig.work)
+        if repoint == "remote-url":
+            _git("remote", "set-url", "origin", str(forged), cwd=rig.work)
+        elif repoint == "insteadof-config":
+            _git("config", f"url.{forged}.insteadOf", str(rig.origin), cwd=rig.work)
+        else:
+            (rig.home / ".gitconfig").write_text(f'[url "{forged}"]\n\tinsteadOf = {rig.origin}\n')
     _record(rig, head_sha=head)
     shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
     out = rig.post(phase="deliver", output=_stamp(rig),

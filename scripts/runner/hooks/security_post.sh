@@ -183,13 +183,9 @@ deliver_urls_verified() {
   [[ -n "$expected" ]] || return 1
   # The head's own files are a floor the agent's branch could lower by
   # deleting a job, so the names main promises are required as well. The
-  # tip comes from the forge by the configured URL: the clone's tracking
-  # ref and remote config are agent-writable, and an object the agent
+  # tip comes from the forge by the configured URL, and an object the agent
   # fetched cannot stand in for the commit the forge named.
-  [[ -n "${REPO_URL:-}" ]] || return 1
-  tip="$(net_bounded git --no-pager -c core.hooksPath=/dev/null -C "$WORK" \
-    ls-remote --exit-code "$REPO_URL" refs/heads/main 2>/dev/null | awk 'NR==1{print $1}')"
-  [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+  tip="$(forge_main_tip)" || return 1
   floor="$(expected_check_names "$tip")" || return 1
   [[ -n "$floor" ]] || return 1
   expected="$(printf '%s\n%s\n' "$expected" "$floor" | sort -u)"
@@ -219,6 +215,25 @@ deliver_urls_verified() {
     esac
   done
   [[ "$count" -gt 0 && "$count" == "$2" ]]
+}
+
+# The SHA the forge serves for refs/heads/main at the configured URL, or
+# non-zero. The clone's .git/config, the bot's ~/.gitconfig and the tracking
+# refs are all agent-writable during the phase, and git honours insteadOf,
+# sshCommand and proxy settings from any of them, so the query runs against
+# a scratch repository this hook creates, with global and system config
+# switched off. Nothing agent-owned is read.
+forge_main_tip() {
+  local scratch tip
+  [[ -n "${REPO_URL:-}" ]] || return 1
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/radon-tip.XXXXXX")" || return 1
+  git init -q --bare "$scratch" 2>/dev/null || { rm -rf "$scratch"; return 1; }
+  tip="$(GIT_DIR="$scratch" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+    net_bounded git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    ls-remote --exit-code "$REPO_URL" refs/heads/main 2>/dev/null | awk 'NR==1{print $1}')"
+  rm -rf "$scratch"
+  [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$tip"
 }
 
 # The check names the workflow files committed at $1 promise on every PR
