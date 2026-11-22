@@ -83,10 +83,13 @@ line here whenever you ship a security fix.**
   mirror-side chokepoint; a new producer that folds account state into a shared
   snapshot table must be added there, not trusted to the table allowlist.
   (`scripts/lib/demoMirrorReliability.test.js`)
-- **The deliver check-name floor is the union of the verified head and `origin/main`** —
-  the head's workflow files are the agent's own branch; the post-run hook also requires
-  every name the workflow files at `origin/main` promise, so deleting a job cannot
-  shrink "every check" (`scripts/runner/hooks/security_post.sh:deliver_urls_verified`).
+- **The deliver check-name floor is the union of the verified head and the forge's `main`** —
+  the head's workflow files are the agent's own branch, and everything in the clone
+  (config, refs, object store; `git show` does not hash-verify what it reads) plus the
+  bot's global git config is agent-writable during the phase. The post-run hook fetches
+  `main` fresh from the configured URL into a scratch repository it creates, with global
+  and system config off, and requires every name those blobs promise too, so deleting a
+  job cannot shrink "every check" (`scripts/runner/hooks/security_post.sh:forge_main_check_names`).
   (`scripts/tests/test_runner_security_hooks.py`)
 - **AUTH_EXEMPT_PATHS** — must NOT contain `/docs` or `/openapi.json` (trusted-local
   only); pinned by `test_health_payload.py` + `test_route_authz_matrix.py`.

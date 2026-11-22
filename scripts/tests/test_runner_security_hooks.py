@@ -1231,3 +1231,49 @@ def test_a_branch_that_drops_a_workflow_job_cannot_lower_the_check_floor(rig, re
 
     assert out["status"].startswith("INCOMPLETE"), out
     assert "ready to merge" not in out["status"]
+
+
+def test_a_forged_tree_object_in_the_clone_cannot_lower_the_check_floor(rig):
+    # `git show` does not hash-verify the objects it reads and the clone's
+    # object store is the agent's, so a tree stored under main's genuine id
+    # can point ci.yml at a reduced blob. The floor must come from blobs the
+    # hook fetched itself, never from the clone.
+    import zlib
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    _git("commit", "-qam", "drop a job", cwd=rig.work)
+
+    def rev(spec):
+        return subprocess.run(["git", "rev-parse", spec], cwd=rig.work, capture_output=True,
+                              text=True, check=True).stdout.strip()
+    head, reduced = rev("HEAD"), rev("HEAD:.github/workflows/ci.yml")
+    tree, genuine = rev("origin/main:.github/workflows"), rev("origin/main:.github/workflows/ci.yml")
+    raw = subprocess.run(["git", "cat-file", "tree", tree], cwd=rig.work, capture_output=True, check=True).stdout
+    assert raw.count(bytes.fromhex(genuine)) == 1
+    forged = raw.replace(bytes.fromhex(genuine), bytes.fromhex(reduced))
+    objects = rig.work / ".git" / "objects"
+    for pack in (objects / "pack").glob("*.pack"):
+        data = pack.read_bytes()
+        pack.unlink()
+        for suffix in (".idx", ".rev", ".bitmap"):
+            pack.with_suffix(suffix).unlink(missing_ok=True)
+        subprocess.run(["git", "unpack-objects", "-q"], cwd=rig.work, input=data, check=True, capture_output=True)
+    target = objects / tree[:2] / tree[2:]
+    if target.exists():
+        target.chmod(0o644)
+    target.parent.mkdir(exist_ok=True)
+    target.write_bytes(zlib.compress(b"tree %d\0" % len(forged) + forged))
+    shown = subprocess.run(["git", "show", "origin/main:.github/workflows/ci.yml"], cwd=rig.work,
+                           capture_output=True, text=True, check=True).stdout
+    assert f"    name: {dropped}\n" not in shown  # the clone now lies about main
+
+    _record(rig, head_sha=head)
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {head} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
