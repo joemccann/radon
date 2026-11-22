@@ -30,7 +30,10 @@ updates are retired from `nightly_toolchain_update.py`; model pins move through
 reviewed CI artifacts. DeepSec package/version checks remain, while its smoke
 uses gateway inference. DeepSec process/revalidate commands use the bridge
 adapter, whose temporary loopback credential selects the pinned SDK's custom
-Responses provider without reading local subscription grants.
+Responses provider without reading local subscription grants. The reviewed
+toolchain lock (`scripts/runner/toolchain/package-lock.json`) overrides
+`@earendil-works/pi-coding-agent`'s undici to 8.12.2. The lock's other undici
+copy stays 7.30.1.
 
 The root runner updater still requires the latest exact-main CI run and its
 production deployment to succeed, including release tagging. Image and tag
