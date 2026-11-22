@@ -40,6 +40,17 @@ def test_preferred_desk_remains_in_scope_and_approved_denials_win():
                  rules={"publisher_deny":{"BofA Global Research"}}) == (False,"RULE_PUBLISHER")
 
 
+@pytest.mark.parametrize("title,publisher", [
+    ("The Flow Show", "Bofa"),
+    ("The Flow Show", "BofA"),
+    ("European Fund Manager Survey", "BofA"),
+    ("LatAm FMS", "baml"),
+    ("Global Fund Manager Survey", "Merrill"),
+])
+def test_bofa_alias_reaches_the_preferred_desk_pdf_path(title, publisher):
+    assert check(title, "Latest desk analysis", publisher=publisher) == (True, "PDF_PREFERRED_DESK")
+
+
 def test_market_index_ticker_is_not_an_off_book_company():
     assert check("Options", "$SPX volatility rose 12%.")[0]
 
