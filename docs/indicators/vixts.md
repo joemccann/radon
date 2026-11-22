@@ -547,7 +547,7 @@ Description=Radon VIX TS Indicator - daily 02:45 UTC Cboe VIX/VIX3M pull
 # Cboe stamps the session row late: observed Last-Modified was 01:50 UTC for
 # VIX and 22:00 UTC for VIX3M on 2026-08-26. 02:45 clears both the EDT
 # (00:00 UTC) and EST (01:00 UTC) publication windows with margin, and sits in
-# the free slot after straddle 02:15, cor 02:20 and vixcor 02:35 so the Cboe
+# the free slot after cor 02:20 and vixcor 02:35 so the Cboe
 # CDN hits stay staggered. Runs every calendar day: weekend and holiday runs
 # are 304 heartbeats that keep service_health inside the 26h window.
 OnCalendar=*-*-* 02:45:00 UTC

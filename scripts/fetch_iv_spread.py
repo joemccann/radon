@@ -64,7 +64,7 @@ OUTLIER_NEIGHBOR_RATIO = 1.5
 IV_SPREAD_JSON = _PROJECT_DIR / "data" / "iv_spread.json"
 SERVICE = "iv-spread"
 # Snapshot upsert ceiling. Two hrana statements, each capped at
-# HRANA_TIMEOUT_S. Must stay under cloud/services TimeoutStartSec=300.
+# HRANA_TIMEOUT_S. Must stay under cloud/services TimeoutStartSec.
 # Sync libsql has no client timeout and holds the GIL, so a stalled
 # upsert_scan_snapshot used to sit until systemd SIGTERM (2026-09-26).
 PERSIST_BUDGET_S = 30
@@ -73,6 +73,13 @@ PERSIST_BUDGET_S = 30
 LEG_KEYS = {"SPX": "spx_iv", "NDX": "ndx_iv"}
 
 HISTORY_READ_PAGE_ROWS = 2000  # keyset page size for the iv_spread_history read
+
+# A gateway that is not authenticated is re-probed after each of these waits
+# before the run falls back to the cache. 2026-11-17: the gateway upstream
+# died 22:16:06-22:18:xx UTC and the 22:16:54 fire lost the session for a
+# day on a single probe. 180s clears a blip of that size and, with one IB
+# fetch and PERSIST_BUDGET_S, stays inside TimeoutStartSec.
+GATEWAY_RECHECK_DELAYS_S = (60.0, 60.0, 60.0)
 
 STATUS_OK = "ok"
 STATUS_STALE_SOURCE = "stale_source"
@@ -295,6 +302,27 @@ def gateway_auth_state() -> Optional[str]:
     from utils.ib_preflight import ib_auth_state
 
     return ib_auth_state()
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _is_gateway_blocked(auth: Optional[str]) -> bool:
+    return auth is not None and auth != "authenticated"
+
+
+def settled_auth_state() -> Optional[str]:
+    """auth_state after riding out a short gateway blip: re-probe after each
+    GATEWAY_RECHECK_DELAYS_S wait while the gate is closed."""
+    auth = gateway_auth_state()
+    for delay in GATEWAY_RECHECK_DELAYS_S:
+        if not _is_gateway_blocked(auth):
+            return auth
+        print(f"[iv-spread] gateway auth_state={auth}; re-probing in {delay:.0f}s", file=sys.stderr)
+        _sleep(delay)
+        auth = gateway_auth_state()
+    return auth
 
 
 # ── real fetcher (constructed lazily when nothing is injected) ────
@@ -612,8 +640,8 @@ def run(
     # health-guarded handler so the run always leaves a heartbeat behind
     # (test_service_registration_completeness: no client is built outside a
     # try whose handler writes the health row).
-    auth = gateway_auth_state()
-    if auth is not None and auth != "authenticated":
+    auth = settled_auth_state()
+    if _is_gateway_blocked(auth):
         print(f"[iv-spread] IB skipped: gateway auth_state={auth}", file=sys.stderr)
         payload, health_error = _cached_fallback(
             scan_time, f"IB skipped: gateway auth_state={auth}", backfill=backfill

@@ -27,6 +27,8 @@ import {
   formatRatio,
   formatSourceDate,
   formatStraddlePct,
+  liveReferenceEntry,
+  liveReferenceSessionDate,
   ratioColor,
   type StraddleChartRow,
 } from "@/lib/straddle";
@@ -109,16 +111,15 @@ export default function StraddlePanel({
   const stats = data.stats;
   const vix1dLastModified = data.source_last_modified?.vix1d ?? null;
 
-  // Live divisor inputs come from the LATEST series row: its close is the
-  // reference the intraday move is measured against, and its VIX1D priced
-  // today's 1-day straddle at that close. (current.implied_straddle_pct is
-  // yesterday's divisor, priced two closes back — wrong for today.)
-  // No market-hours gate: after 16:00 ET the frozen last/close keeps the
-  // session's final ratio on screen until the next Cboe row supersedes it.
-  const latest = series[series.length - 1];
+  // Live divisor inputs come from the PRIOR session's row: its close is the
+  // reference the intraday move is measured against, and its VIX1D priced the
+  // live session's 1-day straddle at that close. After 16:00 ET the frozen
+  // last/close keeps the session's final ratio on screen. A missing prior row
+  // reads --- rather than dividing a multi-session move by a one-day straddle.
+  const reference = liveReferenceEntry(series);
   const liveSpot = prices?.SPX?.last ?? prices?.SPX?.close ?? null;
-  const liveRatio = latest
-    ? computeLiveRatio(liveSpot, latest.spx_close, latest.vix1d_close)
+  const liveRatio = reference
+    ? computeLiveRatio(liveSpot, reference.spx_close, reference.vix1d_close)
     : null;
 
   const rows = buildStraddleChartRows(series);
@@ -182,7 +183,11 @@ export default function StraddlePanel({
                   {formatRatio(liveRatio)}
                 </span>
               }
-              sub={<>INTRADAY VS {latest?.date ?? "PRIOR"} CLOSE</>}
+              sub={
+                reference
+                  ? <>INTRADAY VS {reference.date} CLOSE</>
+                  : <>AWAITING {liveReferenceSessionDate()} CLOSE</>
+              }
             />
             <RegimeStripCell
               testId="straddle-strip-last"

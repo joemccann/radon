@@ -469,7 +469,12 @@ class _EndEvent:
 
 
 def _snapshot_client(mock_ib, *, positions_end, orders_end, open_trades=()):
-    """A connected client whose end events fire only when the test says so."""
+    """A connected client whose snapshot requests finish only when the test says so.
+
+    A finished request returns (the blocking ``reqPositions`` /
+    ``reqAllOpenOrders`` return only after the end marker, DS-2026-11-20-01);
+    an unfinished one raises the request timeout, so no end event fires.
+    """
     mock_ib.isConnected.return_value = True
     mock_ib.errorEvent = eventkit.Event("errorEvent")
     position_end = _EndEvent()
@@ -493,12 +498,14 @@ def _snapshot_client(mock_ib, *, positions_end, orders_end, open_trades=()):
     mock_ib.placeOrder.return_value = acked
 
     def req_positions():
-        if positions_end:
-            position_end.emit()
+        if not positions_end:
+            raise TimeoutError("positionEnd did not arrive")
+        position_end.emit()
 
     def req_orders():
-        if orders_end:
-            order_end.emit()
+        if not orders_end:
+            raise TimeoutError("openOrderEnd did not arrive")
+        order_end.emit()
 
     mock_ib.reqPositions.side_effect = req_positions
     mock_ib.reqAllOpenOrders.side_effect = req_orders

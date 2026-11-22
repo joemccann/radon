@@ -540,7 +540,9 @@ line here whenever you ship a security fix.**
   runs first, so every character class in it excludes both quotes AND the
   backslash that escapes one: eating a closing quote, or the escape in front
   of one, moved where the value appeared to end and published its tail. That
-  root cause has now shipped three times, each time as a different character.
+  root cause has now shipped four times, each time as a different character
+  or rule: the credential-query and database-URL rules were the fourth, their
+  value runs ending only at whitespace or a quote and so eating the escape.
   A new pre-tokenizer rule carries the burden of proving it alters no quoting.
 
   The continuation rule follows the language, not just the indentation: an
@@ -548,6 +550,12 @@ line here whenever you ship a security fix.**
   trailing backslash, and a blank line inside a bracket is still inside it.
   A value that continues only because of indentation was the narrower rule,
   and a key line ending in `(` with the value at column zero escaped it.
+  Indentation is measured after the excerpt lead the key line carries: a
+  quoted (`> `) or bulleted (`- `) excerpt repeats that lead on every line,
+  so from column zero a next-line value sat level with its key and the
+  continuation stopped before it. A line carrying only the bare marker is
+  blank. The detector reads a lead-only value token the same way, since the
+  literal follows the repeated marker on that line.
 
   An egress scrub runs before any truncation, never after. Slicing a
   diagnostic to its last N characters can remove the `KEY=` or provider

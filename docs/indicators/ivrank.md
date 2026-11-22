@@ -348,7 +348,7 @@ daily-bucket check list, each beside `vixcor`, comment naming 22:10 UTC.
 
 ### F.1 FastAPI: none
 
-Daily timer + Turso-reading Next.js route, same as cor/vixcor/margin-debt. No
+Intraday plus daily timer + Turso-reading Next.js route, same as vixcor. No
 operator rescan in v1.
 
 ### F.2 Next.js route — `web/app/api/ivrank/route.ts`
@@ -430,8 +430,9 @@ Every numeric field is `null` when unavailable — never `NaN`, never a sentinel
 
 ### F.4 Hook — `web/lib/useIvRank.ts`
 
-`useSyncHook({ endpoint: "/api/ivrank", interval: 3_600_000, hasPost: false,
-extractTimestamp: d => d.scan_time }, true)` — hourly poll for a daily series.
+`useSyncHook({ endpoint: "/api/ivrank", interval: 300_000, hasPost: false,
+extractTimestamp: d => d.scan_time }, true)` - 5-minute poll matching the
+intraday timer line.
 
 ---
 
