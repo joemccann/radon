@@ -956,17 +956,21 @@ def test_unprocessed_article_waits_for_its_summary_without_spending_attempts(wor
     assert run(world)["published"] == 1
 
 
+def research_warnings(world):
+    return [h[2]["message"] for h in health_for(world, "marketdesk-research") if h[1] == "warn"]
+
+
 def test_summary_that_never_arrives_fails_after_the_wait(world, db):
     world.refs = [make_ref("Zzzzzzzz07", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
-    with pytest.raises(job.ArticlesFailed):
-        run(world)
+    assert run(world)["failed"] == 1
     assert ledger(db, "Zzzzzzzz07")["last_error"] == "no_summary"
     assert world.dests == []
 
 
-def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, capsys):
-    """A provider summary deadline is already the error row. Exit 1 pages P1."""
+def test_summary_deadline_writes_a_warn_row_and_exits_zero(world, db, monkeypatch, capsys):
+    """MarketDesk never summarising an item is provider-side and not actionable:
+    a warn row, not the P2 error row the daily digest pages on (27 in 7 days, 2026-11-21)."""
     world.refs = [make_ref("SummDead01", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
@@ -974,13 +978,14 @@ def test_summary_deadline_keeps_error_and_exits_zero(world, db, monkeypatch, cap
     saved = ledger(db, "SummDead01")
     assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
-    assert any("no_summary" in message for message in research_errors(world))
+    assert research_errors(world) == []
+    assert any("no_summary" in message for message in research_warnings(world))
     assert "no_summary" in capsys.readouterr().err
 
 
 def test_summary_deadline_retires_the_article_on_its_first_error_cycle(world, db, monkeypatch):
     """Past the wait the outcome is fixed (MarketDesk's summarizer replied with an apology, 2026-11-11):
-    one error row, then the writer is green again instead of red for MAX_ATTEMPTS cycles."""
+    one warn row, then the writer is green again instead of red for MAX_ATTEMPTS cycles."""
     world.refs = [make_ref("SummDead04", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
     monkeypatch.setattr(job, "default_deps", lambda: build_deps(world))
@@ -989,18 +994,17 @@ def test_summary_deadline_retires_the_article_on_its_first_error_cycle(world, db
     saved = ledger(db, "SummDead04")
     assert saved["status"] == "failed" and saved["attempts"] == store.MAX_ATTEMPTS
     assert saved["last_error"] == "no_summary"
-    assert len(research_errors(world)) == 1
+    assert research_errors(world) == [] and len(research_warnings(world)) == 1
     assert [c for c in world.calls if c == ("fetch_article", "SummDead04")] == [("fetch_article", "SummDead04")]
     assert health_for(world, "marketdesk-research")[-1][1] == "ok"
 
 
-def test_summary_deadline_retirement_is_reported_in_the_error_row(world, db):
+def test_summary_deadline_retirement_is_reported_in_the_warn_row(world, db):
     world.refs = [make_ref("SummDead05", hours_ago=job.DEFAULT_SUMMARY_WAIT_HOURS + 1)]
     world.summary = []
-    with pytest.raises(job.ArticlesFailed) as failure:
-        run(world)
-    assert failure.value.provider_deadline
-    assert "1 retired" in str(failure.value) and "no_summary" in str(failure.value)
+    run(world)
+    [message] = research_warnings(world)
+    assert "1 retired" in message and "no_summary" in message
 
 
 def test_copy_failure_still_fails_the_oneshot(world, monkeypatch):

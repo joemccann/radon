@@ -175,7 +175,8 @@ fetched with a cookie-less opener that never follows redirects.
    `MARKETDESK_MAX_PER_CYCLE`, default 5) and fails as `no_summary` once older
    than `MARKETDESK_SUMMARY_WAIT_HOURS` (default 6). A retry cannot change that
    outcome, so the deadline retires the row to `failed` at once (every attempt
-   spent), writes one `marketdesk-research` error row, and the oneshot exits 0.
+   spent), writes one `marketdesk-research` warn row (provider-side, not
+   actionable, so it stays out of the error digest), and the oneshot exits 0.
    The next cycle is green again. One other bad item never aborts the rest of the cycle. No new item
    starts after 150 seconds of the cycle; the rest wait for the next one.
 7. Drain the outbox again when something was just published, held or dropped and write the

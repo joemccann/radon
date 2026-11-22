@@ -536,9 +536,23 @@ def backlog_breach(*, now=None):
     if not ((oldest and age > OLDEST_SLA_SECONDS) or growing):
         return None
     stalled = _admission_stalled(current)
+    capped = _daily_cap_full(current)
     message = (f"PDF archive backlog: pending={depth} oldest_h={age // 3600} "
-               f"growing={int(bool(growing))} stalled={int(stalled)}")
-    return BacklogBreach(message, paging=bool(growing) or stalled or age > PAGING_AGE_SECONDS)
+               f"growing={int(bool(growing))} stalled={int(stalled)} capped={int(capped)}")
+    # Intake above the provider allowance grows the queue by design and the age
+    # window retires the excess. Growth while the rolling 24h cap is full is
+    # not actionable, so it warns; a stall or the 14-day ceiling still pages.
+    return BacklogBreach(message, paging=(bool(growing) and not capped) or stalled or age > PAGING_AGE_SECONDS)
+
+
+def _daily_cap_full(current):
+    cap = daily_cap()
+    if not cap:
+        return False
+    rows = hrana_execute(
+        "SELECT COUNT(*) FROM marketdesk_pdf_admissions WHERE julianday(admitted_at)>julianday(?)-1",
+        (_stamp(current),))
+    return bool(rows) and int(rows[0][0] or 0) >= cap
 
 
 def _admission_stalled(current):
