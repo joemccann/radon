@@ -12533,3 +12533,39 @@ Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node 
 | 1 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (174.75s) | 11,664 passed / 21 skipped / 1,211 files (81.71s) | 58 failed / 4,292 passed / 23 skipped (952.83s) | 0 added / 0 removed |
 | 2 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (145.46s) | 11,664 passed / 21 skipped / 1,211 files (94.66s) | 58 failed / 4,292 passed / 23 skipped (1017.59s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (240.35s) | 11,664 passed / 21 skipped / 1,211 files (153.77s) | 58 failed / 4,292 passed / 23 skipped (1184.43s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-20
+
+Range `45660cd1c9e352ee799ea4f721e3c7933ee4f6a3..1ef4fdff5dc2cabcf092756b4ad710e383502c52`: 15 commits / 37 paths. Newest trusted checkpoint on issue #83 is `audited-through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3` (2026-11-19). It carried no open verified finding. Open `testing/` PRs: #1618 T-595 T-596, #1606 T-594, #1598 T-591 T-592 T-593 — skipped, not reallocated. Highest id T-596. Next id T-597.
+
+`rg` confirmed importers for the delta sources: `scripts/api/tests/test_ib_pool_connect_loop.py` for the connect-loop pool call; `scripts/tests/test_index_live_rows.py` for SKEW `carry`; `scripts/api/tests/test_regime_share_route.py` and `scripts/tests/test_regime_share_live_overlay.py` for the overlay generator; `web/tests/share-report-live-reading.test.tsx` for the modal POST; `web/tests/regime-share-live-reading-route.test.ts` for the Next proxy; `scripts/api/tests/test_subprocess_interactive_lane.py` for the share-generator lane; `scripts/tests/test_share_cards_dir.py` and `web/tests/share-card-regular-file.test.ts` for `O_NOFOLLOW`. Inverse: `web/components/RegimePanel.tsx:225` and `:235` now pass `shareBody={readShareReading}`, but `web/tests/regime-share.test.ts:107-143` greps `ShareReportModal` / `shareEndpoint` and never `shareBody`, and `web/tests/regime-cri-chart-layout.test.tsx:45` mocks the modal to `null`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. One new `@unittest.skipUnless(_chromium_available())` on the real-render screenshot case (`scripts/tests/test_card_screenshot.py:115`); the fake-browser cases always run. No `.only` / `xfail`. Re-triaged `TEST_LOG.md`: T-591 / T-592 remain DONE on main. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta-touched files 3×: Python 69 passed / 1 skipped; Vitest 76 passed / 9 files.
+
+Not filed: remaining source-greps in `regime-share.test.ts` (pre-existing; the new API has executing siblings except the owner wiring, which is T-597); Chromium skipUnless (environment-conditional real render); overlay `triggered` recompute keeps snapshot `realized_vol_gt_25` (`test_regime_share_live_overlay.py:66`).
+
+### T-597 — P1 — RegimePanel share wiring is untested, so dropping the live reading stays green
+
+`web/components/RegimePanel.tsx:225` and `:235` pass `shareBody={readShareReading}` so Share to X posts the live CRI the hero shows (`web/lib/regimeShareReading.ts:28`, `web/components/ShareReportModal.tsx:99`). The modal, Next route, FastAPI overlay, and generator each have executing tests. The owner does not. Mutation: delete both `shareBody={readShareReading}` props. Existing four files 26 passed (`/tmp/t597-existing-mut.log`). New wire test: 1 failed / 1 passed (`/tmp/t597-red.log`, POST `/api/regime/share` with no body while the hero is live 43.9).
+
+Acceptance: render `RegimePanel` with real `ShareReportModal` and live VIX/VVIX/SPY ticks. Share to X must POST `{live}` whose `cri.score` is `computeCri` of those ticks, not the scan snapshot 48. Empty `prices` posts no body. Reverting the panel to omit `shareBody` fails the live case.
+
+Audited through: 1ef4fdff5dc2cabcf092756b4ad710e383502c52 on 2026-11-20 — 1 new finding
+
+## Remediation 2026-11-20
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-597 | DONE | shareBody mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t597-red.log`). Restored both props. Green: 2 passed (`/tmp/t597-green.log`) ×3. Product source unchanged. |
+
+### Closing gates 2026-11-20
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1 and r3 EXIT 0. r2 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after an isolated retry (2 passed, `/tmp/pytest-2-serial.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round. Sorted FAILED lists match the origin/main worktree at `1ef4fdff5` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 19,956 passed / 11 skipped / 40 subtests (108.77s) | 11,678 passed / 21 skipped / 1,215 files (48.56s) | 58 failed / 4,292 passed / 23 skipped (938.08s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 2 passed; 19,955 passed / 11 skipped / 40 subtests (158.54s) | 11,678 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,292 passed / 23 skipped (965.27s) | 0 added / 0 removed |
+| 3 | 19,956 passed / 11 skipped / 40 subtests (153.02s) | 11,678 passed / 21 skipped / 1,215 files (96.36s) | 58 failed / 4,292 passed / 23 skipped (1,162.88s) | 0 added / 0 removed |
