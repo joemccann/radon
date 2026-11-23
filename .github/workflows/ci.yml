@@ -419,9 +419,13 @@ jobs:
             # test_runner_security_hooks (53s) on one worker each (run
             # 44017827310, 2482 passed in 105.67s). Both modules use
             # function-scoped tmp_path sandboxes, so per-test load can
-            # split them. Other shards stay loadfile.
+            # split them. CIP-037: load still left a 2.32× wall (run
+            # 44979169331, 2597 passed in 159.67s, junit 275.1s / 4 ≈ 69s)
+            # because the first load batch kept those modules on two
+            # workers. worksteal lets idle workers take leftover tests.
+            # Other shards stay loadfile.
             paths: "scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_runner_run_loop.py scripts/tests/test_runner_security_hooks.py scripts/tests/test_ru*.py scripts/api/tests scripts/trade_blotter tests"
-            xdist: "-n auto --dist load"
+            xdist: "-n auto --dist worksteal"
     concurrency:
       group: ci-py-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
@@ -473,9 +477,9 @@ jobs:
       # -n auto --dist loadfile on letter shards: GitHub-hosted runners have
       # multiple cores; loadfile keeps each test module on one worker so
       # autouse fixtures and module-level stubs do not race. rest uses
-      # --dist load (CIP-031) so the 81s/53s runner modules can split across
-      # workers. pytest-cov combines worker coverage. matrix.xdist is a
-      # deliberate word-split.
+      # --dist worksteal (CIP-037; CIP-031 used load) so the 90s/70s runner
+      # modules can split and idle workers steal leftovers. pytest-cov
+      # combines worker coverage. matrix.xdist is a deliberate word-split.
       - run: >-
           python -m pytest ${{ matrix.paths }}
           ${{ matrix.xdist }}
