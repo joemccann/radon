@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-22T10:00:08Z",
-  "node_count": 4379,
-  "edge_count": 8931,
+  "generated_at": "2026-11-23T10:00:09Z",
+  "node_count": 4389,
+  "edge_count": 8936,
   "areas": {
-    "web": 2423,
+    "web": 2425,
     "site": 134,
-    "scripts": 1608,
-    "cloud": 171,
+    "scripts": 1611,
+    "cloud": 176,
     "lib": 25,
     "tests": 15,
     "tools": 3
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1175
+      "count": 1177
     },
     {
       "id": "site/app",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 875
+      "count": 878
     },
     {
       "id": "scripts/trade_blotter",
@@ -285,7 +285,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 146
+      "count": 151
     },
     {
       "id": "lib/tools",
@@ -429,7 +429,7 @@
     {
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
-      "in": 4,
+      "in": 5,
       "out": 66,
       "test": false
     },
