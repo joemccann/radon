@@ -12603,3 +12603,46 @@ Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node 
 | 1 | 19,956 passed / 11 skipped / 40 subtests (108.77s) | 11,678 passed / 21 skipped / 1,215 files (48.56s) | 58 failed / 4,292 passed / 23 skipped (938.08s) | 0 added / 0 removed |
 | 2 | credentials xdist flake then serial 2 passed; 19,955 passed / 11 skipped / 40 subtests (158.54s) | 11,678 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,292 passed / 23 skipped (965.27s) | 0 added / 0 removed |
 | 3 | 19,956 passed / 11 skipped / 40 subtests (153.02s) | 11,678 passed / 21 skipped / 1,215 files (96.36s) | 58 failed / 4,292 passed / 23 skipped (1,162.88s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-22
+
+Range `1ef4fdff5dc2cabcf092756b4ad710e383502c52..194f6206015ca08fa9cea41f4c5adacf3bb7deb6`: 40 non-merge commits / 93 paths. Newest trusted checkpoint on issue #83 is `audited-through: 1ef4fdff5dc2cabcf092756b4ad710e383502c52` (2026-11-20). It carried no open verified finding. Open `testing/` PRs #1606 (T-594), #1618 (T-595, T-596), #1630 (T-597) are CI-green; tonight skipped those. Highest merged id T-593. Next id T-598.
+
+Codemap has no node for the new runner modules. `rg` confirmed importers: `scripts/tests/test_runner_egress.py`, `test_runner_logd.py`, `test_runner_publisher.py`, `test_runner_run_loop.py`; `scripts/tests/test_research_force_include.py` for `force_include.py` (stale map listed zero test importers). Inverse: `skips_unresolved_subject_hold` (`scripts/research/force_include.py:116`) is called from `publish.py:291` and crash-heal `marketdesk_job.py:319`, but rebuilt the desk from `post['title']` only, so a Hartnett byline titled The Biggest Picture still raised at publish while the filter had already published.
+
+Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. `ci.yml` CIP-031 rest `--dist load` is pinned by `test_cip031_rest_load.py`. No new unlinked `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-593 remains DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Standing root pytest: 4 failed (`/tmp/pytest-standing.log`) on the new AF_UNIX binds. Serial isolated the same 4 (`/tmp/pytest-runner-serial-1.log`). Delta Vitest file `web/tests/straddle-panel.test.tsx` was already updated with the 03:25 rail.
+
+Not filed: IV RANK 17:00 ET rail (T-595 / T-596 on #1618). `pytest.skip` when euid is 0 in `test_runner_logd.py:245` is a host gate, not a hidden defect. Publisher `_call` `time.sleep(0.025)` retries `unavailable` until the bind exists.
+
+### T-598 — P1 — runner unix-socket tests bind under pytest tmp_path, so Darwin never reaches the contract
+
+`scripts/tests/test_runner_logd.py:174` (pre-fix) used `tmp_path / "ingest.sock"`. `test_runner_publisher.py:80` set `socket_path=tmp_path / "run" / "publisher.sock"`. `test_runner_run_loop.py:1749` bound a datagram socket at `tmp_path / "ingest.sock"`. This host's basetemp is `/Users/_radonbot/radon-runner/tmp/pytest-of-_radonbot/...` (129+ bytes). Darwin `sockaddr_un` is 104 bytes. Serial: 4 failed (`/tmp/pytest-runner-serial-1.log`) with `OSError: AF_UNIX path too long` / `unavailable` / missing sock. Sibling suites already bind under `/tmp` (`test_control_service.py:569`, `test_subscription_vault.py:41`).
+
+Acceptance: the four cases bind under `/tmp` and pass on Darwin. Reintroducing `tmp_path` for the socket path fails with `AF_UNIX path too long` here.
+
+### T-599 — P1 — publish() misses a Hartnett byline because the skip only reads the title
+
+`scripts/research/force_include.py:125` (pre-fix) passed `page_text=post.get('title')`. Filter match uses page one (`marketdesk_filter.py:81`). A BofA note titled The Biggest Picture with `Michael Hartnett.` in the body: `equity_admission.decide` returns `held` / `EQUITY_RESEARCH_SUBJECT_UNRESOLVED`, `skips_unresolved_subject_hold` was False, `publish.publish` raised. Flow Show still skipped via filename. Red: 1 failed / 1 passed (`/tmp/t599-red.log`). A BofA initiation without the byline still holds.
+
+Acceptance: that Hartnett byline post inserts. The same unresolved body without the byline still raises `EQUITY_RESEARCH_SUBJECT_UNRESOLVED`. Title-only `page_text` fails the byline case.
+
+Audited through: 194f6206015ca08fa9cea41f4c5adacf3bb7deb6 on 2026-11-22 — 2 new findings
+
+## Remediation 2026-11-22
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-598 | DONE | Serial 4 failed (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp/r{l,p,r}*`. Green: 4 passed (`/tmp/t598-green.log`); three files 177 passed. Product source unchanged. |
+| T-599 | DONE | Hartnett byline `PublicationAdmissionError` (`/tmp/t599-red.log`). `page_text` is `content` then title. Green: 2 passed ×3 (`/tmp/t599-green.log`); blast 273 passed. |
+
+### Closing gates 2026-11-22
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1/r2 EXIT 0. r3 credentials xdist flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]` then serial 11 passed (`/tmp/pytest-3-serial.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as origin/main `194f62060` (0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 20,141 passed / 11 skipped / 40 subtests (104.59s) | 11,681 passed / 21 skipped / 1,215 files (48.26s) | 58 failed / 4,293 passed / 23 skipped (951.52s) | 0 added / 0 removed |
+| 2 | 20,141 passed / 11 skipped / 40 subtests (179.28s) | 11,681 passed / 21 skipped / 1,215 files (170.56s) | 58 failed / 4,293 passed / 23 skipped (990.32s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 11 passed; 20,140 passed / 11 skipped / 40 subtests (165.20s) | 11,681 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,293 passed / 23 skipped (955.31s) | 0 added / 0 removed |

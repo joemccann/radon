@@ -1455,3 +1455,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-597 | DONE | shareBody mutation: existing four files 26 passed; new wire test 1 failed / 1 passed (POST `/api/regime/share` with no body while the hero is live). Restored both props. Green 2 passed ×3. Product source unchanged. Closing rounds: root pytest r1 19,956 passed / 11 skipped; r2 credentials xdist flake then serial 2 passed; r3 19,956 passed / 11 skipped. Vitest 11,678 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,292 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `1ef4fdff5`. |
+
+## 2026-11-22
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
+| T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
