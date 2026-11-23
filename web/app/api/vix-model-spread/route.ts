@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
-import { dbExecute } from "@/lib/dbExecute";
+import { dbBatch } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
-import { readLiveSnapshot } from "@/lib/provisionalRow";
-import { withLiveRow, type VixModelSpreadData, type VixModelSpreadEntry, type VixModelSpreadLive } from "@/lib/vixModelSpread";
+import { liveSnapshotArgs, LIVE_SNAPSHOT_SQL, parseLiveSnapshot } from "@/lib/provisionalRow";
+import { withLiveRow, type VixModelSpreadData, type VixModelSpreadEntry } from "@/lib/vixModelSpread";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,25 +42,28 @@ function parsePayload(raw: string): Payload {
 }
 
 async function readFromDb(): Promise<TimestampedRead<Payload> | null> {
-  const result = await dbExecute({
-    // Raw source series support writer conditional requests; the UI needs only
-    // the aligned derived history. Omit those private, unused inputs in SQL.
-    sql: `SELECT scan_time, json_remove(payload, '$.source_series') AS payload
-          FROM scan_snapshots WHERE service = 'vix-model-spread'
-          ORDER BY scan_time DESC LIMIT 1`,
-    args: [],
-  });
+  // One /v2/pipeline for the official snapshot plus vix-model-spread:live (PERF-062).
+  const [result, liveResult] = await dbBatch(
+    [
+      {
+        // Raw source series support writer conditional requests; the UI needs only
+        // the aligned derived history. Omit those private, unused inputs in SQL.
+        sql: `SELECT scan_time, json_remove(payload, '$.source_series') AS payload
+              FROM scan_snapshots WHERE service = 'vix-model-spread'
+              ORDER BY scan_time DESC LIMIT 1`,
+        args: [],
+      },
+      { sql: LIVE_SNAPSHOT_SQL, args: liveSnapshotArgs("vix-model-spread") },
+    ],
+    { label: "vix-model-spread snapshots", mode: "read" },
+  );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   const data = parsePayload(row.payload);
   // Freshness stays on the official snapshot; the live row only extends it.
-  const merged = isMissingPayload(data) ? data : withLiveRow(data as unknown as VixModelSpreadData, await readLive());
+  const live = parseLiveSnapshot(liveResult, (value): value is VixModelSpreadEntry => isEntry(value));
+  const merged = isMissingPayload(data) ? data : withLiveRow(data as unknown as VixModelSpreadData, live);
   return { data: merged as unknown as Payload, timestampMs: contentTimestampMs(data.scan_time) };
-}
-
-/** Provisional current-session row from the writer's side snapshot; advisory. */
-function readLive(): Promise<VixModelSpreadLive | null> {
-  return readLiveSnapshot(dbExecute, "vix-model-spread", (value): value is VixModelSpreadEntry => isEntry(value));
 }
 
 export async function GET(request: Request): Promise<Response> {
