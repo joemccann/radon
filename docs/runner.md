@@ -140,7 +140,7 @@ Where things live when you are done:
 
 ### Egress proxy (off by default)
 
-Nothing is dropped. The proxy records destinations that are not in the host allowlist and still forwards them. `mode block` is ignored. Run this on the Mac mini only when you want log-only observation. Replace the clone path with the checkout you install from.
+Nothing is dropped. The proxy records destinations that are not in the host allowlist and still forwards them. `mode block` is ignored. `run_loop.sh` `arm_egress_proxy` sets `http_proxy` / `https_proxy` only after the root-owned flag gate and a live localhost probe succeed. A missing flag, a failed gate, or a failed probe leaves the environment unchanged and still launches the agent. Run this on the Mac mini only when you want log-only observation. Replace the clone path with the checkout you install from.
 
 ```bash
 sudo install -d -o root -g wheel -m 755 /usr/local/radon-runner
