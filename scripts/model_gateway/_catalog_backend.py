@@ -70,17 +70,21 @@ prefer_ipv4()
 SERVICE = "model-catalog"
 LLM_MODELS_JSON = _PROJECT_DIR / "data" / "llm_models.json"
 
-PROVIDERS = ("anthropic", "openai", "xai")
+PROVIDERS = ("anthropic", "openai", "xai", "nvidia", "cerebras")
 
 PROVIDER_OVERRIDE_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_MODEL",),
     "openai": ("OPENAI_MODEL",),
     "xai": ("XAI_MODEL", "GROK_MODEL"),
+    "nvidia": ("NVIDIA_TEXT_MODEL", "NVIDIA_VISION_MODEL", "NVIDIA_MODEL"),
+    "cerebras": ("CEREBRAS_MODEL", "CEREBRAS_VISION_MODEL"),
 }
 
 ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
 XAI_LANGUAGE_MODELS_URL = "https://api.x.ai/v1/language-models"
 XAI_MODELS_URL = "https://api.x.ai/v1/models"
+NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
+CEREBRAS_MODELS_URL = "https://api.cerebras.ai/v1/models"
 
 USER_AGENT = "radon/2.0"
 FETCH_TIMEOUT_S = 30
@@ -137,7 +141,16 @@ def provider_auth(provider: str):
 
 
 def provider_key(provider: str) -> Optional[str]:
-    """Credential token for ``provider``, or None when this deployment has none."""
+    """Credential token for ``provider``, or None when this deployment has none.
+
+    NVIDIA and Cerebras stay paused on the ladder, so their chat auth reads
+    as absent. The catalog refresh still lists models when a key is stored,
+    and writes only the newest flagship id.
+    """
+    if provider == "nvidia":
+        return _first_env(("NVIDIA_API_KEY",))
+    if provider == "cerebras":
+        return _first_env(("CEREBRAS_API_KEY",))
     auth = provider_auth(provider)
     return auth.token if auth is not None else None
 
@@ -240,6 +253,12 @@ def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
             return models
         url = f"{ANTHROPIC_MODELS_URL}?limit=100&after_id={payload['last_id']}"
     raise RuntimeError(f"still has_more after {ANTHROPIC_MAX_PAGES} pages; cursor not advancing")
+
+
+def fetch_listed_models(url: str, api_key: str) -> list[dict[str, Any]]:
+    """OpenAI-shaped ``data`` list used by NVIDIA and Cerebras."""
+    headers = {"Authorization": f"Bearer {api_key}"}
+    return list(_http_get_json(url, headers).get("data") or [])
 
 
 def fetch_xai_models(api_key: str) -> list[dict[str, Any]]:
@@ -518,6 +537,8 @@ def _record_cycle_failure(scan_time: str, exc: BaseException) -> None:
 FETCHERS: dict[str, Callable[[str], list[dict[str, Any]]]] = {
     "anthropic": lambda key: fetch_anthropic_models(key),
     "xai": lambda key: fetch_xai_models(key),
+    "nvidia": lambda key: fetch_listed_models(NVIDIA_MODELS_URL, key),
+    "cerebras": lambda key: fetch_listed_models(CEREBRAS_MODELS_URL, key),
 }
 
 
@@ -547,7 +568,9 @@ def resolve_provider_row(
     except Exception as exc:  # noqa: BLE001 - a bad poll must never blank a row
         _log(f"{provider}: model list failed ({exc}); keeping the existing row")
         return previous.get(provider), f"model list failed ({exc})"
-    selected = SELECTORS[provider](models)
+    from .latest import select_latest_flagship
+
+    selected = select_latest_flagship(provider, models)
     if selected is None:
         _log(f"{provider}: {len(models)} models, none frontier; keeping the existing row")
         return previous.get(provider), f"{len(models)} models, none frontier"
