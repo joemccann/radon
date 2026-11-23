@@ -10,12 +10,12 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | vol-skew-mr | `/scanner?mode=vol-skew-mr` | `vol-skew-mr` (on-demand) | [vol-skew-mr.md](vol-skew-mr.md) |
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
-| straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
+| straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) (daily 03:25 UTC, after Cboe's EST SPX publish; LIVE measures from the prior session's close) |
 | msr | `/regime/msr` | `msr` | [msr.md](msr.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor`, `vixcor:live` | [vixcor.md](vixcor.md) (provisional current session every 5 min 09:00-15:55 ET + 02:35 UTC official) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) (every 5 min in ET trading hours + 22:10 UTC final) |
-| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`; timer 22:15 UTC between ivrank 22:10 and dispersion 22:20) |
+| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) (snapshot write is hrana-bounded by `PERSIST_BUDGET_S`; timer every 5 min 09:00-16:55 ET Mon-Fri for the in-progress session, final 22:15 UTC between ivrank 22:10 and dispersion 22:20, recovery 23:15 UTC; gateway blips re-probed via `GATEWAY_RECHECK_DELAYS_S`) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
@@ -24,7 +24,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) (timer 16:20 ET, close-anchored across DST) |
 | rsi-oversold | `/regime/rsi-oversold` | `rsi-oversold` | [rsi-oversold.md](rsi-oversold.md) (timer 16:40 ET, 20 min behind ma-ratio) |
-| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers; an empty Cboe SPX body keeps last-good, 2026-10-10) |
+| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers; an empty Cboe SPX body keeps last-good, 2026-10-10; historical JSON sends `Referer: https://www.cboe.com/` so Cloudflare does not 403, 2026-11-20) |
 | record-high-breadth | `/regime/record-high-breadth` | `record-high-breadth` | [Implementation](record-high-breadth-validation.md), [source parity](record-high-breadth-source-parity.md) (TradingView variant; formula suite is `scripts/tests/test_record_high_breadth.py`) |
 | imbalance | `/regime/imbalance` | `imbalance` | [imbalance.md](imbalance.md) (TradingView USI trade-count ASK-BID; timer 18:25 ET, not installed) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
@@ -34,7 +34,7 @@ Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/ra
 | high-low | `/regime/high-low` | `high-low-line` | [high-low.md](high-low.md); operator-only common-stock breadth, Daily/Weekly StochRSI and SAR. The spec is the only procedure and cites no path outside this repo. |
 | exports | `/regime/exports` | `asia-export-lead` | [Specification](exports.md); official total exports, three-month mean, optional six-month display alignment; licensed EPS comparison deferred |
 | vix-model-spread | `/regime/vix-model-spread` | `vix-model-spread` | [Specification](vix-model-spread.md), [source research](vix-model-spread-source-research.md); personal operator use, 20/252-session bands; provisional current-session row every 5 minutes in ET trading hours |
-| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index); provisional current-session row every 5 minutes in ET trading hours |
+| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index); provisional current-session row every 5 minutes in ET trading hours, SKEW held at its last official close until Cboe posts it |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) (22:20 UTC sweep, 23:20 UTC if a deploy killed the first run) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 | quant | `/regime/quant` | `quant-targets`, `quant-execute` | [quant-strategies.md](../quant-strategies.md) (systematic sleeve, outside the Four Gates) |

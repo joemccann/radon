@@ -2907,3 +2907,326 @@ than 20% higher. Status `VALIDATING`.
 green (4 passed). Related prune/runtime pull contracts 62 passed / 135
 deselected. `bash -n` on the runtime script. Full suites, Vitest, Docker
 builds, and workflow lint are left to PR CI.
+
+## CIP-031 - rest shard distributes per test, not per module (2026-11-17) - VALIDATING
+
+Warm mixed deploys still wait on `pytest (rest)` before coverage and
+prestage. `--dist loadfile` keeps each module on one worker, so two
+runner suites set the shard floor even though they already lead the
+collection list. CIP-030 (open #1585) skips a second podman pull; it
+does not split those modules.
+
+Evidence, attempt-1 mixed warm rest jobs (`gh run view --json jobs`
+plus junit from run 44017827310 artifact `pytest-coverage-rest`).
+Queue 2s is excluded from the gain:
+
+| Run | Clock | Rest job | Pytest step | run_loop | security_hooks |
+|---|---|---|---|---|---|
+| [44017827310](https://github.com/joemccann/radon/actions/runs/44017827310) | 385s | 119s (job 133819978797) | 105.67s / 2482 passed | 81.16s | 52.86s |
+| [44014036689](https://github.com/joemccann/radon/actions/runs/44014036689) | 361s | 134s | — | — | — |
+| [44008732244](https://github.com/joemccann/radon/actions/runs/44008732244) | 356s | 118s | — | — | — |
+| [43675009863](https://github.com/joemccann/radon/actions/runs/43675009863) | 369s | 133s | — | — | — |
+
+Newest mixed-warm p50 clock is 365s (n=4; 10% is 37s). On 44017827310
+junit sum is 231.2s across 4 workers (balanced wall ≈58s) but loadfile
+serialized 81s + 53s. Both modules use function-scoped `tmp_path`
+sandboxes, the same shape as cloud `heavy`. Switching only rest to
+`--dist load` is expected to cut the rest job by about 40s (119s →
+~75s). `scripts-npsz` (106s) then sets the python gate with coverage
+(~20s), so gates fall from 164s toward ~130s (~34s of the 365s clock).
+Letter shards stay loadfile. No new shard (CIP-009 slot cap). Runner
+minutes fall with the shorter rest job.
+
+**Change.** `py-tests` matrix rows carry `xdist`. rest is
+`-n auto --dist load`; the other eight shards stay
+`-n auto --dist loadfile`. Shard globs, lead modules, coverage
+combine, deploy `needs`, health, recovery, rollback, and the
+40-second stability window stay.
+
+**Safety and revert trigger.** Revert if rest flakes from xdist load
+in the first five main runs, if any letter shard loses loadfile, or if
+the shard union no longer equals recursive collection.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| pytest (rest) | 119s | pending | TBD until 5 samples |
+
+Before is the rest job wall on run 44017827310 (job 133819978797).
+Acceptance remains five comparable mixed-warm deploys before and after:
+same-class p50 at least 10% and 15s faster; p95 no worse than 5% or
+15s; cold p50 no worse than 10%; runner minutes no more than 20%
+higher. Status `VALIDATING`.
+
+**Verification.** `scripts/tests/test_cip031_rest_load.py` was red
+(2 failed: missing `xdist` / rest still loadfile) then green (3
+passed). Related shard contracts 64 passed; path filter and gate
+integrity 68 passed. YAML parses. Full suites, Vitest, Docker builds,
+and workflow lint are left to PR CI.
+
+## CIP-032 - skip apt-get when the image jobs already have sshd (2026-11-19) - VALIDATING
+
+Python and gateway image jobs always `apt-get update` then install
+openssh-server so `check_model_transport.py` can see `/usr/sbin/sshd`.
+GitHub ubuntu-24.04 already has that file. The install is a no-op after a
+network index refresh.
+
+Evidence, attempt-1 main image jobs (`gh run view --json jobs` plus job
+logs). Queue 2-3s is excluded from the gain:
+
+| Run | Class | Clock | Job | apt-get until "already the newest" |
+|---|---|---|---|---|
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | mixed, gateway rebuild | 591s | gateway 211s (job 135094530935) | 43.6s (`apt-get update` 20:03:41Z, already-newest 20:04:24Z). Gateway was the last required gate. |
+| [44357745454](https://github.com/joemccann/radon/actions/runs/44357745454) | mixed, python rebuild | 410s | python 135s (job 134990848552) | 66.6s |
+| [44336305147](https://github.com/joemccann/radon/actions/runs/44336305147) | mixed, gateway rebuild | 571s | gateway 226s (job 134914462737) | 10.9s |
+
+Newest mixed successful clocks (n=10, 44127208355..44386917407) p50 456s /
+p95 582s. Gateway rebuilds are the last required job on 10 of 27 mixed
+runs. Skipping the no-op apt is expected to cut 11-67s of those image
+jobs. On 44386917407 that is 43.6s of the 211s gateway wall after Exact
+app images authorized deploy, which clears 15s. A runner without
+`/usr/sbin/sshd` still apt-gets. The transport check still runs. Runner
+minutes fall with the skipped index refresh.
+
+**Change.** Both image verify steps test `[ ! -f /usr/sbin/sshd ]` before
+`apt-get`. Missing file still updates and installs. `check_model_transport.py`
+still runs either way. No `needs` edge, test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+Do not retry CIP-022/023/024 client-reuse. CIP-031 (open #1597) is the
+rest-shard `--dist load` change; this does not touch pytest.
+
+**Safety and revert trigger.** Revert if a python or gateway image job
+skips the transport check, if a runner without `/usr/sbin/sshd` fails to
+install openssh-server, or if deploy no longer waits for Exact app images.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 211s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 44386917407 (job
+135094530935). Acceptance remains five comparable mixed gateway-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip032_skip_sshd_apt.py` was red
+(1 failed: unconditional `apt-get update`) then green (3 passed). Related
+CIP-027/029/disk tests 16 passed. YAML parses. Full suites, Vitest, Docker
+builds, and workflow lint are left to PR CI.
+
+## CIP-033 - skip the python docker-load tarball on main publish (2026-11-19) - VALIDATING
+
+Main python rebuilds still set `load: true` so the next step can
+`docker run --pull=never`. That export is the job tail after the image
+build's own playwright smoke. CIP-032 skipped the sshd apt no-op; it does
+not remove the tarball. Dockerfile.python already smokes playwright as
+`USER radon`.
+
+Evidence, attempt-1 mixed python-rebuild steps (`gh run view --json jobs`
+plus job logs). Queue 2s is excluded from the gain:
+
+| Run | Clock | Python image | Load tarball | Post-build docker run |
+|---|---|---|---|---|
+| [44357745454](https://github.com/joemccann/radon/actions/runs/44357745454) | 410s | 135s (job 134990848552) | 10.8s (`exporting to docker image format` 17:24:00Z–17:24:11Z) | ~9s |
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | 591s | 79s (job 135094530994) | 16.6s | ~8s |
+
+Load plus the duplicate smoke is 20-25s of the python rebuild. Skipping
+that export on main is expected to cut the python job by about 20s, which
+clears 15s. Pull requests still `load: true` (they cannot push). Exact SHA
+tags, Darwin-before-publish, CIP-032 sshd skip, ihash receipts, and
+fail-closed reuse stay. No `needs` edge, test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+
+**Change.** Python `load:` is true only when the run is not a main push.
+Main smoke prints that the image build already ran the playwright
+assertions and exits 0. PR smoke keeps `docker run --pull=never`.
+
+**Safety and revert trigger.** Revert if a main rebuild publishes a python
+SHA that fails `docker run --pull=never` of that tag, if a PR rebuild
+skips the local docker-run smoke, or if deploy no longer waits for Exact
+app images.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 135s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 44357745454 (job
+134990848552). Acceptance remains five comparable mixed python-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip033_python_skip_load.py` was red
+(2 failed: unconditional `load: true`) then green (3 passed). Related
+CIP-027/029/032/disk tests 19 passed. YAML parses. Full suites, Vitest,
+Docker builds, and workflow lint are left to PR CI.
+
+## CIP-034 - cache-from the previous gateway SHA on scripts-only rebuilds (2026-11-20) - VALIDATING
+
+Scripts-only mixed rebuilds still pip-install torch and re-export the
+gateway even though CIP-028 put the lock before vendor CLIs and
+runtime-deps layers are CACHED. The GHA docker cache is gone (Actions
+cache listing is uv/bun only). `buildcache` imported in 0.3s and did
+not supply the torch layer.
+
+Evidence, attempt-1 mixed scripts-rebuild gateway steps (`gh run view
+--json jobs` plus job logs). Queue 2–3s is excluded from the gain:
+
+| Run | Clock | Gateway job | Torch pip | Export layers | Last required gate |
+|---|---|---|---|---|---|
+| [44612924566](https://github.com/joemccann/radon/actions/runs/44612924566) | 543s | 206s (job 135874396489) | 36.8s | 49.8s | gateway |
+| [44610736666](https://github.com/joemccann/radon/actions/runs/44610736666) | 631s | 202s | present | present | gateway |
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | 591s | 211s | present | present | gateway |
+| [43996903765](https://github.com/joemccann/radon/actions/runs/43996903765) | 760s | 228s | 43.6s | 50.5s | gateway |
+
+Newest mixed scripts-rebuild p50 clock among those gateway-wall runs is
+591s (n=4; 10% is 59s). On 44612924566 torch + export are 86.6s of the
+171s build step after Exact app images authorized deploy. Cache-from
+the previous 40-hex SHA image is expected to reuse torch and skip the
+full layer export, about 60–80s of the 206s gateway job. A missing,
+all-zero, or non-40-hex `github.event.before` keeps buildcache only.
+`:latest` is not a cache donor. Ihash retags (gateway 26–40s) are a
+different class. Runner minutes fall with the skipped pip.
+
+**Change.** Gateway `cache-from` starts with
+`ghcr.io/joemccann/radon-model-gateway:${{ github.event.before }}` when
+that value is a real 40-hex SHA, then the existing buildcache and GHA
+scopes. Exact SHA tags, Darwin-before-publish, CIP-026 `pbounds-` skip,
+CIP-029 skip-load, ihash receipts, health, recovery, rollback, and the
+40-second stability window stay. No `needs` edge, test inventory,
+coverage, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Fail closed to build. Revert if a
+scripts-only main rebuild with an unchanged torch lock still runs
+`pip install ... torch==2.12.1+cpu`, if a pull request or first-push
+empty before SHA is used as a registry ref, if `:latest` becomes a
+cache or deploy donor, or if deploy no longer waits for gateway.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 206s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 44612924566 (job
+135874396489). Acceptance remains five comparable mixed scripts-rebuild
+deploys whose torch lock is unchanged, before and after: same-class p50
+at least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no
+worse than 10%; runner minutes no more than 20% higher. The first
+after-run still measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip034_gateway_image_cache_from.py`
+was red (3 failed: missing previous-SHA cache step) then green (3
+passed). Related cloud gateway image contracts 32 passed. YAML parses.
+Full suites, Vitest, Docker builds, and workflow lint are left to PR
+CI.
+
+## CIP-035 - copy scripts/ after the Next build in the node image (2026-11-20) - VALIDATING
+
+`COPY scripts/ ./scripts` sits above `bun run build`, so a scripts-only
+push invalidates the Next layer even though the compile reads only
+`scripts/config/market_holidays.json` and
+`scripts/config/market_early_closes.json`
+(`web/lib/marketCalendar.ts`). Other `scripts/` imports under `web/`
+are tests, which `.dockerignore` already excludes.
+
+Evidence, mixed run
+[44594349045](https://github.com/joemccann/radon/actions/runs/44594349045)
+job 135808679573 (`gh run view --json jobs` plus the node image log).
+Queue is excluded from the gain:
+
+| Step | Wall |
+|---|---|
+| bun install (root + web) | CACHED |
+| playwright install | 16.9s (uncached; separate from this COPY) |
+| COPY scripts/ | 4.1s |
+| bun run build (Turbopack 20.0s compile) | 24.7s |
+| export layers / cache-to / push | 8.0s / 12.1s / 84.3s |
+| node job wall | 171s, last image gate (gateway 122s) |
+
+CIP-002 deferred this move. After CIP-034 the gateway job is expected
+to drop, so the 171s node job becomes the image authorizer on
+scripts-only mixed deploys. Copying the two holiday tables before
+`COPY web/` + `bun run build`, then the rest of `scripts/` after the
+build, is expected to cache the 24.7s Next layer whenever holidays and
+`web/` are unchanged. Playwright cache misses stay CIP-036. Exact SHA
+tags, health, recovery, rollback, and the 40-second stability window
+stay. Runner minutes fall with the skipped compile.
+
+**Change.** `docker/app/Dockerfile.node` copies the two holiday JSON
+files before `COPY web/` and `bun run build`, then `COPY scripts/`
+after the `.next/cache` cleanup and before `USER radon`. bun install
+and playwright install stay ahead of the holiday COPY. No `needs`
+edge, test inventory, coverage, or exact-SHA image admission change.
+
+**Safety and revert trigger.** Revert if a scripts-only main rebuild
+with unchanged holiday tables and `web/` still runs
+`next build --experimental-build-mode=compile` for ~20s, if the image
+drops `scripts/` (newsfeed / relay need the tree), or if Next compile
+starts importing any other path under `scripts/`.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build node image | 171s | pending | TBD until 5 samples |
+
+Before is the node-image job wall on run 44594349045 (job
+135808679573). Acceptance remains five comparable mixed scripts-only
+deploys whose holiday tables and `web/` are unchanged, before and
+after: same-class p50 at least 10% and 15s faster; p95 no worse than
+5% or 15s; cold p50 no worse than 10%; runner minutes no more than
+20% higher. The first after-run still measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip035_node_scripts_after_build.py`
+was red (2 failed: holiday COPY missing) then green (2 passed).
+Related `test_app_images.py` + `test_app_plane_cutover_safety.py` 109
+passed / 2 skipped. Full suites, Vitest, Docker builds, and workflow
+lint are left to PR CI.
+
+## CIP-036 - cache-from the previous node SHA on rebuilds (2026-11-20) - VALIDATING
+
+The node job already reads `radon-node:buildcache` plus GHA scope.
+Scripts-only mixed run 44594349045 still missed earlier layers:
+buildcache imported in 0.8s, then playwright install ran 16.9s and
+`bun run build` ran 24.7s. Actions cache listing is uv/bun only.
+
+Evidence, attempt-1 mixed run
+[44594349045](https://github.com/joemccann/radon/actions/runs/44594349045)
+job 135808679573. Queue is excluded from the gain. CIP-035 moves
+`COPY scripts/` after the Next build so those layers can hit; this
+experiment supplies the previous 40-hex SHA image as cache-from so
+they actually do. A missing, all-zero, or non-40-hex
+`github.event.before` keeps buildcache only. `:latest` is not a cache
+donor. Ihash retags are a different class.
+
+Expected: playwright 16.9s plus the CIP-035 Next layer reuse when
+holidays and `web/` are unchanged, about 40s of the 171s node job.
+After CIP-034 the node job is more often the image authorizer.
+Runner minutes fall with the skipped install and compile.
+
+**Change.** Node `Select image cache` prepends
+`ghcr.io/joemccann/radon-node:${{ github.event.before }}` when that
+value is a real 40-hex SHA, then the existing buildcache inspect and
+GHA scope. Exact SHA tags, health, recovery, rollback, and the
+40-second stability window stay. No `needs` edge, test inventory,
+coverage, or exact-SHA image admission change. Python cache selection
+is unchanged.
+
+**Safety and revert trigger.** Fail closed to build. Revert if a
+scripts-only main rebuild with unchanged bun.lock / playwright still
+runs `playwright install chromium`, if a pull request or first-push
+empty before SHA is used as a registry ref, if `:latest` becomes a
+cache or deploy donor, or if deploy no longer waits for the node
+image.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build node image | 171s | pending | TBD until 5 samples |
+
+Before is the node-image job wall on run 44594349045 (job
+135808679573). Acceptance remains five comparable mixed scripts-only
+deploys, before and after: same-class p50 at least 10% and 15s
+faster; p95 no worse than 5% or 15s; cold p50 no worse than 10%;
+runner minutes no more than 20% higher. The first after-run still
+measures. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip036_node_image_cache_from.py`
+was red (1 failed: missing BEFORE_SHA) then green (3 passed). Related
+image workflow contracts 115 passed / 2 skipped. YAML parses. Full
+suites, Vitest, Docker builds, and workflow lint are left to PR CI.

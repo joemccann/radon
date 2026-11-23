@@ -30,7 +30,10 @@ updates are retired from `nightly_toolchain_update.py`; model pins move through
 reviewed CI artifacts. DeepSec package/version checks remain, while its smoke
 uses gateway inference. DeepSec process/revalidate commands use the bridge
 adapter, whose temporary loopback credential selects the pinned SDK's custom
-Responses provider without reading local subscription grants.
+Responses provider without reading local subscription grants. The reviewed
+toolchain lock (`scripts/runner/toolchain/package-lock.json`) overrides
+`@earendil-works/pi-coding-agent`'s undici to 8.12.2. The lock's other undici
+copy stays 7.30.1.
 
 The root runner updater still requires the latest exact-main CI run and its
 production deployment to succeed, including release tagging. Image and tag
@@ -52,10 +55,59 @@ Safety is where the runner runs, not what the script checks:
 | Agent cannot read operator files, ssh keys, `~/.radon`, Keychain | Dedicated macOS user `_radonbot`, standard (non-admin), hidden |
 | Agent cannot edit the runner | `run_loop.sh`, `loops/*.env`, the hooks, their `lib/` helpers, the `gh` guard and `gitconfig` installed root-owned in `/usr/local/radon-runner` |
 | Agent cannot plant a binary or git config the runner runs | The LaunchDaemon's `PATH` is `/opt/homebrew/bin:/usr/bin:/bin`; root-owned gateway client shims are prepended only for the agent. Every git the runner, the hooks and the agent run reads `/usr/local/radon-runner/gitconfig` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`), never `~/.gitconfig`, and the pre-run hook rebuilds the clone's `.git/config` before every phase |
-| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home |
+| No production credential in the clone | The clone gets no `.env`. The runner loads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from `RADON_RUNNER_DOTENV` or `/usr/local/radon-runner/dotenv-path` (never from the plist), then falls back to `~/.radon-runner.env`. `GH_TOKEN` loads from `~/.radon-runner.env`; model grants remain in the gateway and are stripped from child environments. `_radonbot` and every agent share a uid, so any file the runner can read, the agent can read. The runner unsets the Pushover keys in the agent process and sends every notification itself; each runner prompt tells the agent not to send `radon PR green` or list the absent keys under Next. `GH_TOKEN` stays so the agent can push. Point the dotenv at a Pushover-only file (step 8), not the operator's full Radon `.env`. Never put a production credential or an admin token in `~/.radon-runner.env` or anywhere in the bot's home. The [credential publisher](#credential-publisher) is off by default and does not change this until a later cutover |
 | Agent cannot merge or push `main` | A separate GitHub machine account with the Write role on this repo only, used through its classic token (`repo` plus `workflow`, so nightly CI work that edits `.github/workflows` can be pushed to a branch), plus the `main-review` repository ruleset on the default branch: 1 approving review, approval of the most recent push required, stale approvals dismissed on push. Its only bypass actor is the Repository admin role in pull-request mode, so an admin merges through a PR and never pushes `main` directly; the bot account is not exempt. The 27 required status checks stay in the classic branch protection on `main`, not in the ruleset. A token of the operator's own account would not do: it acts as the admin and bypasses the ruleset |
+| Agent network stays unfiltered until the operator enables the egress proxy | `/usr/local/radon-runner/enable-egress` must be a root-owned regular file that `_radonbot` cannot write. Without it, `install.sh` creates no `_radonegress` account, LaunchDaemon, pf anchor, or `/etc/pf.conf` edit. With it, that separate account runs a localhost proxy in log-only mode and a pf anchor that only passes and logs. The allowlist is the root-owned host file `/usr/local/radon-runner/egress-allowlist`, which is not in git. `mode block` is ignored |
 
 The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bot runner. `scripts/codemap_nightly.sh` is separate and opens a refresh PR for operator review and merge; the job never merges. Verify the live ruleset in step 8b.3 before enabling a new installation.
+
+## External run logs
+
+`com.radon.runner-logd` copies each run log out of the bot home. It stays uninstalled until `/usr/local/radon-runner/enable-runner-logd` exists as a regular file owned by root and not group- or world-writable. `install.sh` does not create that flag, the `_radonlog` account, `/Library/Radon/runner-logs`, the deploy key, or the LaunchDaemon. `com.radon.runner-update` calls the same installer every six hours, so a host without the flag stays inactive. Removing the flag and running the installer again unloads the job.
+
+`_radonlog` is a hidden account with a disabled login shell. It owns `/Library/Radon/runner-logs`. The bot can send datagrams to `ingest.sock` and cannot read the stored logs or the deploy key. One datagram is stored as one line (embedded line breaks become spaces). Lines are scrubbed before they are stored: credential shapes, assignments whose names are tokens, keys, or passwords, and values of environment variables with those names. The daemon pushes the store to the private repo named by `repo=` in `/usr/local/radon-runner/runner-logd.conf`. The installer writes `joemccann/radon-runner-logs` only when that file is absent. The key is mode 600 under `keys/` and only `_radonlog` can read it.
+
+`run_loop.sh` keeps the local log in the bot home either way. If the socket is missing, the run continues and the local log records `runner-logd: streaming unavailable`. Logging never blocks a run.
+
+Enable it on the Mac while every loop is idle:
+
+```bash
+sudo /opt/homebrew/bin/python3.13 -I -c 'import os; p="/usr/local/radon-runner/enable-runner-logd"; fd=os.open(p, os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_WRONLY, 0o644); os.close(fd); os.chown(p, 0, 0)'
+sudo /bin/bash /usr/local/radon-runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo cat /Library/Radon/runner-logs/keys/id_ed25519.pub
+```
+
+Add that public key as a write deploy key on the private repo named in the config. Pin the forge host key, then confirm the job and that the bot cannot read the private key:
+
+```bash
+sudo -u _radonlog /bin/sh -c 'umask 077; /usr/bin/ssh-keyscan -t ed25519 github.com > /Library/Radon/runner-logs/keys/known_hosts'
+sudo launchctl print system/com.radon.runner-logd
+sudo -u _radonbot test ! -r /Library/Radon/runner-logs/keys/id_ed25519
+```
+
+## Credential publisher
+
+`system/com.radon.publisher` is a LaunchDaemon that runs as `_radonpub` (hidden, not an admin, login shell disabled). That account is the only reader of `/Library/Radon/publisher/secrets`. Agents on `_radonbot` talk to `/Library/Radon/publisher/run/publisher.sock`. The socket accepts only four requests: push the caller's own `<prefix>/<YYYY-MM-DD>` branch, open or edit a draft PR for that branch, publish one private security report, or send the operator notification. The draft PR title and body and the private report are run through `scripts/credential_redaction.py` by the daemon before `gh` or `git` sees them. Each connection is bounded by a 30 s timeout. Merges, force-pushes, any other branch, and arbitrary git or API calls are refused. Every request is appended to `/Library/Radon/publisher/log/requests.log`, which `_radonbot` cannot read.
+
+`run_loop.sh`, the `gh` guard, and `security_post.sh` do not call the socket yet. Branch pushes still authenticate as they do today: `run_loop.sh` exports `GH_TOKEN` from `~/.radon-runner.env` into the agent environment, and `GIT_CONFIG_GLOBAL` points at the root-owned gitconfig whose `https://github.com` credential helper is `gh auth git-credential`. The private reports repository is separate: `security_post.sh` sets `GIT_SSH_COMMAND` to `ssh -i ~/.radon-runner-reports-key` and pushes `HEAD:main`. Pushover keys are read by the runner and unset in the agent process.
+
+The job is not installed unless `/usr/local/radon-runner/enable-publisher` is a regular file, not a symlink, owned by root, not group- or world-writable, with a parent directory held to the same bar. `install.sh` then creates the account and the empty secrets directory. It does not read or copy `~/.radon-runner.env`, the reports deploy key, or the Pushover dotenv. Removing the flag later does not stop a daemon that is already loaded; boot it out by hand.
+
+```bash
+sudo install -d -o root -g wheel -m 755 /usr/local/radon-runner
+sudo install -o root -g wheel -m 644 /dev/null /usr/local/radon-runner/enable-publisher
+sudo -u _radonbot test ! -w /usr/local/radon-runner/enable-publisher
+sudo -u _radonbot test ! -w /usr/local/radon-runner
+# After the loops are idle, from a reviewed checkout, or wait for com.radon.runner-update:
+sudo /path/to/radon/scripts/runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/github-token
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/reports-deploy-key
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/pushover-user
+sudo install -o _radonpub -g _radonpub_connect -m 600 /dev/null /Library/Radon/publisher/secrets/pushover-token
+# Write each value as _radonpub. Do not copy the bot's files with the installer.
+sudo -u _radonbot test ! -r /Library/Radon/publisher/secrets/github-token
+sudo launchctl print system/com.radon.publisher
+```
 
 ## Set up a new Mac
 
@@ -69,14 +121,40 @@ Where things live when you are done:
 | `/usr/local/radon-runner/hooks/`, `lib/`, `guard/<loop>/gh` | root | The loops' pre/post-run hooks, the helpers they and the `gh` guard run (copied from `scripts/`), and the guard shim |
 | `/Library/LaunchDaemons/com.radon.runner.<loop>.plist` | root | The nightly schedule, run as `_radonbot` |
 | `/usr/local/radon-runner/dotenv-path` | root, 644 | Absolute path to the Pushover dotenv. Written only when install is run with `RADON_RUNNER_DOTENV`. A later install without that var leaves the file in place. Never a secret value |
+| `/usr/local/radon-runner/enable-egress` | root, not writable by `_radonbot` | Operator-created switch. Absent means the egress proxy is not installed |
+| `/usr/local/radon-runner/egress-allowlist` | root, not writable by `_radonbot` | Host allowlist. Not in git. `scripts/runner/egress-allowlist.example` is the empty template |
+| `/Library/Radon/egress/log/decisions.log` | `_radonegress`, not writable by `_radonbot` | Log-only would-block records. `egress_report.py` summarizes them by day |
 | `/Users/_radonbot/.radon-runner.env` | bot, 600 | `GH_TOKEN` and, as legacy fallback, `PUSHOVER_USER` / `PUSHOVER_TOKEN`. The agent can read it (it runs as the bot); the runner unsets the Pushover keys in the agent process. Never a production or admin credential |
 | `/Library/Radon/model-gateway/identity` | root, 600 | Dedicated model-only SSH transport key; never a provider or operator key |
 | `/Users/_radonbot/radon-runner/work/<loop>` | bot | Tonight's clone, deleted and re-cloned every run |
-| `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The run log, kept 14 days |
+| `/Users/_radonbot/radon-runner/logs/<loop>/<date>.log` | bot, 700 | The local run log, kept 14 days. The bot can edit it |
+| `/usr/local/radon-runner/enable-runner-logd` | root, not group or world writable | Enable flag for the external log daemon. The installer never creates it |
+| `/Library/Radon/runner-logs` | `_radonlog` | Scrubbed run logs and the deploy key. Absent until the flag is enabled |
+| `/Library/LaunchDaemons/com.radon.runner-logd.plist` | root | `system/com.radon.runner-logd`, run as `_radonlog`. Absent until the flag is enabled |
 | `/Users/_radonbot/radon-runner/state/<loop>` | bot, 700 | Per-loop state the runner never deletes: the security loops' private `scratch/`, deliver record, `held.git` (unreleased P0/P1 branches) and `keep/` |
 | `/Users/_radonbot/radon-runner/tmp` | bot, 700 | The daemons' `TMPDIR`, so the bot's temporary files never land in the shared, world-writable `/tmp` |
 | `/Users/_radonbot/.radon-runner-reports-key` | bot, 600 | Write deploy key for the private `joemccann/radon-security-reports`, used by the post-run hook. The agent runs as the same user and can read it, as it could read the old wrapper's key; a deploy key reaches only that one repository |
+| `/usr/local/radon-runner/enable-publisher` | root, not writable by `_radonbot` | Absent unless an operator creates it. While it is missing, untrusted, or writable by the bot, `install.sh` creates no `_radonpub` account, no publisher directory, and no `com.radon.publisher` job, and it copies no credential |
+| `/Library/Radon/publisher/secrets` | `_radonpub`, 700 | Created empty only after the flag passes. Holds `github-token`, `reports-deploy-key`, `pushover-user`, and `pushover-token`. The installer never reads or copies the bot's files into it |
 | Operator login keychain: `github-radon-runner-bot`, `github-radon-runner-bot-token` | operator | The bot's GitHub password and token, for rotation |
+
+### Egress proxy (off by default)
+
+Nothing is dropped. The proxy records destinations that are not in the host allowlist and still forwards them. `mode block` is ignored. Run this on the Mac mini only when you want log-only observation. Replace the clone path with the checkout you install from.
+
+```bash
+sudo install -d -o root -g wheel -m 755 /usr/local/radon-runner
+sudo touch /usr/local/radon-runner/enable-egress
+sudo chown root:wheel /usr/local/radon-runner/enable-egress
+sudo chmod 644 /usr/local/radon-runner/enable-egress
+sudo install -o root -g wheel -m 644 /dev/null /usr/local/radon-runner/egress-allowlist
+sudo /bin/bash /path/to/clone/scripts/runner/install.sh documentation ci-performance performance testing reliability security security-deepsec
+sudo /bin/launchctl print system/com.radon.egress-proxy
+sudo -u _radonbot test ! -w /usr/local/radon-runner/enable-egress
+sudo /opt/homebrew/bin/python3.13 -I /usr/local/radon-runner/egress_report.py
+```
+
+Edit `/usr/local/radon-runner/egress-allowlist` as root before expecting allow decisions. One `host`, `ipv4`, or `ipv6` rule per line. Do not make the flag or the allowlist writable by `_radonbot`.
 
 ### 1. Prerequisites (operator)
 
@@ -585,7 +663,7 @@ When a security phase ends with no `latest-report-<phase>.md`, the post-run hook
 
 Before the post-run hook commits a phase report to the private reports repository it runs the report through the canonical scrubber, `scripts/credential_redaction.py`, from the root-owned `$PREFIX/lib` copy with `python3 -I` (it is in `LIB_FILES`), and then through the hook's own `sed` pass. The canonical pass goes first so YAML block-scalar bodies are consumed before any line-oriented rule sees them and so compound credential names share one key alphabet with the rest of the repo; the `sed` pass only adds the key classes the module does not carry (`credential`, a bare `-key` / `_key` suffix). Together they keep findings, routes and `file:line` but remove secret literals: credential assignments, block-scalar values, cookie and bearer headers, known provider key prefixes, JWTs, and PEM / OpenSSH / PGP private-key blocks (complete or cut off). A failed scrub publishes nothing. A new secret class belongs in `scripts/credential_redaction.py`, which `scripts/nightly_issue_format.py` and this hook both consume.
 
-The deliver phase's "ready to merge" line is never the agent's assertion. The post-run hook re-verifies every claimed PR live before the operator sees it: the URL must be a `pull/<number>` URL on the configured host and `owner/repo` (the number, not the URL, is what goes to `gh`, so `-R` stays authoritative), the PR must be OPEN, same-repo and on the loop's branch prefix, its `headRefOid` must still equal the head SHA the deliver record was marked green at, and its `statusCheckRollup` must be non-empty and wholly `SUCCESS` / `SKIPPED` / `NEUTRAL` ("no checks reported" is pending, not green). A claim of zero PRs is accepted only when the open-PR listing ran, returned fewer than 100 rows, and contained no same-repo PR on the loop's branch prefix. A failed query, a timeout, or a full page is not absence. Anything else is `INCOMPLETE: unverified-pr-url` or `INCOMPLETE: unverified-zero-pr-claim`, the phase exits 75, and the next fire resumes the same branch and PR.
+The deliver phase's "ready to merge" line is never the agent's assertion. The post-run hook re-verifies every claimed PR live before the operator sees it: the URL must be a `pull/<number>` URL on the configured host and `owner/repo` (the number, not the URL, is what goes to `gh`, so `-R` stays authoritative), the PR must be OPEN, same-repo and on the loop's branch prefix, its `headRefOid` must still equal the head SHA the deliver record was marked green at, and its `statusCheckRollup` must be non-empty, wholly `SUCCESS` / `SKIPPED` / `NEUTRAL` ("no checks reported" is pending, not green), and must carry every check name the workflow files at the verified head AND at the forge's `main` promise (the hook fetches `main` from the configured URL into a scratch repository it owns, since the clone and the bot's git config are agent-writable; `nightly_deliver.py expected-checks --rev <sha>` on each, both sets required; an all-green rollup holding only the fast PR-body check is pending, a branch that deletes a job cannot lower the floor, and unreadable workflow files verify nothing). A claim of zero PRs is accepted only when the open-PR listing ran, returned fewer than 100 rows, and contained no same-repo PR on the loop's branch prefix. A failed query, a timeout, or a full page is not absence. Anything else is `INCOMPLETE: unverified-pr-url` or `INCOMPLETE: unverified-zero-pr-claim`, the phase exits 75, and the next fire resumes the same branch and PR.
 
 Loops without `PHASES` (reliability, ci-performance, documentation, testing) run audit, remediate and deliver in one process. They post one comment, `phase=audit`, with that process's exit. They do not emit three codes. `performance` posts its real phase name (`perf`).
 

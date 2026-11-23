@@ -260,7 +260,10 @@ class TestImageBuildCarriesPublicEnv:
 def _image_cache_step(job: dict) -> dict:
     step = next(item for item in job["steps"] if item.get("id") == "image-cache")
     assert step["name"] == "Select image cache"
-    assert set(step["env"]) == {"IMAGE_REPO", "GHA_SCOPE"}
+    env_keys = set(step["env"])
+    required = {"IMAGE_REPO", "GHA_SCOPE"}
+    allowed = required | {"BEFORE_SHA"}
+    assert required <= env_keys <= allowed
     return step
 
 
@@ -340,7 +343,10 @@ class TestImageBuildUsesRemoteCache:
         build = steps[build_index]
         smoke = steps[build_index + 1]["run"]
 
-        assert build["with"]["load"] is True
+        # CIP-033: main publish skips the docker-load tarball; PRs still load.
+        assert build["with"]["load"] == (
+            "${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}"
+        )
         assert "docker run" in smoke
         assert "ghcr.io/joemccann/radon-python:${{ github.sha }}" in smoke
         assert "--pull=never" in smoke

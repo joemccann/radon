@@ -34,6 +34,28 @@ def test_expire_skips_always_publish_held_rows(monkeypatch):
 
 
 
+def test_expire_skips_held_hartnett_and_still_drops_ordinary_bofa(monkeypatch):
+    calls = []
+    macro = "Michael Hartnett. Hyperscaler capex is undervalued on an FCF valuation."
+
+    def fake(sql, args=(), **kw):
+        calls.append((sql, args))
+        if "SELECT" in sql:
+            return [
+                (1, "hartnett-key", "Bofa", "the flow show", "The Flow Show.pdf",
+                 json.dumps({"excerpt": macro})),
+                (2, "stock-key", "BofA Global Research", "acme initiation", "Acme initiation.pdf", "{}"),
+            ]
+        return [("stock-key",)]
+
+    monkeypatch.setattr(publish, "hrana_execute", fake)
+    count = publish.expire_stale_held(now=datetime(2026, 11, 23, 15, 0, tzinfo=timezone.utc))
+    assert count == 1
+    updates = [args for sql, args in calls if "UPDATE" in sql and "HELD_EXPIRED" in sql]
+    assert updates and updates[0][1] == "stock-key"
+    assert "hartnett-key" not in updates[0]
+
+
 def test_expire_still_drops_ordinary_held_rows(monkeypatch):
     calls = []
 

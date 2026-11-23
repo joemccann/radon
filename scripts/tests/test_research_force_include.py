@@ -57,11 +57,42 @@ def test_rubner_detection_variants(identity, filename, page_text, expected):
         assert desk is None or desk.name != "citadel_rubner"
 
 
-def test_bofa_and_db_desks_are_not_always_publish():
+def test_bofa_hartnett_desks_always_publish_and_db_does_not():
     bofa = force_include.match(ident("BofA Global Research", "the flow show"))
+    fms = force_include.match(ident("Bofa", "global fund manager survey"))
     db = force_include.match(ident("Deutsche Bank Research", "db positioning data"))
-    assert bofa is not None and bofa.always_publish is False
+    assert bofa is not None and bofa.always_publish is True
+    assert fms is not None and fms.always_publish is True
     assert db is not None and db.always_publish is False
+
+
+@pytest.mark.parametrize("publisher,series,filename,author,expected", [
+    ("Bofa", "the flow show", None, None, True),
+    ("BofA", "european fund manager survey", None, None, True),
+    ("baml", "latam fund manager survey", None, None, True),
+    ("Merrill", "", "BofA Global FMS.pdf", None, True),
+    ("BofA Securities", "the biggest picture", None, "Michael Hartnett", True),
+    ("unknown", "weekly macro", None, "Hartnett", True),
+    ("Goldman Sachs", "the flow show", "the flow show friday.pdf", None, False),
+    ("Goldman Sachs", "equity strategy", None, None, False),
+    ("BofA Global Research", "equity strategy", None, None, False),
+])
+def test_hartnett_series_and_author_match(publisher, series, filename, author, expected):
+    identity = ident(publisher, series)
+    assert force_include.matches(identity, filename=filename, author=author) is expected
+    assert force_include.always_publish(identity, filename=filename, author=author) is expected
+
+
+def test_hartnett_citation_inside_another_bank_note_is_not_force_included():
+    page = "Goldman Sachs equity strategy. " + ("Rates moved. " * 40) + "Unlike Hartnett we stay underweight."
+    identity = ident("Goldman Sachs", "equity strategy")
+    assert force_include.matches(identity, page_text=page) is False
+
+
+def test_bofa_hartnett_byline_matches_without_a_series_title():
+    page = "The Biggest Picture\nMichael Hartnett\nHyperscaler capex is undervalued on an FCF valuation."
+    identity = ident("Bofa", "the biggest picture")
+    assert force_include.always_publish(identity, page_text=page) is True
 
 
 def test_real_identity_from_bofa_flow_show_filename():

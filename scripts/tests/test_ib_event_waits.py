@@ -404,3 +404,78 @@ def test_get_historical_data_bounds_a_wedged_cancel(MockIB):
     with patch("clients.ib_client.HISTORICAL_CANCEL_GRACE_SECS", 0.05):
         with pytest.raises(IBTimeoutError, match="cancel did not return"):
             client.get_historical_data(MagicMock(), timeout=0.05)
+
+
+def _spec_ib(MockIB):
+    """A double restricted to the real ``ib_insync.IB`` interface.
+
+    The pinned dependency exposes ``positionEvent`` / ``openOrderEvent`` but
+    no ``*EndEvent``; ``getattr(ib, "positionEndEvent", None)`` is None on it
+    (DS-2026-11-20-01). A mock spec'd on the class plus its declared event
+    names reproduces that interface exactly.
+    """
+    import ib_insync
+
+    mock_ib = MagicMock(spec=dir(ib_insync.IB) + list(ib_insync.IB.events))
+    MockIB.return_value = mock_ib
+    return mock_ib
+
+
+def test_pinned_ib_insync_has_no_snapshot_end_events():
+    import ib_insync
+
+    assert not hasattr(ib_insync.IB, "positionEndEvent")
+    assert not hasattr(ib_insync.IB, "openOrderEndEvent")
+    assert "positionEndEvent" not in ib_insync.IB.events
+    assert "openOrderEndEvent" not in ib_insync.IB.events
+
+
+@patch("clients.ib_client.IB")
+def test_get_positions_proves_end_when_blocking_request_returns(MockIB):
+    mock_ib = _spec_ib(MockIB)
+    pos = MagicMock()
+    pos.avgCost = 23.81
+    pos.position = 75
+    mock_ib.positions.return_value = [pos]
+    mock_ib.reqPositions.return_value = [pos]
+    client = _connected_client(mock_ib)
+
+    assert client.get_positions(refresh=True) == [pos]
+    assert client._positions_snapshot_ended is True
+    mock_ib.sleep.assert_not_called()
+
+
+@patch("clients.ib_client.IB")
+def test_get_positions_does_not_prove_end_when_request_raises(MockIB):
+    mock_ib = _spec_ib(MockIB)
+    mock_ib.positions.return_value = []
+    mock_ib.reqPositions.side_effect = TimeoutError("request lapsed")
+    client = _connected_client(mock_ib)
+
+    assert client.get_positions(refresh=True) == []
+    assert client._positions_snapshot_ended is False
+
+
+@patch("clients.ib_client.IB")
+def test_get_open_orders_proves_end_when_blocking_request_returns(MockIB):
+    mock_ib = _spec_ib(MockIB)
+    trades = [MagicMock()]
+    mock_ib.openTrades.return_value = trades
+    mock_ib.reqAllOpenOrders.return_value = trades
+    client = _connected_client(mock_ib)
+
+    assert client.get_open_orders() == trades
+    assert client._open_orders_snapshot_ended is True
+    mock_ib.sleep.assert_not_called()
+
+
+@patch("clients.ib_client.IB")
+def test_get_open_orders_does_not_prove_end_when_request_raises(MockIB):
+    mock_ib = _spec_ib(MockIB)
+    mock_ib.openTrades.return_value = []
+    mock_ib.reqAllOpenOrders.side_effect = TimeoutError("request lapsed")
+    client = _connected_client(mock_ib)
+
+    with pytest.raises(TimeoutError):
+        client.get_open_orders()
+    assert client._open_orders_snapshot_ended is False

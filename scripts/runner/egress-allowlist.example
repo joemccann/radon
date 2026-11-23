@@ -1,0 +1,10 @@
+# Radon runner egress allowlist example.
+# Copy to /usr/local/radon-runner/egress-allowlist
+# Owner must be root. The runner account must not be able to write it.
+# This template names no destination. One rule per line.
+# A mode other than log-only is ignored. Blocking is not implemented.
+#
+# mode log-only
+# host <HOST>
+# ipv4 <IPV4>
+# ipv6 <IPV6>

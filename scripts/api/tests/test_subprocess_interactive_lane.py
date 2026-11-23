@@ -206,3 +206,51 @@ class TestInteractiveAdmissionWait:
 
         raw = asyncio.run(run())
         assert raw.ok is True, raw.stderr
+
+
+SHARE_GENERATORS = (
+    "generate_regime_share.py",
+    "generate_gex_share.py",
+    "generate_vcg_share.py",
+    "generate_cta_share.py",
+)
+
+
+class TestShareGeneratorsAreInteractive:
+    """2026-11-19: POST /regime/share 502'd all session. The generator runs
+    with a 120s budget, so it was classed as batch work and refused the
+    instant cri/vcg/breadth scans held the two batch slots. A share card is a
+    click with no cache and no scan-gate backoff: it takes the interactive
+    lane and waits for a slot like any other user request."""
+
+    @pytest.mark.parametrize("script", SHARE_GENERATORS)
+    def test_share_generator_takes_the_interactive_lane(self, script, monkeypatch):
+        _configure(monkeypatch, hard_cap=4, wait_s=10.0)
+        assert subprocess_mod._lane_capacity(script, 120) == 3
+        assert subprocess_mod._admission_wait_s(script, 120) == 10.0
+
+    def test_share_admits_while_scans_hold_the_batch_lane(
+        self, stub_scripts, monkeypatch
+    ):
+        (stub_scripts / "generate_regime_share.py").write_text(_FAST_STUB)
+        _configure(monkeypatch, hard_cap=4, wait_s=0.0)
+
+        async def run():
+            scans = [
+                asyncio.create_task(
+                    subprocess_mod.run_script("cri_scan.py", ["--json"], timeout=180)
+                ),
+                asyncio.create_task(
+                    subprocess_mod.run_script("vcg_scan.py", ["--json"], timeout=120)
+                ),
+            ]
+            await _await_slots_held(2)
+            try:
+                return await subprocess_mod.run_script(
+                    "generate_regime_share.py", ["--json", "--no-open"], timeout=120
+                )
+            finally:
+                await _drain(scans)
+
+        share = asyncio.run(run())
+        assert share.ok is True, share.error

@@ -10,6 +10,8 @@ export interface ProvisionalMeta {
   source: ProvisionalSource;
   quote_time: string | null;
   scan_time: string;
+  /** Legs the writer held at their last official close (Cboe SKEW posts after the close). */
+  carried?: string[];
 }
 
 export interface LiveSnapshot<Row> {
@@ -19,6 +21,7 @@ export interface LiveSnapshot<Row> {
   current?: unknown;
   source: ProvisionalSource | null;
   quote_time: string | null;
+  carried?: string[];
 }
 
 interface SeriesPayload<Row> {
@@ -31,6 +34,10 @@ interface SeriesPayload<Row> {
 }
 
 type Execute = (statement: { sql: string; args: string[] }) => Promise<{ rows: ArrayLike<unknown> }>;
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
 
 export const LIVE_SNAPSHOT_SQL =
   "SELECT payload FROM scan_snapshots WHERE service = ? ORDER BY scan_time DESC LIMIT 1";
@@ -51,6 +58,7 @@ export function parseLiveSnapshot<Row extends { date: string }>(
     if (live.row !== null && !isRow(live.row)) return null;
     if (live.source !== null && live.source !== "ib" && live.source !== "cboe_delayed") return null;
     if (live.quote_time !== null && typeof live.quote_time !== "string") return null;
+    if (live.carried !== undefined && !isStringList(live.carried)) return null;
     return live as unknown as LiveSnapshot<Row>;
   } catch {
     return null;
@@ -96,7 +104,12 @@ export function appendProvisionalRow<Row extends { date: string }, P extends Ser
     ...("data_date" in payload ? { data_date: row.date } : {}),
     ...("as_of" in payload ? { as_of: row.date } : {}),
     ...(payload.status !== undefined ? { status: expected && row.date >= expected ? "ok" : payload.status } : {}),
-    provisional: { source: live.source, quote_time: live.quote_time, scan_time: live.scan_time },
+    provisional: {
+      source: live.source,
+      quote_time: live.quote_time,
+      scan_time: live.scan_time,
+      ...(live.carried?.length ? { carried: live.carried } : {}),
+    },
   };
 }
 
@@ -106,5 +119,6 @@ const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York",
 export function provisionalNote(provisional: ProvisionalMeta): string {
   const source = provisional.source === "ib" ? "IB index bars" : "Cboe 15-minute delayed quotes";
   const time = provisional.quote_time ? provisional.quote_time.slice(11, 16) : ET_TIME.format(new Date(provisional.scan_time));
-  return `Current session is provisional: ${source} as of ${time} ET, until the official close posts.`;
+  const held = provisional.carried?.length ? `, ${provisional.carried.join(" and ")} held at its last official close` : "";
+  return `Current session is provisional: ${source} as of ${time} ET${held}, until the official close posts.`;
 }

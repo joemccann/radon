@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ATS_VENUE_SHARE_REFRESH, MARGIN_DEBT_REFRESH, type RefreshSchedule } from "@/lib/refreshSchedule";
+import { ATS_VENUE_SHARE_REFRESH, IV_RANK_REFRESH, MARGIN_DEBT_REFRESH, type RefreshSchedule } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
 
 /** A once-a-day 22:10 UTC writer: the rail fixture these cases are written against. */
@@ -182,5 +182,25 @@ describe("computeFreshnessRail — release model", () => {
   it("still reports an absent date as unknown", () => {
     const rail = computeFreshnessRail(MARGIN_DEBT_REFRESH, null, new Date("2026-08-26T22:30:00Z"), "release");
     expect(rail.unknown).toBe(true);
+  });
+});
+
+describe("IV RANK rail after the 5-minute ET window", () => {
+  // Same instant T-221 pinned in web/e2e/ivrank-tab.spec.ts: 17:00 ET
+  // Wednesday, panel holding Tuesday. The daily 22:10 UTC fixture above
+  // is BEHIND with fill 95.14; IV_RANK_REFRESH now includes 09:00-16:55 ET.
+  it("is DUE with a full track: the 16:55 ET tick already fired after the close", () => {
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET);
+    expect(rail.behind).toBe(true);
+    expect(rail.due).toBe(true);
+    expect(rail.overdue).toBe(false);
+    expect(rail.awaitingSession).toBe("2026-08-26");
+    expect(rail.lastSampleAt.toISOString()).toBe("2026-08-26T20:55:00.000Z");
+    expect(rail.nextSampleAt.toISOString()).toBe("2026-08-26T22:10:00.000Z");
+    expect(rail.elapsedFraction).toBe(1);
+    expect((rail.elapsedFraction * 100).toFixed(2)).toBe("100.00");
+    // The 22:10 UTC final is still 1h 10m away; the rail paints Due because
+    // the 16:55 ET tick that owed today's bar has already fired.
+    expect(formatCountdown(rail.msRemaining)).toBe("1h 10m");
   });
 });

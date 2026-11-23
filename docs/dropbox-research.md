@@ -7,6 +7,13 @@ captions against the current canonical portfolio/watchlist before writing. Previ
 receive the same check; an eligibility refusal cancels pending siblings in that
 work batch, preserves their payloads and prior review, and records the terminal
 reason. Explicit operator re-review must pass the current gates again.
+An always-publish Hartnett desk (The Flow Show, a BofA Fund Manager Survey, or a
+Hartnett byline) skips only an unresolved-subject hold at that write. A resolved
+off-book issuer still refuses it.
+
+`research.identify` maps the MarketDesk folder names `BofA`, `BAML`, `Merrill`,
+and `BofA Securities` to BofA Global Research. `ING`, `ANZ`, `ZKB`, and `SocGen`
+keep that casing instead of title case.
 
 ## Components and data boundary
 
@@ -48,14 +55,14 @@ Knowledge distill (`scripts/knowledge/distill.py` → `complete_text_json`) and 
 | cursor | — | Unwired (no vision HTTP path). |
 | codex | `${CODEX_HOME:-~/.codex}/auth.json` ChatGPT+Codex OAuth `tokens.access_token` | Skip rung when auth.json absent. |
 | antigravity | [Antigravity CLI setup](oauth-subscription-auth.md#radon-http-model-ladder-server) | Text only. |
-| nvidia | `NVIDIA_API_KEY` (always OK) | First-class before Cerebras when keyed. **Text** default `nvidia/nemotron-3-ultra-550b-a55b` (override `NVIDIA_TEXT_MODEL` / `NVIDIA_MODEL`). **Vision** default `nvidia/nemotron-3.5-super-vl-120b-a12b`; on timeout/error falls back to `meta/llama-3.2-90b-vision-instruct` (`NVIDIA_VISION_MODEL`). Defaults are chosen by a live chat probe on the production key, not `/v1/models`: the listing includes ids that answer 404 "Function ... not found for account" (`nemotron-3-super-120b-a12b`, `llama-3.2-11b-vision-instruct`, 2026-11-01). |
+| nvidia | `NVIDIA_API_KEY` (always OK) | First-class before Cerebras when keyed. Paused by default. Unset model is the catalog's newest flagship (`NVIDIA_TEXT_MODEL` / `NVIDIA_VISION_MODEL` / `NVIDIA_MODEL` override). No second pinned vision model. |
 | cerebras | `CEREBRAS_API_KEY` | Last rung; nothing is tried after it. `RADON_LADDER_PAUSED_PROVIDERS` (comma list, gateway env) skips a rung without removing its key. `engine.PAUSED_BY_DEFAULT` pauses `nvidia` and `cerebras` in every environment (2026-11-01); the env list adds to it and cannot unpause those two. Uses available credit; prepaid auto-reload stays OFF. |
 
 **NVIDIA rate limit.** The key is free but limited per key (about 40 requests a minute). Production inference paces inside the model gateway. The runtime forces the serving state file to `/var/lib/radon/model-cache/nvidia-rate.json`. A host `RADON_NVIDIA_RATE_STATE` value is not that file. `RADON_NVIDIA_RPM` still defaults to 20. When no slot frees within `RADON_NVIDIA_LADDER_MAX_WAIT_S` (default 15 s) the rung is skipped as `nvidia:rate_limited_local` and nothing is sent. A 429 starts a 30 s cooldown and falls through without retrying in place (and without trying the vision fallback model); five in a row, or any 401/403, pause NVIDIA for 15 minutes. A 401/403 logs `NVIDIA AUTHORIZATION FAILED` at ERROR. Every non-200 failure logs its status and a redacted body excerpt (at most 200 characters). Injected test `post=` callables are never paced. Do not clear a trip by editing a home-directory copy. Details: [model-gateway.md](model-gateway.md) and [runner.md](runner.md#nvidia-rate-limits).
 
 Cerebras is the last resort in every order, including a caller's `providers=` override: `_run_ladder` moves it to the end, so nothing is tried after it and its failure exhausts the ladder. `scripts/tests/test_cerebras_last_rung.py` pins this for the shared, CTA vision and SLM tagger orders and for the nightly loops' `fx:cerebras` rung.
 
-The order is `MODEL_LADDER_ORDER` in `scripts/model_gateway/contracts.py` (Antigravity, Anthropic, Grok, Cursor, Codex, NVIDIA, Cerebras). Callers may pass `providers=`; unknown names are ignored. There is no env override of that tuple. Grok is xAI via the existing `~/.grok/auth.json` grant (`XAI_MODEL` / `GROK_MODEL`). Antigravity is the documented `agy -p` CLI only (text; images record `image_unsupported` and the ladder continues). There is no separate Google HTTP API on this rung.
+The order is `MODEL_LADDER_ORDER` in `scripts/model_gateway/contracts.py` (Antigravity, Anthropic, Grok, Cursor, Codex, NVIDIA, Cerebras). Callers may pass `providers=`; unknown names are ignored. There is no env override of that tuple. Grok is xAI via the existing `~/.grok/auth.json` grant; unset model is `grok-latest` (`XAI_MODEL` / `GROK_MODEL` override). Antigravity is the documented `agy -p` CLI only (text; blank model is the account default; images record `image_unsupported` and the ladder continues). There is no separate Google HTTP API on this rung. Cursor is unwired and has no model id.
 
 Anthropic replies are read from every `text` block, including a list of text spans, and from a Messages SSE body when the HTTP body is not one JSON document. Thinking blocks are not the answer. The gateway client (`scripts/clients/model_ladder.py`) raises `ModelResponseError` when the gateway reports an incomplete or invalid reply, for every caller. A reply the caller's `accept` rejects resumes the next rung through the gateway continuation.
 
@@ -85,7 +92,7 @@ the response body before validating completion.
 
 ## Hosted Nemotron defaults
 
-Nemotron 3.5 Super VL is the default NVIDIA vision model and Nemotron 3 Ultra the default text model (2026-11-01), because the prior defaults were not callable on the production key. Only those two NVIDIA ids receive `reasoning_effort: none` and API `stream: false`; the Llama 90B fallback and other providers receive neither. Transport reads remain bounded and existing JSON/grounding validators remain authoritative. Provider order and embeddings do not change. The [pilot quality gates](nemotron-super-vl-pilot.md) were not run before promotion. `RADON_RESEARCH_MODEL` does not select NVIDIA image models.
+NVIDIA's unset model is the catalog's newest flagship, for text and vision (operator, 2026-11-22). Any `nvidia/nemotron…` id still sends `reasoning_effort: none` and API `stream: false`. Other providers and a non-Nemotron override receive neither. Transport reads remain bounded and existing JSON/grounding validators remain authoritative. Provider order and embeddings do not change. `RADON_RESEARCH_MODEL` does not select NVIDIA image models.
 
 ## Final copy certificate
 

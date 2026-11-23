@@ -159,40 +159,104 @@ pr_number_in_repo() {
 # `//` only falls through on null, so reading the conclusion directly left an
 # EMPTY token that bash word splitting then dropped -- `SUCCESS,` verified as
 # wholly green while a check was still running. Every entry yields a
-# non-empty token now. A claim of ZERO PRs is accepted only by
+# non-empty token now. An all-green rollup is still PENDING when it is a
+# SUBSET of the suite: the PR-body check lands in seconds, long before the
+# pytest and Vitest shards register on the head, so every name the clone's
+# workflow files promise must be present (the same rule nightly_deliver's
+# classify_checks applies in the watch step). Unreadable expectations are not
+# a license: nothing verifies. A claim of ZERO PRs is accepted only by
 # no_loop_pr_exists: the listing ran, came back short of the page limit, and
 # held no same-repo PR on this prefix. A failed query or a full page is not
 # absence.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
-  local tok n fields state branch cross head rollup conclusion count=0
+  local tok n fields state branch cross head rollup names conclusion expected floor count=0
   if [[ "${2:-}" == 0 ]]; then
     no_loop_pr_exists
     return
   fi
+  # The expectations come from the workflow blobs committed at the head the
+  # PR was verified at, never from the clone's working tree or index, both of
+  # which the agent phase controls. An unknown commit verifies nothing.
+  [[ -n "${3:-}" ]] || return 1
+  expected="$(expected_check_names "$3")" || return 1
+  [[ -n "$expected" ]] || return 1
+  # The head's own files are a floor the agent's branch could lower by
+  # deleting a job, so the names main promises are required as well. The
+  # tip comes from the forge by the configured URL, and an object the agent
+  # fetched cannot stand in for the commit the forge named.
+  floor="$(forge_main_check_names)" || return 1
+  expected="$(printf '%s\n%s\n' "$expected" "$floor" | sort -u)"
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
         n="$(pr_number_in_repo "$tok")" || return 1
         fields="$(net_bounded "$GH" pr view "$n" -R "$GH_REPO" \
           --json state,headRefName,isCrossRepository,headRefOid,statusCheckRollup \
-          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | ((.status // "") | ascii_upcase) as $st | ((.conclusion // "") | ascii_upcase) as $cc | ((.state // "") | ascii_upcase) as $se | if $st != "" and $st != "COMPLETED" then "PENDING" elif $cc != "" then $cc elif $se != "" then $se else "PENDING" end] | join(","))] | join(" ")' \
+          -q '[(.state // ""), (.headRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""), ([.statusCheckRollup[]? | ((.status // "") | ascii_upcase) as $st | ((.conclusion // "") | ascii_upcase) as $cc | ((.state // "") | ascii_upcase) as $se | if $st != "" and $st != "COMPLETED" then "PENDING" elif $cc != "" then $cc elif $se != "" then $se else "PENDING" end] | join(",")), ([.statusCheckRollup[]? | ((.name // .context // "") | gsub("\\s+"; ""))] | join(","))] | join(" ")' \
           2>/dev/null || true)"
-        read -r state branch cross head rollup <<< "$fields"
+        read -r state branch cross head rollup names <<< "$fields"
         [[ "$state" == OPEN && "$cross" == false ]] || return 1
         [[ "$branch" == "$PR_BRANCH_PREFIX"* ]] || return 1
         [[ -n "$head" && "$head" == "$3" ]] || return 1
-        [[ -n "$rollup" ]] || return 1
+        [[ -n "$rollup" && -n "$names" ]] || return 1
         for conclusion in ${rollup//,/ }; do
           case "$conclusion" in
             SUCCESS|SKIPPED|NEUTRAL) ;;
             *) return 1 ;;
           esac
         done
+        for tok in $expected; do
+          [[ ",$names," == *",$tok,"* ]] || return 1
+        done
         count=$((count + 1)) ;;
     esac
   done
   [[ "$count" -gt 0 && "$count" == "$2" ]]
+}
+
+# The check names the forge's refs/heads/main promises, or non-zero. The
+# clone's .git (config, refs, object store), the bot's ~/.gitconfig and its
+# remote config are all agent-writable during the phase: git honours
+# insteadOf, sshCommand and proxy settings from any of them, and `git show`
+# does not hash-verify the objects it reads, so a forged tree stored under
+# main's genuine id would answer for it. Main is therefore fetched fresh
+# from the configured URL into a scratch repository this hook creates, with
+# global and system config switched off, and its blobs are read there.
+# Nothing agent-owned is read.
+forge_main_check_names() {
+  local scratch tip names
+  [[ -n "${REPO_URL:-}" ]] || return 1
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/radon-tip.XXXXXX")" || return 1
+  if git init -q --bare "$scratch" 2>/dev/null \
+    && GIT_DIR="$scratch" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+       net_bounded git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+       fetch -q --depth 1 "$REPO_URL" refs/heads/main 2>/dev/null \
+    && tip="$(GIT_DIR="$scratch" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+       git rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" \
+    && [[ "$tip" =~ ^[0-9a-f]{40}$ ]] \
+    && names="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null expected_check_names "$tip" "$scratch")" \
+    && [[ -n "$names" ]]; then
+    rm -rf "$scratch"
+    printf '%s\n' "$names"
+    return 0
+  fi
+  rm -rf "$scratch"
+  return 1
+}
+
+# The check names the workflow files committed at $1 promise on every PR
+# head, one whitespace-stripped token per line (names carry spaces; the
+# rollup side is stripped the same way), read from the repository at $2
+# (the clone by default). Non-zero when they cannot be read.
+expected_check_names() {
+  local out line
+  out="$("$TIMEOUT_BIN" 30 "$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py" \
+    expected-checks --root "${2:-$WORK}" --rev "$1" 2>/dev/null)" || return 1
+  while IFS= read -r line; do
+    line="${line//[[:space:]]/}"
+    [[ -n "$line" ]] && printf '%s\n' "$line"
+  done <<< "$out"
 }
 
 # The head SHA the record's green was verified at, or "" (DS-2026-10-21-10).
@@ -389,22 +453,24 @@ _phase_clock() {
 }
 
 # Last lines of this phase's log, secret-scrubbed, or a fixed omission line.
-# A failed scrub publishes no tail.
+# A failed scrub publishes no tail. The scrub runs over the WHOLE log and the
+# tail is cut from its output, never the other way round: a cut can drop a
+# block-scalar header or an assignment's key while keeping the opaque value,
+# and without that context no rule recognises the value as a secret.
 _sanitize_log_tail() {
-  local raw clipped cleaned
+  local cleaned clipped
   if [[ ! -f "${PHASE_LOG:-}" || -L "${PHASE_LOG:-}" ]]; then
     printf '%s\n' "(no phase log)"
     return 0
   fi
-  raw="$(tail -n 80 "$PHASE_LOG" 2>/dev/null || true)"
-  clipped="$(printf '%s\n' "$raw" | tail -c 4000)"
-  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
-  clipped="${clipped//\`\`\`/[fence]}"
-  if ! cleaned="$(printf '%s\n' "$clipped" | _redact_secret_classes | _redact_diag_lines)"; then
+  if ! cleaned="$(_redact_secret_classes <"$PHASE_LOG" | _redact_diag_lines)"; then
     printf '%s\n' "(log tail omitted: redaction failed)"
     return 0
   fi
-  printf '%s\n' "$cleaned"
+  clipped="$(printf '%s\n' "$cleaned" | tail -n 80 | tail -c 4000)"
+  # bash 3.2 parses $'\x60\x60\x60' inside ${//} as an unclosed backtick.
+  clipped="${clipped//\`\`\`/[fence]}"
+  printf '%s\n' "$clipped"
 }
 
 # The agent writes latest-report-<phase>.md. A phase with no file newer than
