@@ -173,7 +173,10 @@ def test_build_and_hardened_smoke_run_only_on_a_miss() -> None:
     )
     build = steps[build_index]
     smoke = steps[build_index + 1]
-    assert build["with"]["load"] is True
+    # CIP-033: main publish skips the docker-load tarball; PRs still load.
+    assert build["with"]["load"] == (
+        "${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}"
+    )
     assert build["if"] == "steps.reuse.outputs.hit != 'true'"
     assert smoke["if"] == "steps.reuse.outputs.hit != 'true'"
     assert "docker run" in smoke["run"]
