@@ -12493,6 +12493,40 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 2 | 5 failed (same T-591+T-592) / 19,866 passed / 10 skipped / 40 subtests (177.40s) | 11,631 passed / 21 skipped / 1,209 files (128.55s) | 58 failed / 4,288 passed / 23 skipped (1037.57s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 5 Darwin T-591+T-592 / 19,865 passed / 10 skipped / 40 subtests (159.14s) | 11,631 passed / 21 skipped / 1,209 files (100.69s) | 58 failed / 4,288 passed / 23 skipped (984.57s) | 0 added / 0 removed |
 
+## Delta audit 2026-11-18
+
+Range `b40788e1ac5f10745726d7960ca8b51cd96d2a53..6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c`: 41 commits / 40 paths. Newest trusted checkpoint on issue #83 is `audited-through: b40788e1ac5f10745726d7960ca8b51cd96d2a53` (2026-11-17). It carried no open verified finding. Open `testing/` PR #1598 (T-593, CI green) is skipped so tonight neither repeats nor reallocates it. Highest id T-593. Next id T-594.
+
+Codemap (`tools/codemap/codemap.json`) has no node for `cloud/scripts/radon-app-runtime.sh`, `scripts/runner/hooks/security_post.sh`, or `scripts/research/marketdesk_pdf_store.py`. `rg` confirmed importers: `web/tests/probe-freshness.test.ts` and `web/tests/probe-freshness-route.test.ts` for journal liveness; `scripts/api/tests/test_ws_ticket_validate_local_only.py` for the loopback validator; `scripts/tests/test_marketdesk_pdf_sim.py` / `test_marketdesk_pdf_store.py` for PDF age-out and reclaim; `cloud/tests/test_cip030_podman_pull_skip.py` for the podman pull skip. Inverse: `scripts/api/tests/test_index_options_chain.py` gained `isolated_cache_dir` so leftover DATA_DIR files cannot skip `ib_chain.py`, but `test_subprocess_failure_returns_502` still uses an empty tmp dir, so PERF-058's stale-on-failure path (`scripts/api/server.py:5173-5176`) has no failing-test-first pin. Futures sibling is `test_futures_chain.py:161`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65; pytest `--fail-under=56`) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-590 SUPERSEDED, T-591 / T-592 DONE. T-593 lives on #1598. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Not filed: probe journal-liveness matrix (evaluateJournalCheck + route SQL `not_ok_since` + health-probe additive keys); service-token `/ws-ticket` set-equality plus live 401/403; CIP-030 pull-skip argv; PDF age-out / protected-claim sims; T-592 bash 3.2 fence (already merged).
+
+### T-594 — P1 — Index-options live miss with a cache 502s with every existing test still green
+
+`scripts/api/server.py:5111-5176` (PERF-058) serves a same-day cache without spawning, then on a live miss returns the last-good book flagged `stale` so the VIX/SPX/NDX ticket does not show a timeout. `scripts/api/tests/test_index_options_chain.py:99-105` (`test_subprocess_failure_returns_502`) writes no cache. `scripts/api/tests/test_index_options_chain_cache_budget.py:70-108` only pins spawn counts on success. Mutation `if False and` on the stale fallback: new test 1 failed / 1 passed (`/tmp/t594-red.log`, 502 `"The operation was aborted due to timeout"`); the pre-existing 502 case stayed green.
+
+Acceptance: a cross-day cache plus a timed-out `ib_chain.py` returns 200 `stale=true` with the cached `conId`. No cache still 502s. Disabling the fallback fails the cached case.
+
+Audited through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c on 2026-11-18 — 1 new finding
+
+## Remediation 2026-11-18
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-594 | DONE | Mutation `if False and` at `server.py:5173`: 1 failed / 1 passed (`/tmp/t594-red.log`). Restored product source. Green: 2 passed (`/tmp/t594-green.log`); `test_index_options_chain.py` + budget 9 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-18
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1/r2/r3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; r3 also had `test_many_assignment_lines_stay_linear` under load. Each isolated serial retry passed. Vitest EXIT 0 each round. Cloud EXIT 1 each round. FAILED list matches the origin/main audit run at `6d1e5541a` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 2 passed; 19,900 passed / 10 skipped / 40 subtests (160.65s) | 11,651 passed / 21 skipped / 1,209 files (98.08s) | 58 failed / 4,292 passed / 23 skipped (975.72s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 1 passed ×3; 19,900 passed / 10 skipped / 40 subtests (165.15s) | 11,651 passed / 21 skipped / 1,209 files (101.85s) | 58 failed / 4,292 passed / 23 skipped (975.74s) | 0 added / 0 removed |
+| 3 | credentials xdist flake + linear load flake then serial 1 passed each; 19,899 passed / 10 skipped / 40 subtests (189.01s) | 11,651 passed / 21 skipped / 1,209 files (105.65s) | 58 failed / 4,292 passed / 23 skipped (1143.87s) | 0 added / 0 removed |
+
 ## Delta audit 2026-11-19
 
 Range `6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c..45660cd1c9e352ee799ea4f721e3c7933ee4f6a3`: 22 commits / 45 paths. Newest trusted checkpoint on issue #83 is `audited-through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c` (2026-11-18). It carried no open verified finding. Open `testing/` PRs: #1606 (T-594, all checks green) and #1598 (T-593, all checks green). Highest id in ledgers T-592; PRs hold T-593/T-594. Next id T-595.

@@ -1437,6 +1437,12 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-593 | DONE | Chained URLError `assert 1 == 0`; cause-less TimeoutError text `assert 0 == 1` (`/tmp/t593-red.log`). `_is_transport_blip` uses `is_transport_error` on `__cause__`. Green 10 passed; file 104 passed ×3. Closing rounds: root pytest Darwin 5-red is T-591+T-592 on #1587; r3 credentials xdist flake then serial 2 passed; 19,866/19,866/19,865 passed / 10 skipped / 40 subtests. Vitest 11,631 passed / 21 skipped / 1,209 files each round. Cloud 58 failed / 4,288 passed / 23 skipped each round, 0 added / 0 removed against `8aaad84e9`. |
 
+## 2026-11-18
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-594 | DONE | Mutation `if False and` on the index-options stale fallback: 1 failed / 1 passed (`/tmp/t594-red.log`, 502 timeout while `test_subprocess_failure_returns_502` stayed green). Restored product source. Green 2 passed; file+budget 9 passed ×3. Product source unchanged. |
+
 ## 2026-11-19
 
 | ID | Status | Evidence |
