@@ -170,7 +170,7 @@ pr_number_in_repo() {
 # absence.
 # $1 urls, $2 claimed count, $3 the recorded head SHA ("" when none).
 deliver_urls_verified() {
-  local tok n fields state branch cross head rollup names conclusion expected count=0
+  local tok n fields state branch cross head rollup names conclusion expected floor count=0
   if [[ "${2:-}" == 0 ]]; then
     no_loop_pr_exists
     return
@@ -181,6 +181,12 @@ deliver_urls_verified() {
   [[ -n "${3:-}" ]] || return 1
   expected="$(expected_check_names "$3")" || return 1
   [[ -n "$expected" ]] || return 1
+  # The head's own files are a floor the agent's branch could lower by
+  # deleting a job, so the names main promises are required as well. The
+  # tip comes from the forge by the configured URL, and an object the agent
+  # fetched cannot stand in for the commit the forge named.
+  floor="$(forge_main_check_names)" || return 1
+  expected="$(printf '%s\n%s\n' "$expected" "$floor" | sort -u)"
   for tok in $1; do
     case "$tok" in
       http://*|https://*)
@@ -209,13 +215,44 @@ deliver_urls_verified() {
   [[ "$count" -gt 0 && "$count" == "$2" ]]
 }
 
+# The check names the forge's refs/heads/main promises, or non-zero. The
+# clone's .git (config, refs, object store), the bot's ~/.gitconfig and its
+# remote config are all agent-writable during the phase: git honours
+# insteadOf, sshCommand and proxy settings from any of them, and `git show`
+# does not hash-verify the objects it reads, so a forged tree stored under
+# main's genuine id would answer for it. Main is therefore fetched fresh
+# from the configured URL into a scratch repository this hook creates, with
+# global and system config switched off, and its blobs are read there.
+# Nothing agent-owned is read.
+forge_main_check_names() {
+  local scratch tip names
+  [[ -n "${REPO_URL:-}" ]] || return 1
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/radon-tip.XXXXXX")" || return 1
+  if git init -q --bare "$scratch" 2>/dev/null \
+    && GIT_DIR="$scratch" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+       net_bounded git --no-pager -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+       fetch -q --depth 1 "$REPO_URL" refs/heads/main 2>/dev/null \
+    && tip="$(GIT_DIR="$scratch" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+       git rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" \
+    && [[ "$tip" =~ ^[0-9a-f]{40}$ ]] \
+    && names="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null expected_check_names "$tip" "$scratch")" \
+    && [[ -n "$names" ]]; then
+    rm -rf "$scratch"
+    printf '%s\n' "$names"
+    return 0
+  fi
+  rm -rf "$scratch"
+  return 1
+}
+
 # The check names the workflow files committed at $1 promise on every PR
 # head, one whitespace-stripped token per line (names carry spaces; the
-# rollup side is stripped the same way). Non-zero when they cannot be read.
+# rollup side is stripped the same way), read from the repository at $2
+# (the clone by default). Non-zero when they cannot be read.
 expected_check_names() {
   local out line
   out="$("$TIMEOUT_BIN" 30 "$PY" -I "$RUNNER_DIR/lib/nightly_deliver.py" \
-    expected-checks --root "$WORK" --rev "$1" 2>/dev/null)" || return 1
+    expected-checks --root "${2:-$WORK}" --rev "$1" 2>/dev/null)" || return 1
   while IFS= read -r line; do
     line="${line//[[:space:]]/}"
     [[ -n "$line" ]] && printf '%s\n' "$line"

@@ -37,7 +37,11 @@ def test_shipped_baseline_pauses_nvidia_and_cerebras_whatever_the_env_says(monke
     assert "nvidia" not in engine.wired_providers(KEYS)
 
 
-def test_nvidia_text_default_is_an_invocable_catalog_model():
-    # nemotron-3-super-120b-a12b is listed but 404s "Function not found for
-    # account" (2026-11-01); Ultra answered the same probe (PR #1379).
-    assert _model_for("nvidia", {}, kind="text") == "nvidia/nemotron-3-ultra-550b-a55b"
+def test_pause_does_not_pin_a_stale_nvidia_default(tmp_path, monkeypatch):
+    import model_gateway.engine as engine
+    monkeypatch.setattr(engine, "PAUSED_BY_DEFAULT", frozenset({"nvidia", "cerebras"}))
+    path = tmp_path / "llm_models.json"
+    path.write_text('{"models":[{"provider":"nvidia","model_id":"nvidia/nemotron-3.6-ultra-600b"}]}')
+    monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
+    assert _auth_for("nvidia", KEYS) is None
+    assert _model_for("nvidia", KEYS, kind="text") == "nvidia/nemotron-3.6-ultra-600b"

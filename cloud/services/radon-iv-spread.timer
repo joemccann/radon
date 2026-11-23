@@ -1,14 +1,22 @@
 [Unit]
-Description=Radon IV SPREAD Indicator - daily NDX minus SPX 1M implied volatility spread
+Description=Radon IV SPREAD Indicator - NDX minus SPX 1M implied volatility spread, every 5 minutes in ET trading hours plus daily final
 
 [Timer]
+# IB serves the in-progress session's OPTION_IMPLIED_VOLATILITY daily bar
+# intraday, so the 5-minute ET line keeps the current session's spread live
+# (09:00-16:55 ET, Mon-Fri, VIX P/C precedent). Off-session fires restate
+# unchanged bars.
+OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
 # 22:15 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
-# 21:00 UTC winter), so both daily OPTION_IMPLIED_VOLATILITY bars are final
-# when the job reads them, and it sits between radon-ivrank (22:10) and
-# radon-dispersion (22:20) so the three IB daily pulls never share a minute.
-# Runs every calendar day: weekend and holiday runs are unchanged-data
-# heartbeats that keep service_health fresh inside the 26h staleness window.
+# 21:00 UTC winter), so this run restates today's row from the final bars.
+# It sits between radon-ivrank (22:10) and radon-dispersion (22:20) so the
+# three IB daily pulls never share a minute. Runs every calendar day:
+# weekend and holiday runs are unchanged-data heartbeats that keep
+# service_health fresh inside the 26h staleness window.
 OnCalendar=*-*-* 22:15:00 UTC
+# 23:15 is the recovery slot: a gateway outage longer than the job's own
+# re-probe window at 22:15 still gets the final bars that night.
+OnCalendar=*-*-* 23:15:00 UTC
 Persistent=true
 RandomizedDelaySec=120
 
