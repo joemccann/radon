@@ -89,7 +89,8 @@ const MISSING_IVRANK = {
 
 // The instant the freshness-rail assertions are written against, shared with
 // web/tests/freshness-rail.test.ts: 2026-08-26 is a Wednesday and 21:00 UTC is
-// 17:00 ET, after the close and before the 22:10 UTC radon-ivrank.timer slot.
+// 17:00 ET. The 16:55 ET 5-minute tick has already fired after the close;
+// the 22:10 UTC daily final is still ahead.
 const RAIL_NOW = "2026-08-26T21:00:00Z";
 // The session the panel holds: Tuesday, one behind the close that just printed.
 const RAIL_AS_OF = "2026-08-25";
@@ -192,7 +193,7 @@ test.describe("/regime/ivrank — SPY 1M IV rank tab", () => {
     // A rail counting down to the WRONG slot — the page reading a schedule
     // constant that is not IV_RANK_REFRESH — satisfied a shape check, and so
     // did a hardcoded `data-state`. Pin the clock and assert the figures
-    // web/tests/freshness-rail.test.ts derives for this instant. T-221.
+    // web/tests/freshness-rail.test.ts derives for this instant. T-221 / T-595.
     await page.clock.setFixedTime(new Date(RAIL_NOW));
     await setupMocks(page, RAIL_PAYLOAD);
     await page.goto("/regime/ivrank");
@@ -209,20 +210,16 @@ test.describe("/regime/ivrank — SPY 1M IV rank tab", () => {
     const countdown = page.getByTestId("ivrank-freshness-rail-countdown");
     await expect(countdown).not.toHaveText("--", { timeout: 15_000 });
 
-    // radon-ivrank.timer fires 22:10 UTC. 21:00 UTC is 1h10m short of it, and
-    // any other schedule constant lands on a different number.
-    await expect(countdown).toHaveText("1h 10m");
-
-    // 17:00 ET Wednesday: Wednesday's close has printed and the panel holds
-    // Tuesday, so the rail is BEHIND — not "current", and not yet "overdue",
-    // because the run that owes the session has not fired.
-    await expect(rail).toHaveAttribute("data-state", "behind");
+    // 17:00 ET Wednesday: the 16:55 ET tick already fired after the close,
+    // the panel still holds Tuesday, so the rail is DUE (full track). The
+    // 22:10 UTC final is 1h 10m away; due paints "Due" instead of that
+    // countdown. A daily-only schedule at this instant is BEHIND / 95.14.
+    await expect(countdown).toHaveText("Due");
+    await expect(rail).toHaveAttribute("data-state", "due");
     await expect(rail).toContainText("Awaiting 2026-08-26");
-
-    // 22h50m of the 24h interval has elapsed since the 2026-08-25 22:10 run.
     await expect(page.getByTestId("ivrank-freshness-rail-fill")).toHaveAttribute(
       "data-fill-pct",
-      "95.14",
+      "100.00",
     );
   });
 
