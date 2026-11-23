@@ -58,7 +58,10 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 WORKDIR /home/radon/radon
 RUN ./node_modules/.bin/playwright install chromium chromium-headless-shell
 
-COPY scripts/ ./scripts
+# CIP-035: Next compiles only the two holiday tables from scripts/
+# (`web/lib/marketCalendar.ts`). Copy those before `bun run build` so a
+# scripts-only push reuses the Next layer. The rest of scripts/ lands after.
+COPY scripts/config/market_holidays.json scripts/config/market_early_closes.json ./scripts/config/
 COPY web/ ./web
 
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -90,6 +93,8 @@ RUN rm -rf /home/radon/radon/web/.next/cache \
     && install -d -o radon -g radon \
       /home/radon/radon/web/.next/cache \
       /home/radon/radon/web/public/data
+
+COPY scripts/ ./scripts
 
 COPY docker/app/next-clerk-guard.sh /usr/local/bin/next-clerk-guard
 RUN chmod 0755 /usr/local/bin/next-clerk-guard
