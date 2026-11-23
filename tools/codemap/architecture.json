@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-20T10:00:08Z",
-  "node_count": 4368,
-  "edge_count": 8923,
+  "generated_at": "2026-11-22T10:00:08Z",
+  "node_count": 4379,
+  "edge_count": 8931,
   "areas": {
     "web": 2423,
     "site": 134,
-    "scripts": 1597,
+    "scripts": 1608,
     "cloud": 171,
     "lib": 25,
     "tests": 15,
@@ -225,7 +225,7 @@
     {
       "id": "scripts/runner",
       "area": "scripts",
-      "count": 5
+      "count": 10
     },
     {
       "id": "scripts/security",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 869
+      "count": 875
     },
     {
       "id": "scripts/trade_blotter",
@@ -345,7 +345,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 113,
+      "in": 114,
       "out": 0,
       "test": false
     },
@@ -415,7 +415,7 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 67,
+      "in": 68,
       "out": 4,
       "test": false
     },

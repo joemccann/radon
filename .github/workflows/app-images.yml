@@ -348,6 +348,29 @@ jobs:
           target_raw="$(docker buildx imagetools inspect "$target" --raw | sha256sum | awk 'NR==1 { print $1 }')"
           test -n "$source_raw" && test "$source_raw" = "$target_raw"
           echo "hit=true" >> "$GITHUB_OUTPUT"
+      # CIP-034: scripts-only rebuild 44612924566 imported buildcache in 0.3s
+      # then still pip-installed torch (36.8s) and exported layers (49.8s).
+      # The previous main SHA image already has those layers. A missing,
+      # all-zero, or non-40-hex before SHA omits that line (PR / first push)
+      # and keeps buildcache. :latest is not a cache donor.
+      - name: Select gateway layer cache
+        id: gateway-cache
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          {
+            echo "cache_from<<EOF"
+            if printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+                && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              echo "type=registry,ref=ghcr.io/joemccann/radon-model-gateway:${BEFORE_SHA}"
+            fi
+            echo "type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache"
+            echo "type=registry,ref=ghcr.io/joemccann/radon-python:buildcache"
+            echo "type=gha,scope=radon-model-gateway"
+            echo "type=gha,scope=radon-python"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and publish model gateway image
         if: steps.reuse-gateway.outputs.hit != 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -368,11 +391,7 @@ jobs:
             ghcr.io/joemccann/radon-model-gateway:latest
           build-args: |
             MODEL_CLIENTS_PAYLOAD_SHA256=${{ steps.pyimage.outputs.payload }}
-          cache-from: |
-            type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache
-            type=registry,ref=ghcr.io/joemccann/radon-python:buildcache
-            type=gha,scope=radon-model-gateway
-            type=gha,scope=radon-python
+          cache-from: ${{ steps.gateway-cache.outputs.cache_from }}
           cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'type=registry,ref=ghcr.io/joemccann/radon-model-gateway:buildcache,mode=max' || '' }}
           provenance: false
       - name: Smoke model gateway runtime
@@ -524,17 +543,31 @@ jobs:
         env:
           IMAGE_REPO: ghcr.io/joemccann/radon-node
           GHA_SCOPE: radon-node
+          # CIP-036: scripts-only rebuild 44594349045 imported buildcache
+          # in 0.8s then still ran playwright (16.9s) and bun run build
+          # (24.7s). The previous main SHA image already has those layers.
+          # A missing, all-zero, or non-40-hex before SHA omits that line
+          # (PR / first push) and keeps buildcache. :latest is not a cache donor.
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           # Same boundary as the python image: do not hold the exact-SHA
           # publish on a GHA cache upload, and PRs export no cache at all.
           # buildcache is not a deploy tag.
+          sha_from=""
+          if printf '%s' "${BEFORE_SHA:-}" | grep -Eq '^[0-9a-f]{40}$' \
+              && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            sha_from="type=registry,ref=${IMAGE_REPO}:${BEFORE_SHA}"
+          fi
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
             # Missing buildcache is the steady state until the first export.
             # A failed inspect must not fail the publish; GHA remains readable.
             cache_from="type=gha,scope=${GHA_SCOPE}"
             if docker buildx imagetools inspect "${IMAGE_REPO}:buildcache" >/dev/null 2>&1; then
               cache_from="type=registry,ref=${IMAGE_REPO}:buildcache"$'\n'"type=gha,scope=${GHA_SCOPE}"
+            fi
+            if [ -n "$sha_from" ]; then
+              cache_from="${sha_from}"$'\n'"${cache_from}"
             fi
             {
               echo "cache_from<<EOF"
@@ -545,6 +578,9 @@ jobs:
           else
             {
               echo "cache_from<<EOF"
+              if [ -n "$sha_from" ]; then
+                printf '%s\n' "$sha_from"
+              fi
               echo "type=registry,ref=${IMAGE_REPO}:buildcache"
               echo "type=gha,scope=${GHA_SCOPE}"
               echo "EOF"
