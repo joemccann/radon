@@ -2963,6 +2963,103 @@ passed). Related shard contracts 64 passed; path filter and gate
 integrity 68 passed. YAML parses. Full suites, Vitest, Docker builds,
 and workflow lint are left to PR CI.
 
+## CIP-032 - skip apt-get when the image jobs already have sshd (2026-11-19) - VALIDATING
+
+Python and gateway image jobs always `apt-get update` then install
+openssh-server so `check_model_transport.py` can see `/usr/sbin/sshd`.
+GitHub ubuntu-24.04 already has that file. The install is a no-op after a
+network index refresh.
+
+Evidence, attempt-1 main image jobs (`gh run view --json jobs` plus job
+logs). Queue 2-3s is excluded from the gain:
+
+| Run | Class | Clock | Job | apt-get until "already the newest" |
+|---|---|---|---|---|
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | mixed, gateway rebuild | 591s | gateway 211s (job 135094530935) | 43.6s (`apt-get update` 20:03:41Z, already-newest 20:04:24Z). Gateway was the last required gate. |
+| [44357745454](https://github.com/joemccann/radon/actions/runs/44357745454) | mixed, python rebuild | 410s | python 135s (job 134990848552) | 66.6s |
+| [44336305147](https://github.com/joemccann/radon/actions/runs/44336305147) | mixed, gateway rebuild | 571s | gateway 226s (job 134914462737) | 10.9s |
+
+Newest mixed successful clocks (n=10, 44127208355..44386917407) p50 456s /
+p95 582s. Gateway rebuilds are the last required job on 10 of 27 mixed
+runs. Skipping the no-op apt is expected to cut 11-67s of those image
+jobs. On 44386917407 that is 43.6s of the 211s gateway wall after Exact
+app images authorized deploy, which clears 15s. A runner without
+`/usr/sbin/sshd` still apt-gets. The transport check still runs. Runner
+minutes fall with the skipped index refresh.
+
+**Change.** Both image verify steps test `[ ! -f /usr/sbin/sshd ]` before
+`apt-get`. Missing file still updates and installs. `check_model_transport.py`
+still runs either way. No `needs` edge, test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+Do not retry CIP-022/023/024 client-reuse. CIP-031 (open #1597) is the
+rest-shard `--dist load` change; this does not touch pytest.
+
+**Safety and revert trigger.** Revert if a python or gateway image job
+skips the transport check, if a runner without `/usr/sbin/sshd` fails to
+install openssh-server, or if deploy no longer waits for Exact app images.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build gateway image | 211s | pending | TBD until 5 samples |
+
+Before is the gateway-image job wall on run 44386917407 (job
+135094530935). Acceptance remains five comparable mixed gateway-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip032_skip_sshd_apt.py` was red
+(1 failed: unconditional `apt-get update`) then green (3 passed). Related
+CIP-027/029/disk tests 16 passed. YAML parses. Full suites, Vitest, Docker
+builds, and workflow lint are left to PR CI.
+
+## CIP-033 - skip the python docker-load tarball on main publish (2026-11-19) - VALIDATING
+
+Main python rebuilds still set `load: true` so the next step can
+`docker run --pull=never`. That export is the job tail after the image
+build's own playwright smoke. CIP-032 skipped the sshd apt no-op; it does
+not remove the tarball. Dockerfile.python already smokes playwright as
+`USER radon`.
+
+Evidence, attempt-1 mixed python-rebuild steps (`gh run view --json jobs`
+plus job logs). Queue 2s is excluded from the gain:
+
+| Run | Clock | Python image | Load tarball | Post-build docker run |
+|---|---|---|---|---|
+| [44357745454](https://github.com/joemccann/radon/actions/runs/44357745454) | 410s | 135s (job 134990848552) | 10.8s (`exporting to docker image format` 17:24:00Z–17:24:11Z) | ~9s |
+| [44386917407](https://github.com/joemccann/radon/actions/runs/44386917407) | 591s | 79s (job 135094530994) | 16.6s | ~8s |
+
+Load plus the duplicate smoke is 20-25s of the python rebuild. Skipping
+that export on main is expected to cut the python job by about 20s, which
+clears 15s. Pull requests still `load: true` (they cannot push). Exact SHA
+tags, Darwin-before-publish, CIP-032 sshd skip, ihash receipts, and
+fail-closed reuse stay. No `needs` edge, test inventory, coverage, health
+check, stability window, rollback, or exact-SHA image admission change.
+
+**Change.** Python `load:` is true only when the run is not a main push.
+Main smoke prints that the image build already ran the playwright
+assertions and exits 0. PR smoke keeps `docker run --pull=never`.
+
+**Safety and revert trigger.** Revert if a main rebuild publishes a python
+SHA that fails `docker run --pull=never` of that tag, if a PR rebuild
+skips the local docker-run smoke, or if deploy no longer waits for Exact
+app images.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Exact app images / Build python image | 135s | pending | TBD until 5 samples |
+
+Before is the python-image job wall on run 44357745454 (job
+134990848552). Acceptance remains five comparable mixed python-rebuild
+deploys before and after: same-class p50 at least 10% and 15s faster;
+p95 no worse than 5% or 15s; cold p50 no worse than 10%; runner minutes
+no more than 20% higher. Status `VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip033_python_skip_load.py` was red
+(2 failed: unconditional `load: true`) then green (3 passed). Related
+CIP-027/029/032/disk tests 19 passed. YAML parses. Full suites, Vitest,
+Docker builds, and workflow lint are left to PR CI.
+
 ## CIP-034 - cache-from the previous gateway SHA on scripts-only rebuilds (2026-11-20) - VALIDATING
 
 Scripts-only mixed rebuilds still pip-install torch and re-export the
