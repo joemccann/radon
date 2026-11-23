@@ -510,7 +510,7 @@ class TestAnthropicHttpxStream:
 
         monkeypatch.setattr(httpx, "post", guarded_post)
         monkeypatch.setattr(httpx, "Client", Client)
-        result = complete_multimodal_json("evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"}, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
+        result = complete_multimodal_json("evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a", "ANTHROPIC_MODEL": "claude-test"}, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
         assert result.data == OBJ
         assert post_calls == []
         assert closed == ["response", "client"]
