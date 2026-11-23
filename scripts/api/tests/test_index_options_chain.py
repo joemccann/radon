@@ -5,6 +5,7 @@ than `ib_pool`.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,53 @@ def test_subprocess_failure_returns_502(client):
         resp = client.get("/index-options/chain?symbol=VIX&expiry=20260616")
     assert resp.status_code == 502
     assert run_mock.called
+
+
+def test_subprocess_failure_with_cache_returns_stale_not_502(client, isolated_cache_dir):
+    """Cross-day cache + live timeout must still paint the VIX/SPX book.
+
+    PERF-058 added the futures-style fallback at server.py (live miss serves
+    last-good flagged stale). test_subprocess_failure_returns_502 uses an
+    empty DATA_DIR, so deleting that fallback left the suite green while the
+    order ticket 502'd.
+    """
+    expiry = "20260616"
+    cached = {
+        "symbol": "VIX",
+        "expiry": expiry,
+        "exchange": "CBOE",
+        "tradingClass": "VIX",
+        "contracts": [
+            {
+                "conId": 9,
+                "strike": 20.0,
+                "right": "C",
+                "lastTradeDateOrContractMonth": expiry,
+            }
+        ],
+        "count": 1,
+        "as_of_date": "2000-01-01",
+        "stale": False,
+    }
+    (isolated_cache_dir / f"index_options_chain_VIX_{expiry}.json").write_text(
+        json.dumps(cached)
+    )
+
+    async def _stub(*args, **kwargs):
+        return _fake_script_result(
+            ok=False,
+            error="The operation was aborted due to timeout",
+            exit_code=1,
+        )
+
+    with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
+        resp = client.get("/index-options/chain?symbol=VIX&expiry=20260616")
+
+    assert run_mock.called, "cross-day cache must still attempt a refresh"
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stale"] is True
+    assert body["contracts"][0]["conId"] == 9
 
 
 def test_case_insensitive(client):

@@ -161,14 +161,20 @@ class TestQwen35Candidate:
         assert fields["output_dir"] != "models/slm-tagger/v1/adapter"
         reqs = _req_pins(REQS.read_text(encoding="utf-8"))
         assert reqs["llamafactory"] == "0.9.5"
-        assert reqs["transformers"] == "5.6.0"
+        assert reqs["transformers"] == "5.17.0"
         assert reqs["torch"] == "2.14.1"
         assert reqs["peft"] == "0.18.1"
         assert reqs["bitsandbytes"] == "0.50.2"
         assert reqs["accelerate"] == "1.11.0"
         assert reqs["datasets"] == "4.0.0"
         assert reqs["trl"] == "0.24.0"
-        assert reqs["tokenizers"] == "0.22.2"
+        assert reqs["tokenizers"] == "0.23.3"
+        assert reqs["fsspec"] == "2026.9.0"
+        assert reqs["pillow"] == "13.0.0"
+        assert reqs["starlette"] == "1.10.0"
+        assert reqs["fastapi"] == "0.165.0"
+        assert "gradio" not in reqs
+        assert "pip install --no-deps -r" in REQS.read_text(encoding="utf-8")
         fleet = (REPO / "requirements.txt").read_text(encoding="utf-8")
         assert "llamafactory" not in fleet
         assert "transformers" not in fleet

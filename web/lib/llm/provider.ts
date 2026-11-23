@@ -36,7 +36,7 @@ export type LlmChatRequest = {
   tools?: LlmTool[];
   /** OpenAI/xAI string; Anthropic is mapped to `{ type }`. Omit to leave provider default. */
   toolChoice?: LlmToolChoice;
-  /** xAI grok-4.6 defaults to high; the assistant loop must pass low for tool rounds. */
+  /** xAI's latest alias defaults to high; the assistant loop must pass low for tool rounds. */
   reasoningEffort?: LlmReasoningEffort;
   model?: string;
   provider?: LlmProviderName;

@@ -69,6 +69,28 @@ line here whenever you ship a security fix.**
   (`web/lib/shareReportPath.ts:readRegularShareCardFile`, `scripts/api/server.py:share_content`).
   When a served directory moves, ask who else can write the new location.
   (`web/tests/share-card-regular-file.test.ts`, `scripts/tests/test_share_cards_dir.py`)
+- **Every text the publisher sends to a public surface is scrubbed at the publisher** —
+  the `_radonpub` daemon is the one process holding the GitHub token, so the draft PR
+  title and body pass through `_scrub` (`scripts/runner/publisher.py:_gh_draft`) exactly
+  as the private report does; a request validator that checks shape alone is not a
+  scrub. The log store takes one datagram as one line (`runner_logd.py:ingest_payload`),
+  and the serve loop bounds every connection so one idle client cannot hold the socket.
+  (`scripts/tests/test_runner_publisher.py`, `scripts/tests/test_runner_logd.py`)
+- **A market-only snapshot may still carry an account-derived field** — the demo mirror
+  copies whole payloads, so a per-service meta count of the open-position book
+  (`universe.counts.portfolio`) rode into the demo database inside a flow snapshot.
+  `stripAccountDerivedFields` (`scripts/db/mirror_market_snapshots_to_demo.js`) is the
+  mirror-side chokepoint; a new producer that folds account state into a shared
+  snapshot table must be added there, not trusted to the table allowlist.
+  (`scripts/lib/demoMirrorReliability.test.js`)
+- **The deliver check-name floor is the union of the verified head and the forge's `main`** —
+  the head's workflow files are the agent's own branch, and everything in the clone
+  (config, refs, object store; `git show` does not hash-verify what it reads) plus the
+  bot's global git config is agent-writable during the phase. The post-run hook fetches
+  `main` fresh from the configured URL into a scratch repository it creates, with global
+  and system config off, and requires every name those blobs promise too, so deleting a
+  job cannot shrink "every check" (`scripts/runner/hooks/security_post.sh:forge_main_check_names`).
+  (`scripts/tests/test_runner_security_hooks.py`)
 - **AUTH_EXEMPT_PATHS** — must NOT contain `/docs` or `/openapi.json` (trusted-local
   only); pinned by `test_health_payload.py` + `test_route_authz_matrix.py`.
   (`feedback_auth_exempt_paths_double_pin`)

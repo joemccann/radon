@@ -188,6 +188,9 @@ def ingest_payload(payload: bytes, root: Path, env: dict | None = None) -> None:
     loop, sep, line = text.partition("\t")
     if not sep or not LOOP_RE.fullmatch(loop) or not line.strip():
         return
+    # One datagram is one stored line: a line break inside the payload would
+    # otherwise append entries nobody emitted, with any timestamp text.
+    line = " ".join(line.splitlines())
     line = scrub_line(line, env)
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     dest_dir = root / "repo" / "logs" / loop

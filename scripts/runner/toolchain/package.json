@@ -7,6 +7,9 @@
   },
   "overrides": {
     "@openai/codex": "0.162.1",
-    "@openai/codex-sdk": "0.162.1"
+    "@openai/codex-sdk": "0.162.1",
+    "@earendil-works/pi-coding-agent": {
+      "undici": "8.12.2"
+    }
   }
 }

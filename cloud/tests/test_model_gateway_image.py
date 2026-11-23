@@ -232,12 +232,9 @@ def test_main_push_gateway_reuse_still_retags_and_compares_manifest_bytes(tmp_pa
 
 def test_gateway_build_reads_registry_cache_and_exports_only_on_main_push():
     build = next(s for s in _gateway_steps() if s.get("with", {}).get("target") == "model-gateway")
-    assert build["with"]["cache-from"].splitlines() == [
-        f"type=registry,ref={GATEWAY_REPO}:buildcache",
-        "type=registry,ref=ghcr.io/joemccann/radon-python:buildcache",
-        "type=gha,scope=radon-model-gateway",
-        "type=gha,scope=radon-python",
-    ]
+    assert build["with"]["cache-from"] == (
+        "${{ steps.gateway-cache.outputs.cache_from }}"
+    )
     # Pull requests export nothing: the GHA export was 288.5s of a 490s
     # gateway build step on PR run 41261010191.
     assert build["with"]["cache-to"] == (

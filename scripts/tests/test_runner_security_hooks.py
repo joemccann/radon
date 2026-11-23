@@ -1194,3 +1194,86 @@ def test_an_agent_exit_75_is_incomplete(rig):
     out = rig.post(rc=75, output=f"{rig.marker} audit run_id=r1\n")
     assert out["status"].startswith("INCOMPLETE (exit 75)")
     assert "exit=75" in rig.comment()
+
+
+@pytest.mark.parametrize("repoint", ["none", "tracking-ref", "remote-url", "insteadof-config", "global-config"])
+def test_a_branch_that_drops_a_workflow_job_cannot_lower_the_check_floor(rig, repoint):
+    # The expected suite is read from the verified head, which the agent's
+    # branch defines. A branch that deletes a job would make its own shorter
+    # rollup read as the whole suite; the floor must also carry every name
+    # the workflow files at main promise. The clone's tracking ref, its remote
+    # config, a url rewrite in the clone's config and one in the bot's global
+    # config are all the agent's too, so none of them may move the floor.
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    _git("commit", "-qam", "drop a job", cwd=rig.work)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rig.work, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    if repoint == "tracking-ref":
+        _git("update-ref", "refs/remotes/origin/main", head, cwd=rig.work)
+    elif repoint in ("remote-url", "insteadof-config", "global-config"):
+        forged = rig.work.parent / "forged.git"
+        _git("clone", "-q", "--bare", str(rig.work), str(forged), cwd=rig.work.parent)
+        _git("--git-dir", str(forged), "update-ref", "refs/heads/main", head, cwd=rig.work.parent)
+        if repoint == "remote-url":
+            _git("remote", "set-url", "origin", str(forged), cwd=rig.work)
+        elif repoint == "insteadof-config":
+            _git("config", f"url.{forged}.insteadOf", str(rig.origin), cwd=rig.work)
+        else:
+            (rig.home / ".gitconfig").write_text(f'[url "{forged}"]\n\tinsteadOf = {rig.origin}\n')
+    _record(rig, head_sha=head)
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {head} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
+
+
+def test_a_forged_tree_object_in_the_clone_cannot_lower_the_check_floor(rig):
+    # `git show` does not hash-verify the objects it reads and the clone's
+    # object store is the agent's, so a tree stored under main's genuine id
+    # can point ci.yml at a reduced blob. The floor must come from blobs the
+    # hook fetched itself, never from the clone.
+    import zlib
+    dropped = "Perimeter smoke (next start + curl)"
+    ci = rig.work / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text()
+    assert f"    name: {dropped}\n" in text
+    ci.write_text(text.replace(f"    name: {dropped}\n", "", 1))
+    _git("commit", "-qam", "drop a job", cwd=rig.work)
+
+    def rev(spec):
+        return subprocess.run(["git", "rev-parse", spec], cwd=rig.work, capture_output=True,
+                              text=True, check=True).stdout.strip()
+    head, reduced = rev("HEAD"), rev("HEAD:.github/workflows/ci.yml")
+    tree, genuine = rev("origin/main:.github/workflows"), rev("origin/main:.github/workflows/ci.yml")
+    raw = subprocess.run(["git", "cat-file", "tree", tree], cwd=rig.work, capture_output=True, check=True).stdout
+    assert raw.count(bytes.fromhex(genuine)) == 1
+    forged = raw.replace(bytes.fromhex(genuine), bytes.fromhex(reduced))
+    objects = rig.work / ".git" / "objects"
+    for pack in (objects / "pack").glob("*.pack"):
+        data = pack.read_bytes()
+        pack.unlink()
+        for suffix in (".idx", ".rev", ".bitmap"):
+            pack.with_suffix(suffix).unlink(missing_ok=True)
+        subprocess.run(["git", "unpack-objects", "-q"], cwd=rig.work, input=data, check=True, capture_output=True)
+    target = objects / tree[:2] / tree[2:]
+    if target.exists():
+        target.chmod(0o644)
+    target.parent.mkdir(exist_ok=True)
+    target.write_bytes(zlib.compress(b"tree %d\0" % len(forged) + forged))
+    shown = subprocess.run(["git", "show", "origin/main:.github/workflows/ci.yml"], cwd=rig.work,
+                           capture_output=True, text=True, check=True).stdout
+    assert f"    name: {dropped}\n" not in shown  # the clone now lies about main
+
+    _record(rig, head_sha=head)
+    shrunk = ",".join(n for n in FULL_CHECK_NAMES.split(",") if n != "".join(dropped.split()))
+    out = rig.post(phase="deliver", output=_stamp(rig),
+                   STUB_PR_VIEW=f"OPEN {rig.loop}/2026-09-28 false {head} SUCCESS {shrunk}")
+
+    assert out["status"].startswith("INCOMPLETE"), out
+    assert "ready to merge" not in out["status"]
