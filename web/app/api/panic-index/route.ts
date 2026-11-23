@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
+import { dbBatch } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { snapshotMaxAgeMs } from "@/lib/demo/snapshotWindow";
 import { isPanicIndexPoint, MISSING_PANIC_INDEX, type PanicIndexData } from "@/lib/panicIndex";
-import { appendProvisionalRow, readLiveSnapshot } from "@/lib/provisionalRow";
+import { appendProvisionalRow, liveSnapshotArgs, LIVE_SNAPSHOT_SQL, parseLiveSnapshot } from "@/lib/provisionalRow";
 import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live Turso state. Without
 // this, the framework freezes the first response and serves stale data until
@@ -22,12 +22,18 @@ export const runtime = "nodejs";
 const PANIC_INDEX_MAX_AGE_MS = getFreshnessWindowMs("panic-index", "closed");
 
 async function readPanicIndexFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT scan_time, payload FROM scan_snapshots
-          WHERE service = 'panic-index' ORDER BY scan_time DESC LIMIT 1`,
-    args: [],
-  });
+  // One /v2/pipeline for the official snapshot plus panic-index:live (PERF-062).
+  const [result, liveResult] = await dbBatch(
+    [
+      {
+        sql: `SELECT scan_time, payload FROM scan_snapshots
+              WHERE service = 'panic-index' ORDER BY scan_time DESC LIMIT 1`,
+        args: [],
+      },
+      { sql: LIVE_SNAPSHOT_SQL, args: liveSnapshotArgs("panic-index") },
+    ],
+    { label: "panic-index snapshots", mode: "read" },
+  );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   const data = JSON.parse(row.payload) as Record<string, unknown>;
@@ -36,7 +42,7 @@ async function readPanicIndexFromDb(): Promise<TimestampedRead<Record<string, un
     ? data
     : appendProvisionalRow(
         data as unknown as PanicIndexData,
-        await readLiveSnapshot((statement) => db.execute(statement), "panic-index", isPanicIndexPoint),
+        parseLiveSnapshot(liveResult, isPanicIndexPoint),
       );
   return {
     data: merged as unknown as Record<string, unknown>,

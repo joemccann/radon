@@ -52,8 +52,13 @@ describe("personal VIX model source selection", () => {
   it("omits writer-only raw source history in the SQL read", async () => {
     const data=payload();await insert({...data,source_series:{VIX:[{date:entry.date,value:20}]}});
     const execute=vi.spyOn(db,"execute");
+    const batch=vi.spyOn(db,"batch");
     expect(await body()).toEqual(data);
-    expect(execute.mock.calls.some(([statement])=>typeof statement === "object" && statement.sql.includes("json_remove(payload, '$.source_series')"))).toBe(true);
+    const statements = [
+      ...execute.mock.calls.map(([statement]) => statement),
+      ...batch.mock.calls.flatMap(([stmts]) => stmts as Array<{ sql?: string }>),
+    ];
+    expect(statements.some((statement) => typeof statement === "object" && statement.sql?.includes("json_remove(payload, '$.source_series')"))).toBe(true);
   });
   it("serves the last good read from memory when storage throws", async () => {
     const data = payload(); await insert(data); await body();
