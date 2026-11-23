@@ -39,6 +39,32 @@ function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+export const LIVE_SNAPSHOT_SQL =
+  "SELECT payload FROM scan_snapshots WHERE service = ? ORDER BY scan_time DESC LIMIT 1";
+
+export function liveSnapshotArgs(service: string): string[] {
+  return [`${service}:live`];
+}
+
+/** Parse a live-snapshot SELECT result, or null when absent, malformed or unreadable. */
+export function parseLiveSnapshot<Row extends { date: string }>(
+  result: { rows: ArrayLike<unknown> } | null | undefined,
+  isRow: (value: unknown) => value is Row,
+): LiveSnapshot<Row> | null {
+  try {
+    if (!result || result.rows.length === 0) return null;
+    const live = JSON.parse(String((result.rows[0] as { payload: unknown }).payload)) as Record<string, unknown>;
+    if (typeof live.scan_time !== "string") return null;
+    if (live.row !== null && !isRow(live.row)) return null;
+    if (live.source !== null && live.source !== "ib" && live.source !== "cboe_delayed") return null;
+    if (live.quote_time !== null && typeof live.quote_time !== "string") return null;
+    if (live.carried !== undefined && !isStringList(live.carried)) return null;
+    return live as unknown as LiveSnapshot<Row>;
+  } catch {
+    return null;
+  }
+}
+
 /** Latest live snapshot for `service`, or null when absent, malformed or unreadable. */
 export async function readLiveSnapshot<Row extends { date: string }>(
   execute: Execute,
@@ -47,17 +73,10 @@ export async function readLiveSnapshot<Row extends { date: string }>(
 ): Promise<LiveSnapshot<Row> | null> {
   try {
     const result = await execute({
-      sql: `SELECT payload FROM scan_snapshots WHERE service = ? ORDER BY scan_time DESC LIMIT 1`,
-      args: [`${service}:live`],
+      sql: LIVE_SNAPSHOT_SQL,
+      args: liveSnapshotArgs(service),
     });
-    if (result.rows.length === 0) return null;
-    const live = JSON.parse(String((result.rows[0] as { payload: unknown }).payload)) as Record<string, unknown>;
-    if (typeof live.scan_time !== "string") return null;
-    if (live.row !== null && !isRow(live.row)) return null;
-    if (live.source !== null && live.source !== "ib" && live.source !== "cboe_delayed") return null;
-    if (live.quote_time !== null && typeof live.quote_time !== "string") return null;
-    if (live.carried !== undefined && !isStringList(live.carried)) return null;
-    return live as unknown as LiveSnapshot<Row>;
+    return parseLiveSnapshot(result, isRow);
   } catch {
     return null;
   }
