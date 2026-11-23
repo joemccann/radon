@@ -733,6 +733,9 @@ def _default_post(
     timeout: float | tuple[float, float],
     stream: bool = False,
 ):
+    if url == "https://api.anthropic.com/v1/messages" and not json.get("model"):
+        raise ValueError("model_unavailable")
+
     import httpx
 
     if stream:

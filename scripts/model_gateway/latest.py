@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -25,6 +26,18 @@ LATEST_ALIAS: dict[str, str] = {
     # The catalog fixture records it on the current flagship as grok-latest.
     "grok": "grok-latest",
 }
+
+_DISCOVERED_MODELS: dict[str, str] = {}
+_DISCOVERED_LOCK = threading.Lock()
+
+
+def remember_discovered_models(provider: str, models: list[dict[str, Any]]) -> None:
+    """Keep successful metadata resolution across failed inventory refreshes."""
+    chosen = select_latest_flagship(provider, models)
+    if chosen is not None:
+        with _DISCOVERED_LOCK:
+            _DISCOVERED_MODELS[provider] = _model_id(chosen)
+
 
 _CATALOG_PROVIDER = {
     "anthropic": "anthropic",
@@ -121,7 +134,12 @@ def stored_model_id(provider: str) -> str:
         payload = json.loads(_catalog_path().read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return ""
-    for row in payload.get("models") or []:
+    if not isinstance(payload, dict):
+        return ""
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return ""
+    for row in models:
         if not isinstance(row, dict) or row.get("provider") != want:
             continue
         model_id = row.get("model_id")
@@ -165,6 +183,11 @@ def resolved_default(provider: str, *, kind: str = "text") -> str:
         return LATEST_ALIAS[provider]
     if provider == "cursor":
         return ""
+    native = _CATALOG_PROVIDER.get(provider, provider)
+    with _DISCOVERED_LOCK:
+        discovered = _DISCOVERED_MODELS.get(native, "")
+    if discovered:
+        return discovered
     stored = stored_model_id(provider)
     if stored:
         return stored

@@ -1649,3 +1649,13 @@ class TestCodexRateLimitCooldown:
         assert "codex:http_429" in second.attempted
         assert "codex:rate_limited_cooldown" not in second.attempted
         assert sum("chatgpt.com" in url for url in second_router.calls) == 1
+
+
+@pytest.mark.parametrize("payload", [[], None, "catalog", {"models": 7}, {"models": {"x": 1}}])
+def test_malformed_catalog_shape_is_unavailable(tmp_path, monkeypatch, payload):
+    from model_gateway.latest import stored_model_id
+
+    path = tmp_path / "llm_models.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
+    assert stored_model_id("anthropic") == ""

@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,3 +120,20 @@ def test_a_writable_gateway_source_is_refused(tmp_path: Path, name: str) -> None
     victim.chmod(stat.S_IMODE(victim.stat().st_mode) | stat.S_IWOTH)
     result = _run(tree)
     assert result.returncode == 77, result.stdout + result.stderr
+
+
+def test_installed_gateway_can_resolve_a_model(tmp_path: Path) -> None:
+    """Exercise resolution using exactly the modules shipped to the Mac."""
+    installed = tmp_path / "gateway"
+    for name in _gateway_files():
+        target = installed / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / "scripts" / name, target)
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); "
+         "from model_gateway.engine import _model_for; "
+         "assert _model_for('grok', {}) == 'grok-latest'", str(installed)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
