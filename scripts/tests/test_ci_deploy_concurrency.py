@@ -380,7 +380,7 @@ def test_unit_pytest_uses_xdist_loadfile() -> None:
     assert "--cov-branch" not in commands
     assert "term-missing" not in commands
     rows = {str(row["shard"]): row for row in py_tests["strategy"]["matrix"]["include"]}
-    assert rows["rest"]["xdist"] == "-n auto --dist load"
+    assert rows["rest"]["xdist"] == "-n auto --dist worksteal"
     for name, row in rows.items():
         if name == "rest":
             continue
