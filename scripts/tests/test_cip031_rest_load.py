@@ -28,11 +28,12 @@ def _rows() -> dict[str, dict]:
 
 
 def test_rest_shard_uses_per_test_xdist_load() -> None:
+    # CIP-037 replaced load with worksteal; rest must still not be loadfile.
     rows = _rows()
-    assert rows["rest"]["xdist"] == "-n auto --dist load"
+    assert "loadfile" not in str(rows["rest"]["xdist"])
     commands = "\n".join(str(step.get("run", "")) for step in _py_tests()["steps"])
     assert "matrix.xdist" in commands
-    assert "-n auto --dist loadfile" not in commands
+    assert rows["rest"]["xdist"] == "-n auto --dist worksteal"
 
 
 def test_other_py_shards_stay_on_loadfile() -> None:
