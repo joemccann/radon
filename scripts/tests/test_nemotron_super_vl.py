@@ -6,6 +6,7 @@ import json
 import pytest
 
 from model_gateway.engine import (
+    ModelLadderExhausted,
     accept_tags_payload,
     complete_multimodal_json,
     complete_text_json,
@@ -16,7 +17,6 @@ pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
 SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 LLAMA_90B = "meta/llama-3.2-90b-vision-instruct"
-ULTRA = "nvidia/nemotron-3-ultra-550b-a55b"
 PNG = b"\x89PNG-test"
 ROWS = [{"underlying": "SPX", "position_today": -0.45}]
 OBJECT = {"tags": ["MACRO", "OPTIONS", "VOLATILITY"]}
@@ -109,25 +109,24 @@ def test_super_vl_explicit_text_pin_preserves_tag_validator():
 
 
 @pytest.mark.parametrize("kind", ["single", "multimodal"])
-def test_super_vl_failure_retains_legacy_vision_fallback_without_new_controls(kind):
-    value = ROWS if kind == "single" else OBJECT
-    post = Capture(Response(503, {"error": {"message": "capacity"}}), completion(value))
+def test_super_vl_failure_does_not_send_a_pinned_second_model(kind):
+    post = Capture(Response(503, {"error": {"message": "capacity"}}))
     env = {**ENV, "NVIDIA_VISION_MODEL": SUPER_VL}
-    if kind == "single":
-        result = extract_via_vision(PNG, "extract", env=env, post=post)
-        assert result.rows == ROWS
-    else:
-        result = complete_multimodal_json("review", images=[("page", PNG)], env=env, post=post)
-        assert result.data == OBJECT
-    assert result.model == LLAMA_90B
-    assert len(post.calls) == 2
+    with pytest.raises(ModelLadderExhausted):
+        if kind == "single":
+            extract_via_vision(PNG, "extract", env=env, post=post)
+        else:
+            complete_multimodal_json("review", images=[("page", PNG)], env=env, post=post)
+    assert len(post.calls) == 1
     assert_super_vl_call(post.calls[0])
-    assert post.calls[1]["body"]["model"] == LLAMA_90B
-    assert_legacy_call(post.calls[1])
 
 
 @pytest.mark.parametrize("kind", ["single", "multimodal", "text"])
-def test_defaults_are_entitled_nemotron_with_reasoning_off(kind):
+def test_defaults_follow_the_catalog_flagship_with_reasoning_off(kind, tmp_path, monkeypatch):
+    latest = "nvidia/nemotron-3.6-ultra-600b"
+    path = tmp_path / "llm_models.json"
+    path.write_text(json.dumps({"models": [{"provider": "nvidia", "model_id": latest}]}))
+    monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
     post = Capture(completion(ROWS if kind == "single" else OBJECT))
     if kind == "single":
         result = extract_via_vision(PNG, "extract", env=ENV, post=post)
@@ -135,9 +134,8 @@ def test_defaults_are_entitled_nemotron_with_reasoning_off(kind):
         result = complete_multimodal_json("review", images=[("page", PNG)], env=ENV, post=post)
     else:
         result = complete_text_json("tag", env=ENV, post=post)
-    expected = ULTRA if kind == "text" else SUPER_VL
-    assert result.model == expected
-    assert_super_vl_call(post.calls[0], model=expected)
+    assert result.model == latest
+    assert_super_vl_call(post.calls[0], model=latest)
 
 
 def test_llama_vision_pin_receives_no_nemotron_controls():
@@ -168,13 +166,11 @@ def test_super_vl_invalid_final_content_cannot_bypass_semantic_validation(bad_co
     invalid = Response(200, {"choices": [{"message": {
         "content": bad_content, "reasoning_content": json.dumps(OBJECT),
     }}]})
-    post = Capture(invalid, completion(OBJECT))
-    result = complete_multimodal_json(
-        "tag the chart", images=[("page", PNG)],
-        env={**ENV, "NVIDIA_VISION_MODEL": SUPER_VL}, post=post, accept=accept_tags_payload,
-    )
-    assert result.data == OBJECT
-    assert result.model == LLAMA_90B
-    assert len(post.calls) == 2
+    post = Capture(invalid)
+    with pytest.raises(ModelLadderExhausted):
+        complete_multimodal_json(
+            "tag the chart", images=[("page", PNG)],
+            env={**ENV, "NVIDIA_VISION_MODEL": SUPER_VL}, post=post, accept=accept_tags_payload,
+        )
+    assert len(post.calls) == 1
     assert_super_vl_call(post.calls[0])
-    assert_legacy_call(post.calls[1])

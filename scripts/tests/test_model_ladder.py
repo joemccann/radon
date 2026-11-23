@@ -603,17 +603,30 @@ class TestCompleteTextJson:
 
 
 class TestCerebrasModelId:
-    def test_default_is_not_archived_scout(self):
+    def test_default_is_the_newest_flagship_not_a_pinned_id(self, tmp_path, monkeypatch):
         from model_gateway.engine import _model_for
+        from model_gateway.latest import select_latest_flagship
 
+        models = [
+            {"id": "qwen-3.8-27b", "created": 10},
+            {"id": "qwen-3.9-72b", "created": 20},
+            {"id": "llama-4-scout-17b-16e-instruct", "created": 30},
+        ]
+        assert select_latest_flagship("cerebras", models)["id"] == "qwen-3.9-72b"
+        path = tmp_path / "llm_models.json"
+        path.write_text(json.dumps({"models": [{"provider": "cerebras", "model_id": "qwen-3.9-72b"}]}))
+        monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
         vision = _model_for("cerebras", {}, kind="vision")
         text = _model_for("cerebras", {}, kind="text")
         assert "llama-4-scout" not in vision
         assert "llama-4-scout" not in text
-        assert vision == "qwen-3.8-27b"
-        assert text == "qwen-3.8-27b"
+        assert vision == text == "qwen-3.9-72b"
+        assert _model_for("cerebras", {"CEREBRAS_MODEL": "operator-pin"}) == "operator-pin"
 
-    def test_reviewer_path_uses_public_multimodal_id(self):
+    def test_reviewer_path_uses_the_catalog_id(self, tmp_path, monkeypatch):
+        path = tmp_path / "llm_models.json"
+        path.write_text(json.dumps({"models": [{"provider": "cerebras", "model_id": "qwen-3.9-72b"}]}))
+        monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
         captured: list[dict] = []
 
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
@@ -628,7 +641,7 @@ class TestCerebrasModelId:
             stream_anthropic=False,
         )
         assert result.provider == "cerebras"
-        assert captured[0]["model"] == "qwen-3.8-27b"
+        assert captured[0]["model"] == "qwen-3.9-72b"
         assert "llama-4-scout" not in captured[0]["model"]
         assert captured[0]["reasoning_effort"] == "none"
 
@@ -822,14 +835,18 @@ class TestCodexSubscriptionGoesThroughChatGpt:
             seen.append((url, headers or {}, json or {}))
             return _StreamingResponse({}, chunks=[sse])
 
+        env = {"CODEX_HOME": str(self._codex_home(tmp_path)), "RADON_LADDER_NO_AUTH_FILES": "0"}
         result = complete_text_json(
             "evaluate",
             system="You are Radon.",
-            env={"CODEX_HOME": str(self._codex_home(tmp_path)), "RADON_LADDER_NO_AUTH_FILES": "0"},
+            env=env,
             post=post,
         )
         assert result.provider == "codex"
-        assert result.model == 'gpt-6.1-sol'
+        assert result.model == model_ladder._model_for(
+            "codex", env, kind="text", auth_kind="subscription",
+        )
+        assert result.model != "gpt-6.1-sol"
         assert result.data == {"ok": True}
         url, headers, body = seen[0]
         assert url == "https://chatgpt.com/backend-api/codex/responses"
@@ -837,9 +854,21 @@ class TestCodexSubscriptionGoesThroughChatGpt:
         assert headers["chatgpt-account-id"] == "acct-1"
         assert body["stream"] is True
         assert body['store'] is False
-        assert body['model'] == 'gpt-6.1-sol'
+        assert body['model'] == result.model
         assert body["instructions"] == "You are Radon."
         assert body["input"][0]["content"][-1] == {"type": "input_text", "text": "evaluate"}
+
+    def test_codex_cache_picks_the_newer_flagship(self, tmp_path, monkeypatch):
+        home = tmp_path / "cache-home"
+        folder = home / ".codex"
+        folder.mkdir(parents=True)
+        (folder / "models_cache.json").write_text(json.dumps({"models": [
+            {"slug": "gpt-5.5", "created": 1},
+            {"slug": "gpt-5.6-sol", "created": 2},
+            {"slug": "gpt-5.6-luna", "created": 9},
+        ]}))
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        assert model_ladder._model_for("codex", {}, kind="text", auth_kind="subscription") == "gpt-5.6-sol"
 
     def test_prepaid_openai_key_never_reaches_api_openai_com(self):
         router = _Router({"api.openai.com": _openai_obj_ok()})
@@ -862,13 +891,11 @@ class TestCodexSubscriptionGoesThroughChatGpt:
     def test_subscription_defaults_and_explicit_model_precedence(self, tmp_path, call_kind, overrides):
         env = {'CODEX_HOME': str(self._codex_home(tmp_path)), 'RADON_LADDER_NO_AUTH_FILES': '0',
                'OPENAI_API_KEY': 'sk-wallet-must-not-be-used', 'RADON_LADDER_ALLOW_PREPAID': '1'}
-        expected_model = 'gpt-6.1-sol'
         endpoint = 'https://chatgpt.com/backend-api/codex/responses'
         env.update(overrides)
-        if call_kind != 'text' and overrides.get('OPENAI_VISION_MODEL'):
-            expected_model = overrides['OPENAI_VISION_MODEL']
-        else:
-            expected_model = overrides.get('OPENAI_MODEL', expected_model)
+        expected_model = model_ladder._model_for(
+            "codex", env, kind="text" if call_kind == "text" else "vision", auth_kind="subscription",
+        )
         seen = []
         value = ROWS if call_kind == 'vision_extract' else OBJ
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
@@ -1166,7 +1193,7 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
             stream_anthropic=False,
         )
         assert result.provider == "nvidia"
-        assert result.model == "nvidia/nemotron-3.5-super-vl-120b-a12b"
+        assert result.model == model_ladder._model_for("nvidia", {"NVIDIA_API_KEY": "nvapi-test"}, kind="vision")
 
     def test_subscription_anthropic_wins_without_prepaid(self):
         router = _Router({"api.anthropic.com": _anthropic_obj_ok()})
@@ -1180,25 +1207,22 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
 
 
 class TestNvidiaVisionDefaultAndFallback:
-    # Production key probe 2026-11-01: llama-3.2-11b-vision 404 "Specified
-    # function in account ... not found"; llama-3.2-90b-vision 0/10 in 24h
-    # (ReadTimeout); Super VL 200 in 0.3s with reasoning off.
-    def test_default_vision_model_is_super_vl_then_90b(self):
+    def test_default_is_the_newer_release_and_not_a_second_pinned_id(self, tmp_path, monkeypatch):
         from model_gateway.engine import _model_for, _nvidia_vision_models
+        from model_gateway.latest import select_latest_flagship
 
-        assert _model_for("nvidia", {}, kind="vision") == (
-            "nvidia/nemotron-3.5-super-vl-120b-a12b"
-        )
-        assert _nvidia_vision_models({}) == (
-            "nvidia/nemotron-3.5-super-vl-120b-a12b",
-            "meta/llama-3.2-90b-vision-instruct",
-        )
-
-    def test_unentitled_11b_never_in_default_chain(self):
-        from model_gateway.engine import _nvidia_vision_models
-
-        for env in ({}, {"NVIDIA_VISION_MODEL": "meta/llama-3.2-90b-vision-instruct"}):
-            assert "meta/llama-3.2-11b-vision-instruct" not in _nvidia_vision_models(env)
+        models = [
+            {"id": "nvidia/nemotron-3-ultra-550b-a55b", "created": 10, "input_modalities": ["text", "image"]},
+            {"id": "nvidia/nemotron-3.6-ultra-600b", "created": 20, "input_modalities": ["text", "image"]},
+            {"id": "meta/llama-3.2-90b-vision-instruct", "created": 30, "input_modalities": ["text", "image"]},
+        ]
+        assert select_latest_flagship("nvidia", models, kind="vision")["id"] == "nvidia/nemotron-3.6-ultra-600b"
+        path = tmp_path / "llm_models.json"
+        path.write_text(json.dumps({"models": [{"provider": "nvidia", "model_id": "nvidia/nemotron-3.6-ultra-600b"}]}))
+        monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
+        assert _model_for("nvidia", {}, kind="vision") == "nvidia/nemotron-3.6-ultra-600b"
+        assert _nvidia_vision_models({}) == ("nvidia/nemotron-3.6-ultra-600b",)
+        assert "meta/llama-3.2-11b-vision-instruct" not in _nvidia_vision_models({})
 
     def test_nvidia_vision_model_override_honored(self):
         from model_gateway.engine import _nvidia_vision_models
@@ -1208,49 +1232,22 @@ class TestNvidiaVisionDefaultAndFallback:
         )
         assert models == ("meta/llama-3.2-90b-vision-instruct",)
 
-    def test_multimodal_falls_from_super_vl_to_90b_on_error(self):
+    def test_a_failed_latest_does_not_send_a_stale_second_model(self):
         calls: list[str] = []
 
         def post(url, *, headers=None, json=None, timeout=None, stream=False):
-            model = (json or {}).get("model", "")
-            calls.append(model)
-            if model == "nvidia/nemotron-3.5-super-vl-120b-a12b":
-                return _Resp(500, {"error": {"message": "timeout"}})
-            return _openai_obj_ok()
+            calls.append((json or {}).get("model", ""))
+            return _Resp(500, {"error": {"message": "timeout"}})
 
-        result = complete_multimodal_json(
-            "evaluate",
-            images=[("page", PNG)],
-            env={"NVIDIA_API_KEY": "nvapi-test"},
-            post=post,
-            stream_anthropic=False,
-        )
-        assert result.provider == "nvidia"
-        assert result.model == "meta/llama-3.2-90b-vision-instruct"
-        assert calls == [
-            "nvidia/nemotron-3.5-super-vl-120b-a12b",
-            "meta/llama-3.2-90b-vision-instruct",
-        ]
-
-    def test_vision_extract_uses_super_vl_then_90b(self):
-        calls: list[str] = []
-
-        def post(url, *, headers=None, json=None, timeout=None, stream=False):
-            model = (json or {}).get("model", "")
-            calls.append(model)
-            if "super-vl" in model:
-                return _Resp(503, {"error": {"message": "capacity"}})
-            return _openai_ok()
-
-        result = extract_via_vision(
-            PNG, PROMPT, env={"NVIDIA_API_KEY": "nvapi-test"}, post=post
-        )
-        assert result.provider == "nvidia"
-        assert result.model == "meta/llama-3.2-90b-vision-instruct"
-        assert calls == [
-            "nvidia/nemotron-3.5-super-vl-120b-a12b",
-            "meta/llama-3.2-90b-vision-instruct",
-        ]
+        with pytest.raises(ModelLadderExhausted):
+            complete_multimodal_json(
+                "evaluate",
+                images=[("page", PNG)],
+                env={"NVIDIA_API_KEY": "nvapi-test", "NVIDIA_VISION_MODEL": "nvidia/nemotron-3.6-ultra-600b"},
+                post=post,
+                stream_anthropic=False,
+            )
+        assert calls == ["nvidia/nemotron-3.6-ultra-600b"]
 
 
 class TestNoPrepaidByDefault:
@@ -1293,7 +1290,7 @@ class TestNoPrepaidByDefault:
             accept=accept_tags_payload,
         )
         assert result.provider == "nvidia"
-        assert result.model == "nvidia/nemotron-3-ultra-550b-a55b"
+        assert result.model == model_ladder._model_for("nvidia", self.PREPAID_ONLY, kind="text")
         assert any("integrate.api.nvidia.com" in url for url in router.calls)
 
     def test_retired_allow_prepaid_flag_wires_nothing(self):
@@ -1322,16 +1319,14 @@ class TestNoPrepaidByDefault:
 
 
 class TestNvidiaTextDefault:
-    def test_default_text_model_is_nemotron_ultra_not_unentitled_super(self):
-        # nemotron-3-super-120b-a12b: 404 "Function ... Not found for account"
-        # on the production key (2026-11-01); ultra-550b answered 200.
-        from model_gateway.engine import _DEFAULT_TEXT_MODELS, _model_for
+    def test_default_text_model_comes_from_the_catalog(self, tmp_path, monkeypatch):
+        from model_gateway.engine import _model_for
 
-        assert "llama-3.3-70b" not in _DEFAULT_TEXT_MODELS["nvidia"]
-        assert _DEFAULT_TEXT_MODELS["nvidia"] != "nvidia/nemotron-3-super-120b-a12b"
-        assert _model_for("nvidia", {}, kind="text") == (
-            "nvidia/nemotron-3-ultra-550b-a55b"
-        )
+        path = tmp_path / "llm_models.json"
+        path.write_text(json.dumps({"models": [{"provider": "nvidia", "model_id": "nvidia/nemotron-3.6-ultra-600b"}]}))
+        monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
+        assert _model_for("nvidia", {}, kind="text") == "nvidia/nemotron-3.6-ultra-600b"
+        assert "nemotron-3-super-120b" not in _model_for("nvidia", {}, kind="text")
 
     def test_nvidia_text_model_override_honored(self):
         from model_gateway.engine import _model_for
@@ -1353,16 +1348,14 @@ class TestNvidiaTextDefault:
             == "nvidia/llama-3.1-nemotron-70b-instruct"
         )
 
-    def test_vision_defaults_are_super_vl_then_90b(self):
-        from model_gateway.engine import _model_for, _nvidia_vision_models
+    def test_unset_catalog_does_not_invent_a_snapshot(self):
+        from model_gateway.engine import _model_for
 
-        assert _model_for("nvidia", {}, kind="vision") == (
-            "nvidia/nemotron-3.5-super-vl-120b-a12b"
-        )
-        assert _nvidia_vision_models({}) == (
-            "nvidia/nemotron-3.5-super-vl-120b-a12b",
-            "meta/llama-3.2-90b-vision-instruct",
-        )
+        assert _model_for("nvidia", {}, kind="vision") == ""
+        assert _model_for("anthropic", {}, kind="text") == ""
+        assert _model_for("grok", {}) == "grok-latest"
+        assert _model_for("antigravity", {}) == ""
+        assert _model_for("grok", {"XAI_MODEL": "grok-4.6"}) == "grok-4.6"
 
 
 class TestNoAuthFilesFlag:

@@ -1,3 +1,14 @@
+# Latest model on every ladder rung (2026-11-23)
+
+- [x] T1 depends_on: [] Inventory pinned model ids and CLI checksum pins.
+- [x] T2 depends_on: [T1] Resolve alias, account default, or catalog release date. Env overrides stay. NVIDIA and Cerebras stay paused.
+- [x] T3 depends_on: [T1] Daily factory/ workflow verifies SHA-512, team id, and arch before a pin PR.
+- [x] T4 depends_on: [T2, T3] Docs, focused tests, PR. Do not merge.
+
+## Review
+
+Antigravity omits `--model` (account default). Grok sends `grok-latest`. Anthropic, Codex, NVIDIA, and Cerebras use the catalog's newest flagship by release date. Codex also reads the CLI model cache. Cursor stays unwired. CLI checksums and the Darwin team id stay; `.github/workflows/vendor-cli-latest.yml` opens the bump PR.
+
 # Always publish Hartnett (2026-11-22)
 
 - [x] T1 depends_on: [] Failing tests: MarketDesk folder `BofA` canonical publisher; ING/ANZ/ZKB/SocGen casing.
