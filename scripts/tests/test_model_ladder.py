@@ -510,7 +510,7 @@ class TestAnthropicHttpxStream:
 
         monkeypatch.setattr(httpx, "post", guarded_post)
         monkeypatch.setattr(httpx, "Client", Client)
-        result = complete_multimodal_json("evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a"}, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
+        result = complete_multimodal_json("evaluate", env={"CLAUDE_CODE_OAUTH_TOKEN": "a", "ANTHROPIC_MODEL": "claude-test"}, stream_anthropic=True, read_timeout=120.0, max_response_bytes=2_000_000, require_end_turn=True)
         assert result.data == OBJ
         assert post_calls == []
         assert closed == ["response", "client"]
@@ -1649,3 +1649,13 @@ class TestCodexRateLimitCooldown:
         assert "codex:http_429" in second.attempted
         assert "codex:rate_limited_cooldown" not in second.attempted
         assert sum("chatgpt.com" in url for url in second_router.calls) == 1
+
+
+@pytest.mark.parametrize("payload", [[], None, "catalog", {"models": 7}, {"models": {"x": 1}}])
+def test_malformed_catalog_shape_is_unavailable(tmp_path, monkeypatch, payload):
+    from model_gateway.latest import stored_model_id
+
+    path = tmp_path / "llm_models.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr("model_gateway.latest._catalog_path", lambda: path)
+    assert stored_model_id("anthropic") == ""

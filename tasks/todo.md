@@ -1,3 +1,15 @@
+# Repair gateway model resolution on both hosts
+
+- [x] T1 depends_on: [] Compare deployed Mac and VPS behavior with main.
+- [x] T2 depends_on: [T1] Ship the resolver in the Mac installation and cover staged imports.
+- [x] T3 depends_on: [T1] Resolve models from gateway metadata when the catalog file is absent.
+- [ ] T4 depends_on: [T2, T3] Verify test suites and both deployed services.
+- [ ] T5 depends_on: [T4] Verify nightly results.
+
+## Review
+
+Confirmed the missing Mac module and empty VPS model ID. An isolated Mac process served health and the VPS accepted an explicit Anthropic generation. Production rollout and runner verification are pending.
+
 # Latest model on every ladder rung (2026-11-23)
 
 - [x] T1 depends_on: [] Inventory pinned model ids and CLI checksum pins.

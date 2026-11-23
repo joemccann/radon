@@ -34,7 +34,7 @@ Every rung resolves a model in this order (operator, 2026-11-22). An env overrid
 | --- | --- |
 | Antigravity | Account default. `agy` is invoked with no `--model` unless `ANTIGRAVITY_MODEL` is set. |
 | Grok | `grok-latest`, the alias xAI moves. `XAI_MODEL` or `GROK_MODEL` overrides it. |
-| Anthropic | Catalog row (`created_at`). `RADON_RESEARCH_MODEL`, `ANTHROPIC_MODEL`, or `ANTHROPIC_VISION_MODEL` overrides it. The Messages API has no floating latest id. |
+| Anthropic | Newest eligible model from the gateway’s background metadata refresh, then the catalog file. A failed refresh retains the last successful selection for the life of the process. `RADON_RESEARCH_MODEL`, `ANTHROPIC_MODEL`, or `ANTHROPIC_VISION_MODEL` overrides it. The Messages API has no floating latest id. |
 | Codex | Catalog row, else the newest flagship in `~/.codex/models_cache.json`. The ChatGPT grant cannot list models. `OPENAI_MODEL` or `OPENAI_VISION_MODEL` overrides it. |
 | Cursor | Unwired. No model id. |
 | NVIDIA, Cerebras | Paused, and still resolved the same way from the catalog. A stored key is used only to list models. `NVIDIA_*_MODEL` and `CEREBRAS_*_MODEL` override the id. There is no second pinned vision fallback. |

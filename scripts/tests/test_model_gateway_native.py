@@ -181,3 +181,16 @@ def test_claude_plain_sessions_never_send_auto_mode_betas(monkeypatch, thinking)
     native.complete({"protocol": "messages", "request": request, "stream": True}, post=lambda url, **kw: seen.append(kw) or Response(_claude_stream()), env={})
     beta = set(seen[0]["headers"]["anthropic-beta"].split(","))
     assert not beta & {"thinking-display-updates-2026-08-18", "afk-mode-2026-01-31", "dangerous-tool-use-2026-09-03"}
+
+
+def test_unresolved_anthropic_model_never_reaches_native_http(monkeypatch):
+    native = module(monkeypatch, {"anthropic"})
+    monkeypatch.setattr(engine, "_model_for", lambda *args, **kwargs: "")
+    calls = []
+    with pytest.raises(engine.ModelLadderExhausted) as failure:
+        native.complete(
+            {"protocol": "messages", "request": {"model": "provider-default", "messages": []}, "stream": False},
+            post=lambda *args, **kwargs: calls.append(args), env={},
+        )
+    assert calls == []
+    assert "anthropic:model_unavailable" in str(failure.value)
