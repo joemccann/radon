@@ -213,6 +213,8 @@ def complete(payload: dict, *, post: Callable | None = None, env: Mapping[str, s
         body = copy.deepcopy(request)
         body["model"] = model
         if name == "anthropic":
+            if not model:
+                raise RuntimeError("model_unavailable")
             headers = engine._anthropic_headers(auth.token, subscription=auth.kind == "subscription")
             headers["anthropic-beta"] = ",".join(dict.fromkeys([*headers.get("anthropic-beta", "").split(","), *_CLAUDE_NATIVE_BETAS, *_claude_field_betas(body)]))
             headers["x-app"] = "cli"

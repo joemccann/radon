@@ -312,6 +312,8 @@ def model_inventory(*, refresh: bool = False) -> dict:
                     raw = fetch(key)
                 if not isinstance(raw, list):
                     raise ValueError("invalid model metadata")
+                from .latest import remember_discovered_models
+                remember_discovered_models(provider, raw)
                 found[provider] = _metadata_rows(provider, raw, stamp)
             except Exception:
                 failed[provider] = "metadata_unavailable"
