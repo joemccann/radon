@@ -58,21 +58,21 @@ issuer-research sections cannot be admitted under a broad desk-note title.
    A resolved off-book issuer is dropped; unresolved subjects or mixed report
    scope remain held. Every issuer in a resolved recommendation list must qualify.
    Desk force-inclusion and operator notes cannot override this gate, except an
-   always-publish Hartnett desk (The Flow Show, a BofA Fund Manager Survey, or a
-   note authored by Hartnett). That desk skips only the unresolved-subject hold
-   and the 24h hold expiry. A resolved off-book issuer still drops. Other
-   force-included desks stay on this gate.
+   always-publish desk: The Flow Show, a BofA Fund Manager Survey, a note
+   authored by Hartnett, or Citadel Rubner GMI. Those desks skip only the
+   unresolved-subject hold and the 24h hold expiry. A resolved off-book issuer
+   still drops. Deutsche Bank positioning stays on this gate.
 4. Novelty drops `DUPLICATE_OF_PUBLISHED`, retaining the existing cross-publisher
    always-publish desk exception. This exception does not override eligibility.
 5. The source summary and images proceed to grounded copy generation without
    a generic model relevance SELECT. The final generated title, body and rendered figure captions are checked for
-   equity eligibility again, with the same Hartnett unresolved-subject exception,
+   equity eligibility again, with the same always-publish unresolved-subject exception,
    then pass the existing numerical/ticker/source
    validation and exact-copy Humanizer certification. Source bullet lists are
    input facts and are never appended to the article.
 6. The shared `research.publish` boundary checks the exact certified final copy
    against the current canonical book immediately before its database write.
-   The Hartnett unresolved-subject exception applies at this write too. A
+   The always-publish unresolved-subject exception applies at this write too. A
    saved certificate or queued payload cannot retain eligibility after an issuer
    leaves the book. MarketDesk records a terminal eligibility outcome; the legacy
    Dropbox outbox parks the affected batch with payload/history preserved.

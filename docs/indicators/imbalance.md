@@ -76,7 +76,7 @@ Lee-Ready / eligible-trade classification, overnight, TRF / ATS mix.
 
 ## Cadence
 
-Daily calendar-day timer at 18:25 ET, five minutes after
+Daily calendar-day timer at 18:25 ET, 10 minutes after
 `record-high-breadth` (18:15 ET) so the two jobs do not refresh the same
 TradingView OAuth store concurrently. Weekend and holiday runs heartbeat
 unchanged data. Watchdog window 26h. `MAX_BARS=5000` per symbol,
