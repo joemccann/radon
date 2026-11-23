@@ -347,7 +347,7 @@ def _write_db_cache(
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     MARGIN_DEBT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    MARGIN_DEBT_JSON.write_text(json.dumps(payload, indent=2))
+    MARGIN_DEBT_JSON.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def build_series(finra_xlsx: bytes) -> tuple[list[dict[str, Any]], bool]:

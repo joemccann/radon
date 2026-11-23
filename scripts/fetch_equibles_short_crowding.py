@@ -550,7 +550,7 @@ def _record_health(state: str, scan_time: str, error: Optional[dict[str, Any]] =
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
     SHORT_CROWDING_JSON.parent.mkdir(parents=True, exist_ok=True)
-    SHORT_CROWDING_JSON.write_text(json.dumps(payload, indent=2))
+    SHORT_CROWDING_JSON.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def _fetch_entry(client: Any, ticker: str, today: date) -> Optional[dict[str, Any]]:

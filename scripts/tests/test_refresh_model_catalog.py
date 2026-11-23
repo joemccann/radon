@@ -54,6 +54,7 @@ ALL_KEY_VARS = [
     "OPENAI_API_KEY",
     "XAI_API_KEY", "GROK_API_KEY",
     "ANTHROPIC_MODEL", "OPENAI_MODEL", "XAI_MODEL", "GROK_MODEL",
+    "NVIDIA_API_KEY", "CEREBRAS_API_KEY",
 ]
 
 
@@ -178,6 +179,24 @@ class TestSelectOpenai:
         assert not chosen.endswith("-chat-latest")
 
 
+class TestLatestFlagshipByReleaseDate:
+    def test_later_release_beats_a_higher_version_number(self):
+        from model_gateway.latest import select_latest_flagship
+
+        models = [
+            {"id": "grok-9.0", "created": 1, "input_modalities": ["text"], "output_modalities": ["text"]},
+            {"id": "grok-4.7", "created": 9, "input_modalities": ["text"], "output_modalities": ["text"]},
+        ]
+        assert select_latest_flagship("xai", models)["id"] == "grok-4.7"
+
+    def test_fixture_frontier_is_still_the_newest_dated_row(self):
+        from model_gateway.latest import select_latest_flagship
+
+        assert select_latest_flagship("xai", XAI)["id"] == "grok-4.6"
+        assert select_latest_flagship("openai", OPENAI)["id"] == "gpt-5.6-sol"
+        assert select_latest_flagship("anthropic", ANTHROPIC)["id"] == "claude-opus-5"
+
+
 class TestSelectXai:
     def test_picks_the_documented_frontier(self):
         assert select_xai_frontier(XAI)["id"] == "grok-4.6"
@@ -279,7 +298,7 @@ class TestOverrides:
         assert provider_override("xai") == "grok-4.7-operator-pin"
 
     def test_no_override_by_default(self, clean_env):
-        assert [provider_override(p) for p in PROVIDERS] == [None, None, None]
+        assert [provider_override(p) for p in PROVIDERS] == [None] * len(PROVIDERS)
 
 
 class TestBuildOutput:

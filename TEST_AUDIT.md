@@ -12492,3 +12492,114 @@ Serial from the repo root, Python 3.13.16, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | 5 failed (T-591×3 + T-592×2) / 19,866 passed / 10 skipped / 40 subtests (110.14s) | 11,631 passed / 21 skipped / 1,209 files (50.25s) | 58 failed / 4,288 passed / 23 skipped (975.85s) | — |
 | 2 | 5 failed (same T-591+T-592) / 19,866 passed / 10 skipped / 40 subtests (177.40s) | 11,631 passed / 21 skipped / 1,209 files (128.55s) | 58 failed / 4,288 passed / 23 skipped (1037.57s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 2 passed; 5 Darwin T-591+T-592 / 19,865 passed / 10 skipped / 40 subtests (159.14s) | 11,631 passed / 21 skipped / 1,209 files (100.69s) | 58 failed / 4,288 passed / 23 skipped (984.57s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-18
+
+Range `b40788e1ac5f10745726d7960ca8b51cd96d2a53..6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c`: 41 commits / 40 paths. Newest trusted checkpoint on issue #83 is `audited-through: b40788e1ac5f10745726d7960ca8b51cd96d2a53` (2026-11-17). It carried no open verified finding. Open `testing/` PR #1598 (T-593, CI green) is skipped so tonight neither repeats nor reallocates it. Highest id T-593. Next id T-594.
+
+Codemap (`tools/codemap/codemap.json`) has no node for `cloud/scripts/radon-app-runtime.sh`, `scripts/runner/hooks/security_post.sh`, or `scripts/research/marketdesk_pdf_store.py`. `rg` confirmed importers: `web/tests/probe-freshness.test.ts` and `web/tests/probe-freshness-route.test.ts` for journal liveness; `scripts/api/tests/test_ws_ticket_validate_local_only.py` for the loopback validator; `scripts/tests/test_marketdesk_pdf_sim.py` / `test_marketdesk_pdf_store.py` for PDF age-out and reclaim; `cloud/tests/test_cip030_podman_pull_skip.py` for the podman pull skip. Inverse: `scripts/api/tests/test_index_options_chain.py` gained `isolated_cache_dir` so leftover DATA_DIR files cannot skip `ib_chain.py`, but `test_subprocess_failure_returns_502` still uses an empty tmp dir, so PERF-058's stale-on-failure path (`scripts/api/server.py:5173-5176`) has no failing-test-first pin. Futures sibling is `test_futures_chain.py:161`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65; pytest `--fail-under=56`) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-590 SUPERSEDED, T-591 / T-592 DONE. T-593 lives on #1598. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Not filed: probe journal-liveness matrix (evaluateJournalCheck + route SQL `not_ok_since` + health-probe additive keys); service-token `/ws-ticket` set-equality plus live 401/403; CIP-030 pull-skip argv; PDF age-out / protected-claim sims; T-592 bash 3.2 fence (already merged).
+
+### T-594 — P1 — Index-options live miss with a cache 502s with every existing test still green
+
+`scripts/api/server.py:5111-5176` (PERF-058) serves a same-day cache without spawning, then on a live miss returns the last-good book flagged `stale` so the VIX/SPX/NDX ticket does not show a timeout. `scripts/api/tests/test_index_options_chain.py:99-105` (`test_subprocess_failure_returns_502`) writes no cache. `scripts/api/tests/test_index_options_chain_cache_budget.py:70-108` only pins spawn counts on success. Mutation `if False and` on the stale fallback: new test 1 failed / 1 passed (`/tmp/t594-red.log`, 502 `"The operation was aborted due to timeout"`); the pre-existing 502 case stayed green.
+
+Acceptance: a cross-day cache plus a timed-out `ib_chain.py` returns 200 `stale=true` with the cached `conId`. No cache still 502s. Disabling the fallback fails the cached case.
+
+Audited through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c on 2026-11-18 — 1 new finding
+
+## Remediation 2026-11-18
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-594 | DONE | Mutation `if False and` at `server.py:5173`: 1 failed / 1 passed (`/tmp/t594-red.log`). Restored product source. Green: 2 passed (`/tmp/t594-green.log`); `test_index_options_chain.py` + budget 9 passed ×3. Product source unchanged. |
+
+### Closing gates 2026-11-18
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1/r2/r3 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; r3 also had `test_many_assignment_lines_stay_linear` under load. Each isolated serial retry passed. Vitest EXIT 0 each round. Cloud EXIT 1 each round. FAILED list matches the origin/main audit run at `6d1e5541a` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 2 passed; 19,900 passed / 10 skipped / 40 subtests (160.65s) | 11,651 passed / 21 skipped / 1,209 files (98.08s) | 58 failed / 4,292 passed / 23 skipped (975.72s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 1 passed ×3; 19,900 passed / 10 skipped / 40 subtests (165.15s) | 11,651 passed / 21 skipped / 1,209 files (101.85s) | 58 failed / 4,292 passed / 23 skipped (975.74s) | 0 added / 0 removed |
+| 3 | credentials xdist flake + linear load flake then serial 1 passed each; 19,899 passed / 10 skipped / 40 subtests (189.01s) | 11,651 passed / 21 skipped / 1,209 files (105.65s) | 58 failed / 4,292 passed / 23 skipped (1143.87s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-19
+
+Range `6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c..45660cd1c9e352ee799ea4f721e3c7933ee4f6a3`: 22 commits / 45 paths. Newest trusted checkpoint on issue #83 is `audited-through: 6d1e5541a1fd5e583bad5d44ce06dc1b2c7a034c` (2026-11-18). It carried no open verified finding. Open `testing/` PRs: #1606 (T-594, all checks green) and #1598 (T-593, all checks green). Highest id in ledgers T-592; PRs hold T-593/T-594. Next id T-595.
+
+Codemap has no node for `scripts/utils/share_cards.py` or the timer units. `rg` confirmed importers: `scripts/tests/test_share_cards_dir.py` and `scripts/tests/test_vixcor.py` / `web/tests/vixcor-*.ts*` for the live row; `web/tests/refresh-schedule.test.ts` for the 5-minute OnCalendar pin. Inverse: `web/lib/refreshSchedule.ts` IV_RANK_REFRESH grew the 09:00-16:55 ET line, but `web/tests/freshness-rail.test.ts` switched to a `DAILY_2210` fixture and `web/e2e/ivrank-tab.spec.ts:191-226` still asserted the daily behind/95.14 fill at 17:00 ET. `web/lib/useIvRank.ts:12` dropped to `interval: 300_000` with no hook test (`ivrank-panel.test.tsx` mocks the hook); `web/tests/vixcor-hook.test.tsx:113` already pins the vixcor sibling.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. No new `skip` / `xfail`. Re-triaged `TEST_LOG.md`: T-588 / T-589 / T-591 / T-592 remain DONE; T-590 SUPERSEDED; T-493 / T-495 / T-488 have later DONE evidence.
+
+Not filed: ivrank/vixcor `SERVICE_FRESHNESS_WINDOWS` stay 26h (`serviceHealthWindows.ts:222-228`), matching the vix-pc / vixts 5-minute-plus-daily pattern; `_expected_live_corr` in `test_vixcor.py` mirrors `compute_corr_series` beside date/gap/write assertions; `web/app/api/ivrank/route.ts:30` comment still says daily (the 48h max-age still holds).
+
+### T-595 — P1 — IV RANK freshness rail still asserted the daily 24h fill after the timer went 5-minute
+
+`web/lib/refreshSchedule.ts:60-63` is 09:00-16:55 ET every 5 minutes plus 22:10 UTC. `web/e2e/ivrank-tab.spec.ts:212-226` (T-221) pinned 17:00 ET Wednesday / asOf Tuesday as `data-state="behind"`, countdown `1h 10m`, fill `95.14`. `computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", 2026-08-26T21:00Z)` is now `due=true`, `elapsedFraction=1`, last sample 20:55 UTC. The vitest rail cases no longer import `IV_RANK_REFRESH`, so a wrong-schedule regression of the live constant is untested in CI. Spec is not in the Playwright CI job.
+
+Acceptance: `computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1700_ET)` is due, not overdue, awaiting 2026-08-26, fill `100.00`, last sample 20:55 UTC, next 22:10 UTC. Reasserting `due=false` / `95.14` fails. The e2e at the same clock reads `Due` / `data-state="due"` / fill `100.00`.
+
+### T-596 — P2 — useIvRank 5-minute poll is untested, so an hourly revert stays green
+
+`web/lib/useIvRank.ts:12` is `interval: 300_000`. Codemap lists no test importer; `web/tests/ivrank-panel.test.tsx:132` mocks the hook. `web/tests/vixcor-hook.test.tsx:113-131` pins the sibling. Mutation `300_000` → `3_600_000`: GET case stayed green, poll case 1 failed (`expected 1 to be 2` at 5 minutes, `/tmp/t596-red.log`).
+
+Acceptance: render `useIvRank`, one GET at mount, none at 2.5 minutes, one more GET at 5. Restoring `3_600_000` fails the 5-minute GET.
+
+Audited through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3 on 2026-11-19 — 2 new findings
+
+## Remediation 2026-11-19
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-595 | DONE | Old daily fill: 1 failed / 21 passed (`/tmp/t595-red.log`, `due` true vs false). Corrected pin: 22 passed (`/tmp/t595-green.log`); delta Vitest 106 passed ×2. Product source unchanged. Playwright e2e left to CI (no browser here). |
+| T-596 | DONE | Hourly mutation: 1 failed / 1 passed (`/tmp/t596-red.log`). Restored 300_000. Green: 2 passed ×3 (`/tmp/t596-green.log`). Product source unchanged. |
+
+### Closing gates 2026-11-19
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest EXIT 1 each round on the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after isolated retries (2 passed each). Vitest EXIT 0 each round. Cloud EXIT 1 each round. FAILED node list matches origin/main standing at `45660cd1c` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (174.75s) | 11,664 passed / 21 skipped / 1,211 files (81.71s) | 58 failed / 4,292 passed / 23 skipped (952.83s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (145.46s) | 11,664 passed / 21 skipped / 1,211 files (94.66s) | 58 failed / 4,292 passed / 23 skipped (1017.59s) | 0 added / 0 removed |
+| 3 | credentials xdist flake then serial 2 passed; 19,920 passed / 10 skipped / 40 subtests (240.35s) | 11,664 passed / 21 skipped / 1,211 files (153.77s) | 58 failed / 4,292 passed / 23 skipped (1184.43s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-20
+
+Range `45660cd1c9e352ee799ea4f721e3c7933ee4f6a3..1ef4fdff5dc2cabcf092756b4ad710e383502c52`: 15 commits / 37 paths. Newest trusted checkpoint on issue #83 is `audited-through: 45660cd1c9e352ee799ea4f721e3c7933ee4f6a3` (2026-11-19). It carried no open verified finding. Open `testing/` PRs: #1618 T-595 T-596, #1606 T-594, #1598 T-591 T-592 T-593 — skipped, not reallocated. Highest id T-596. Next id T-597.
+
+`rg` confirmed importers for the delta sources: `scripts/api/tests/test_ib_pool_connect_loop.py` for the connect-loop pool call; `scripts/tests/test_index_live_rows.py` for SKEW `carry`; `scripts/api/tests/test_regime_share_route.py` and `scripts/tests/test_regime_share_live_overlay.py` for the overlay generator; `web/tests/share-report-live-reading.test.tsx` for the modal POST; `web/tests/regime-share-live-reading-route.test.ts` for the Next proxy; `scripts/api/tests/test_subprocess_interactive_lane.py` for the share-generator lane; `scripts/tests/test_share_cards_dir.py` and `web/tests/share-card-regular-file.test.ts` for `O_NOFOLLOW`. Inverse: `web/components/RegimePanel.tsx:225` and `:235` now pass `shareBody={readShareReading}`, but `web/tests/regime-share.test.ts:107-143` greps `ShareReportModal` / `shareEndpoint` and never `shareBody`, and `web/tests/regime-cri-chart-layout.test.tsx:45` mocks the modal to `null`.
+
+`ci.yml` and coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged in the range. One new `@unittest.skipUnless(_chromium_available())` on the real-render screenshot case (`scripts/tests/test_card_screenshot.py:115`); the fake-browser cases always run. No `.only` / `xfail`. Re-triaged `TEST_LOG.md`: T-591 / T-592 remain DONE on main. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta-touched files 3×: Python 69 passed / 1 skipped; Vitest 76 passed / 9 files.
+
+Not filed: remaining source-greps in `regime-share.test.ts` (pre-existing; the new API has executing siblings except the owner wiring, which is T-597); Chromium skipUnless (environment-conditional real render); overlay `triggered` recompute keeps snapshot `realized_vol_gt_25` (`test_regime_share_live_overlay.py:66`).
+
+### T-597 — P1 — RegimePanel share wiring is untested, so dropping the live reading stays green
+
+`web/components/RegimePanel.tsx:225` and `:235` pass `shareBody={readShareReading}` so Share to X posts the live CRI the hero shows (`web/lib/regimeShareReading.ts:28`, `web/components/ShareReportModal.tsx:99`). The modal, Next route, FastAPI overlay, and generator each have executing tests. The owner does not. Mutation: delete both `shareBody={readShareReading}` props. Existing four files 26 passed (`/tmp/t597-existing-mut.log`). New wire test: 1 failed / 1 passed (`/tmp/t597-red.log`, POST `/api/regime/share` with no body while the hero is live 43.9).
+
+Acceptance: render `RegimePanel` with real `ShareReportModal` and live VIX/VVIX/SPY ticks. Share to X must POST `{live}` whose `cri.score` is `computeCri` of those ticks, not the scan snapshot 48. Empty `prices` posts no body. Reverting the panel to omit `shareBody` fails the live case.
+
+Audited through: 1ef4fdff5dc2cabcf092756b4ad710e383502c52 on 2026-11-20 — 1 new finding
+
+## Remediation 2026-11-20
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-597 | DONE | shareBody mutation: existing tests 26 passed; new wire test 1 failed / 1 passed (`/tmp/t597-red.log`). Restored both props. Green: 2 passed (`/tmp/t597-green.log`) ×3. Product source unchanged. |
+
+### Closing gates 2026-11-20
+
+Serial from the repo root, Python 3.13, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest r1 and r3 EXIT 0. r2 had the known credentials xdist clock flake in `test_real_stalled_vault_stops_at_request_deadline_or_disconnect[True]`; that file passed serially after an isolated retry (2 passed, `/tmp/pytest-2-serial.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round. Sorted FAILED lists match the origin/main worktree at `1ef4fdff5` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | 19,956 passed / 11 skipped / 40 subtests (108.77s) | 11,678 passed / 21 skipped / 1,215 files (48.56s) | 58 failed / 4,292 passed / 23 skipped (938.08s) | 0 added / 0 removed |
+| 2 | credentials xdist flake then serial 2 passed; 19,955 passed / 11 skipped / 40 subtests (158.54s) | 11,678 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,292 passed / 23 skipped (965.27s) | 0 added / 0 removed |
+| 3 | 19,956 passed / 11 skipped / 40 subtests (153.02s) | 11,678 passed / 21 skipped / 1,215 files (96.36s) | 58 failed / 4,292 passed / 23 skipped (1,162.88s) | 0 added / 0 removed |

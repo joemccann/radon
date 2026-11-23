@@ -1,0 +1,58 @@
+name: vendor-cli-latest
+
+# Daily check of the pinned subscription CLIs. Checksum, team id, and
+# architecture are verified before any pin file changes. The pull request
+# uses a factory/ branch, which the runner-bot-nightly-only ruleset allows.
+# Cursor has no pin file. Nothing here merges.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Verify CLI pins
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve and verify the newest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/bump_vendor_cli_pins.py --apply
+
+      - name: Open a factory pin PR when a pin changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "pins unchanged"
+            exit 0
+          fi
+          branch="factory/vendor-cli-$(date -u +%Y%m%d)"
+          git config user.name "Engineering Lead"
+          git config user.email "joemccann@mail.grokbot.com"
+          git checkout -B "$branch"
+          git add docker/app/vendor-clis/antigravity.json docker/app/vendor-clis/package.json docker/app/vendor-clis/package-lock.json scripts/runner/antigravity-darwin.json
+          git commit -m "Bump verified vendor CLI pins"
+          git push --force-with-lease "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${branch}"
+          python3 scripts/ci/check_pr_body.py --body-file scripts/ci/vendor_cli_pin_pr_body.md
+          existing="$(gh pr list --head "$branch" --json number --jq '.[0].number' || true)"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body-file scripts/ci/vendor_cli_pin_pr_body.md
+          else
+            gh pr create --base main --head "$branch" --title "Bump verified vendor CLI pins" --body-file scripts/ci/vendor_cli_pin_pr_body.md
+          fi

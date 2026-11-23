@@ -23,11 +23,11 @@ of the subscription band still runs. Only a full-cascade miss is an ops_only /
 hard fail — never "top up Anthropic" while another keyed provider remains.
 
 NVIDIA is first-class before Cerebras whenever ``NVIDIA_API_KEY`` is present.
-Default **text** model is ``nvidia/nemotron-3-ultra-550b-a55b`` (override
-``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
-``nvidia/nemotron-3.5-super-vl-120b-a12b``, with automatic fallback to
-``meta/llama-3.2-90b-vision-instruct`` on timeout/error (override
-``NVIDIA_VISION_MODEL``). Inject keys via ``/etc/radon/env``; never commit secrets.
+Every rung, including the paused ones, resolves its model through
+``latest.resolved_default``: an env override, else the provider's own latest
+alias or account default, else the catalog refresh's newest flagship by
+release date. There is no pinned snapshot id. Inject keys via
+``/etc/radon/env``; never commit secrets.
 """
 from __future__ import annotations
 
@@ -169,8 +169,6 @@ _CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140"
 # ChatGPT subscription endpoint the codex CLI uses. api.openai.com meters the
 # prepaid wallet and rejects the grant ("no credits remaining", live 2026-09-18).
 _CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
-# GPT-5.5 retired from ChatGPT sign-in on 2026-10-14; API-key sessions retain it.
-_CODEX_SUBSCRIPTION_MODEL = "gpt-6.1-sol"
 # Google access runs ONLY through the Antigravity CLI (`agy -p`), operator
 # 2026-09-18: no Google API key or OAuth token path, under any flag. The
 # Antigravity grant lacks the generativelanguage scope (403 live), so there is
@@ -198,19 +196,6 @@ _ANTIGRAVITY_CLI_ENV_ALLOWLIST = frozenset(
         "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
     }
 )
-
-# /v1/models lists ids the account cannot call, so defaults are chosen by a
-# live 1-token chat probe on the production key, not by the listing. Probe
-# 2026-11-01: nemotron-3-super-120b-a12b and llama-3.2-11b-vision answer 404
-# "Function ... not found for account"; llama-3.2-90b-vision answered 0/10 in
-# production over 24h (ReadTimeout). Ultra and Super VL answered 200.
-_NVIDIA_SUPER_VL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-_NVIDIA_ULTRA = "nvidia/nemotron-3-ultra-550b-a55b"
-_NVIDIA_VISION_DEFAULT = _NVIDIA_SUPER_VL
-_NVIDIA_VISION_FALLBACK = "meta/llama-3.2-90b-vision-instruct"
-_NVIDIA_TEXT_DEFAULT = _NVIDIA_ULTRA
-# Nemotron reasoning models: reasoning on by default eats small JSON budgets.
-_NVIDIA_REASONING_OFF = frozenset({_NVIDIA_SUPER_VL, _NVIDIA_ULTRA})
 
 # Env inventory for cloud/.env.example tests: subscription material only.
 _ANTHROPIC_KEYS = _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
@@ -242,31 +227,8 @@ _CREDIT_MARKERS = (
     "exceeded your current quota",
 )
 
-_DEFAULT_VISION_MODELS = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "grok": "grok-4.6",
-    "codex": "gpt-5.5",
-    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
-    "nvidia": _NVIDIA_VISION_DEFAULT,
-    # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
-    # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
-    # endpoints 2026-09-03 (dedicated only). gpt-oss-120b is text-only.
-    # qwen-3.8-27b accepts PNG/JPEG data URIs, matching Reviewer and CTA
-    # vision bodies. Override with CEREBRAS_VISION_MODEL / CEREBRAS_MODEL.
-    "cerebras": "qwen-3.8-27b",
-}
-
-_DEFAULT_TEXT_MODELS = {
-    "anthropic": "claude-sonnet-4-6",
-    "grok": "grok-4.6",
-    "codex": "gpt-5.5",
-    "antigravity": "",  # account default unless ANTIGRAVITY_MODEL is set
-    "nvidia": _NVIDIA_TEXT_DEFAULT,
-    "cerebras": "qwen-3.8-27b",
-}
-
-# qwen-3.8-27b defaults reasoning to high; disable so JSON/vision extraction
-# is not consumed by chain-of-thought on the last ladder rung.
+# Cerebras reasoning defaults to high; disable so JSON extraction is not
+# consumed by chain-of-thought on the last ladder rung.
 _CEREBRAS_REQUEST_EXTRAS = {"reasoning_effort": "none"}
 
 _SECRET_PATTERN = re.compile(
@@ -589,57 +551,51 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
 def _model_for(
     name: str, env: Mapping[str, str], *, kind: str = "vision", auth_kind: str = "api_key"
 ) -> str:
-    defaults = _DEFAULT_VISION_MODELS if kind == "vision" else _DEFAULT_TEXT_MODELS
+    """Env override, else the provider's latest alias or catalog flagship.
+
+    ``auth_kind`` is retained for callers. Subscription and API sessions
+    share one resolution path, so a retired snapshot is not kept for either.
+    """
+    del auth_kind
+    from .latest import resolved_default
+
     if name == "anthropic":
         if kind == "text":
-            return _first_env_model(
-                env,
-                "RADON_RESEARCH_MODEL",
-                "ANTHROPIC_MODEL",
-                default=defaults["anthropic"],
+            chosen = _first_env_model(
+                env, "RADON_RESEARCH_MODEL", "ANTHROPIC_MODEL", default=""
             )
-        return _first_env_model(
-            env, "ANTHROPIC_VISION_MODEL", "ANTHROPIC_MODEL", default=defaults["anthropic"]
-        )
+        else:
+            chosen = _first_env_model(
+                env, "ANTHROPIC_VISION_MODEL", "ANTHROPIC_MODEL", default=""
+            )
+        return chosen or resolved_default(name, kind=kind)
     if name == "grok":
-        return _first_env_model(env, "XAI_MODEL", "GROK_MODEL", default=defaults["grok"])
+        return _first_env_model(env, "XAI_MODEL", "GROK_MODEL", default="") or resolved_default(name, kind=kind)
     if name == "codex":
-        default = _CODEX_SUBSCRIPTION_MODEL if auth_kind == "subscription" else defaults["codex"]
         if kind == "vision":
-            return _first_env_model(
-                env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=default
-            )
-        return _first_env_model(env, "OPENAI_MODEL", default=default)
+            chosen = _first_env_model(env, "OPENAI_VISION_MODEL", "OPENAI_MODEL", default="")
+        else:
+            chosen = _first_env_model(env, "OPENAI_MODEL", default="")
+        return chosen or resolved_default(name, kind=kind)
     if name == "antigravity":
-        return _first_env_model(env, "ANTIGRAVITY_MODEL", default=defaults["antigravity"])
+        return _first_env_model(env, "ANTIGRAVITY_MODEL", default="") or resolved_default(name, kind=kind)
     if name == "nvidia":
         if kind == "vision":
-            return _first_env_model(
-                env,
-                "NVIDIA_VISION_MODEL",
-                "NVIDIA_MODEL",
-                default=_NVIDIA_VISION_DEFAULT,
-            )
-        return _first_env_model(
-            env,
-            "NVIDIA_TEXT_MODEL",
-            "NVIDIA_MODEL",
-            default=_NVIDIA_TEXT_DEFAULT,
-        )
+            chosen = _first_env_model(env, "NVIDIA_VISION_MODEL", "NVIDIA_MODEL", default="")
+        else:
+            chosen = _first_env_model(env, "NVIDIA_TEXT_MODEL", "NVIDIA_MODEL", default="")
+        return chosen or resolved_default(name, kind=kind)
     if name == "cerebras":
-        return _first_env_model(
-            env, "CEREBRAS_VISION_MODEL", "CEREBRAS_MODEL", default=defaults["cerebras"]
-        )
-    return name
+        chosen = _first_env_model(env, "CEREBRAS_VISION_MODEL", "CEREBRAS_MODEL", default="")
+        return chosen or resolved_default(name, kind=kind)
+    if name == "cursor":
+        return ""
+    return ""
 
 
 def _nvidia_vision_models(env: Mapping[str, str]) -> tuple[str, ...]:
-    """Primary NVIDIA vision id, then the Llama 90B fallback when distinct."""
-    primary = _model_for("nvidia", env, kind="vision")
-    models = [primary]
-    if primary != _NVIDIA_VISION_FALLBACK:
-        models.append(_NVIDIA_VISION_FALLBACK)
-    return tuple(models)
+    """The resolved NVIDIA vision id. No second pinned fallback."""
+    return (_model_for("nvidia", env, kind="vision"),)
 
 
 def _anthropic_headers(api_key: str, *, subscription: bool) -> dict[str, str]:
@@ -1212,10 +1168,10 @@ def _nvidia_request_extras(model: str) -> dict[str, Any]:
     """Keep Nemotron reasoning within our small, final-JSON budgets.
 
     API token streaming is separate from the bounded HTTP transport reader:
-    the latter expects one JSON document, not SSE events. These fields are
-    model-specific so the retained Llama vision fallback stays compatible.
+    the latter expects one JSON document, not SSE events. The family check
+    follows whichever Nemotron the catalog currently resolved.
     """
-    if model in _NVIDIA_REASONING_OFF:
+    if (model or "").startswith("nvidia/nemotron"):
         return {"reasoning_effort": "none", "stream": False}
     return {}
 

@@ -72,5 +72,5 @@ fi
 if env -i "${TRAIN_ENV[@]}" python3.13 -c "import llamafactory" >/dev/null 2>&1; then
   exec env -i "${TRAIN_ENV[@]}" python3.13 -m llamafactory.cli train "$LF_CONFIG" dataset_dir="$DATA_DIR"
 fi
-echo "LLaMA-Factory is not installed. pip install -r scripts/newsfeed/slm/requirements-slm.txt in the train venv only. Or SLM_TRAINER=mlx." >&2
+echo "LLaMA-Factory is not installed. pip install --no-deps -r scripts/newsfeed/slm/requirements-slm.txt in the train venv only. Or SLM_TRAINER=mlx." >&2
 exit 2

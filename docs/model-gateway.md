@@ -26,6 +26,21 @@ Each provider admits `RADON_MODEL_PROVIDER_CONCURRENCY` in-flight calls at a tim
 
 NVIDIA and Cerebras are paused in every environment by `engine.PAUSED_BY_DEFAULT` (operator, 2026-11-01). A paused rung reads as unkeyed, so no request is sent, and its stored key is kept. `RADON_LADDER_PAUSED_PROVIDERS` in the gateway env adds more rungs and cannot unpause these two. Cerebras returns 402 for every model. NVIDIA won 4 of about 1,550 requests over 3 days, and its research figure match is unsafe in either model order (pilot results, PR #1382). To unpause, remove the name from the set.
 
+## Latest model
+
+Every rung resolves a model in this order (operator, 2026-11-22). An env override wins. Otherwise the provider's own latest alias or account default is used when the CLI or API has one. Otherwise the id is the newest chat flagship from the catalog refresh, chosen by release date (`latest.select_latest_flagship`). Source files do not pin a snapshot id.
+
+| Provider | Unset resolution |
+| --- | --- |
+| Antigravity | Account default. `agy` is invoked with no `--model` unless `ANTIGRAVITY_MODEL` is set. |
+| Grok | `grok-latest`, the alias xAI moves. `XAI_MODEL` or `GROK_MODEL` overrides it. |
+| Anthropic | Catalog row (`created_at`). `RADON_RESEARCH_MODEL`, `ANTHROPIC_MODEL`, or `ANTHROPIC_VISION_MODEL` overrides it. The Messages API has no floating latest id. |
+| Codex | Catalog row, else the newest flagship in `~/.codex/models_cache.json`. The ChatGPT grant cannot list models. `OPENAI_MODEL` or `OPENAI_VISION_MODEL` overrides it. |
+| Cursor | Unwired. No model id. |
+| NVIDIA, Cerebras | Paused, and still resolved the same way from the catalog. A stored key is used only to list models. `NVIDIA_*_MODEL` and `CEREBRAS_*_MODEL` override the id. There is no second pinned vision fallback. |
+
+Nemotron ids (`nvidia/nemotron…`) still send `reasoning_effort: none` and `stream: false`. Cerebras requests still send `reasoning_effort: none`. CLI binaries stay checksum and signature pinned. `.github/workflows/vendor-cli-latest.yml` opens a `factory/` pull request when a verified newer release exists.
+
 ## Upgrades and rollback
 
 CLI packages and inference dependencies are built at reviewed pins in immutable release images. The gateway target starts from `runtime-deps` and copies `scripts/` after the torch lock so a scripts-only push reuses those layers. `scripts/model_gateway/model-artifacts.json` pins the existing Chronos and local embedding snapshots and their asset hashes. Loading and cache migration verify those assets. Embedding model spaces do not change during fallback or upgrades.
