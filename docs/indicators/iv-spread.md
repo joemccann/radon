@@ -337,6 +337,8 @@ Key `iv-spread` in: writer heartbeat, snapshot service, route
 "iv-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: true },
 ```
 
+The window comment names the 22:15 UTC close fire. Section E is the timer: every 5 minutes 09:00-16:55 ET Mon-Fri, plus 22:15 and 23:15 UTC. The 26h window stays because weekend heartbeats are the longest gap.
+
 `scripts/watchdog/services.py`, two edits beside `ivrank`: the
 `SCHEDULED_SERVICES` entry `{"open": 26 * _HOUR, "closed": 26 * _HOUR,
 "requires_ib": True}` and the daily-bucket check list, comments naming 22:15
@@ -365,7 +367,7 @@ radon-iv-spread.timer")` via the existing `expectedOnCalendar` /
 
 ### F.1 FastAPI: none
 
-Daily timer + Turso-reading Next.js route, same as ivrank. No operator
+Intraday plus daily timer, Turso-reading Next.js route, same shape as ivrank. No operator
 rescan in v1.
 
 ### F.2 Next.js route — `web/app/api/iv-spread/route.ts`
@@ -390,16 +392,18 @@ const MISSING_IV_SPREAD = {
   excluded: [],
 };
 
-// radon-iv-spread.timer fires daily at 22:15 UTC including weekends, so a
-// snapshot older than two days means the writer is down. A stale_source
+// radon-iv-spread.timer fires every 5 minutes in ET trading hours plus daily
+// at 22:15/23:15 UTC including weekends, so a snapshot older than two days
+// means the writer is down. A stale_source
 // re-serve refreshes scan_time every run, so its age rides the DATA date
 // (as_of) via ivSpreadContentTimestampMs; other payloads age by scan_time.
 const IV_SPREAD_MAX_AGE_MS = 48 * 60 * 60_000;
 ```
 
-`dbFirstRead({ fromDb, fromDisk, maxAgeMs, label: "iv-spread", isDegraded:
+`dbFirstRead({ fromDb, maxAgeMs, label: "iv-spread", isDegraded:
 isMissingPayload })`, `fromDb` = latest `scan_snapshots` row for
-`service = 'iv-spread'`, `fromDisk` = `data/iv_spread.json`;
+`service = 'iv-spread'`. No disk read. A failed Turso read serves the last
+good in-memory snapshot for that label.
 `staleCollapse(MISSING_IV_SPREAD, result)` on the not-fresh path;
 `setCacheResponseHeaders(..., { maxAgeSeconds: 300,
 staleWhileRevalidateSeconds: 3600, requestId, cacheState: "HIT", tags:
@@ -570,8 +574,7 @@ the intraday timer line. Types live in `web/lib/ivSpread.ts`.
    nothing; backfill without IB raises; row-upsert failure folds into an
    error heartbeat while the snapshot still lands; JSON mirrored atomically.
 2. `web/tests/iv-spread-api.test.ts` — in-memory `@libsql/client` seeded with
-   `scan_snapshots`; Turso-beats-older-disk; disk fallback; Turso throw →
-   disk at 200; no cross-service leak; exact `MISSING_IV_SPREAD` at 200 for
+   `scan_snapshots`; no cross-service leak; exact `MISSING_IV_SPREAD` at 200 for
    absent; >48h stale → `{ ...MISSING, stale: true, scan_time }`; inside 48h
    served; `stale_source` passes through; null `z_score`/`regime` intact;
    `dynamic`, `runtime`, no `POST`, cache headers + `iv-spread` tag.
