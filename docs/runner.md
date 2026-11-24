@@ -297,7 +297,7 @@ a client upgrade. A provider requiring new consent shows up as `no_key` or a
 
 ### 6. Model readiness (bot shell)
 
-The installed gateway needs the same model resolver as the VPS. After an update, check provider status and run a generation through the local socket. The health endpoint alone does not exercise model selection.
+The installed gateway copies `model_gateway/latest.py` with the rest of `GATEWAY_FILES`, the same resolver the VPS uses. After an update, the `status` command below lists wired providers and capabilities.
 
 ```bash
 RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway-local/run/gateway.sock \
