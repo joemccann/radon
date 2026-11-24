@@ -20,6 +20,11 @@ LINUX_PIN = ROOT / "docker/app/vendor-clis/antigravity.json"
 DARWIN_PIN = ROOT / "scripts/runner/antigravity-darwin.json"
 NPM_PIN = ROOT / "docker/app/vendor-clis/package.json"
 TEAM_ID = "EQHXZ8M8AV"
+# The manifest supplies both url and sha512, so the digest alone cannot decide
+# trust; the artifact must also live under Google's official bucket path.
+OFFICIAL_URL = re.compile(
+    r"https://storage\.googleapis\.com/antigravity-public/antigravity-cli/[0-9.]+-[0-9]+/(linux-x64|linux-arm|darwin-arm)/cli_[a-z0-9_]+\.tar\.gz"
+)
 ARCH_TOKEN = {"amd64": "linux-x64", "arm64": "linux-arm", "darwin-arm64": "darwin-arm"}
 NPM_PACKAGES = (
     "@anthropic-ai/claude-code",
@@ -50,14 +55,20 @@ def require_npm_integrity(payload: bytes, integrity: str) -> None:
         raise ValueError("npm checksum mismatch")
 
 
+def require_official_url(url: str) -> None:
+    if not isinstance(url, str) or not OFFICIAL_URL.fullmatch(url):
+        raise ValueError("artifact url is not the official Antigravity release path")
+
+
 def require_arch(url: str, arch: str) -> None:
+    require_official_url(url)
     token = ARCH_TOKEN[arch]
     if token not in (url or ""):
         raise ValueError(f"arch {arch} is not in the artifact url")
 
 
-def require_team(team_id: str) -> None:
-    if team_id != TEAM_ID:
+def require_team(team_id: object) -> None:
+    if not isinstance(team_id, str) or team_id != TEAM_ID:
         raise ValueError("signer team id is not Google's")
 
 
@@ -89,7 +100,7 @@ def verified_agy_pins(manifest: dict, blobs: dict[str, bytes]) -> tuple[dict, di
     if darwin_bytes is None:
         raise ValueError("missing bytes for darwin-arm64")
     require_sha512_hex(darwin_bytes, darwin_row["sha512"])
-    require_team(str(darwin_row.get("team_id") or TEAM_ID))
+    require_team(darwin_row.get("team_id"))
     current = json.loads(LINUX_PIN.read_text(encoding="utf-8"))
     linux_pin = {
         "version": str(manifest["version"]),
@@ -176,6 +187,8 @@ def apply_agy() -> bool:
             raise ValueError("Antigravity platform versions disagree")
         row = {"url": url, "sha512": digest}
         if arch == "darwin-arm64":
+            # The manifest carries no signer; the pin asserts Google's team id
+            # and the Darwin installer verifies it against codesign on install.
             row["team_id"] = TEAM_ID
         combined["platforms"][arch] = row
         blobs[url] = payload

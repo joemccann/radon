@@ -10,6 +10,7 @@ import pytest
 from scripts.ci import bump_vendor_cli_pins as pins
 
 ROOT = Path(__file__).resolve().parents[2]
+OFFICIAL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/9.9.9-1234/"
 
 
 def _blob(url: str, body: bytes) -> tuple[str, bytes]:
@@ -24,15 +25,15 @@ def test_agy_pins_require_checksum_team_and_arch():
         "version": "9.9.9",
         "platforms": {
             "amd64": {
-                "url": "https://example.test/antigravity/linux-x64/cli.tar.gz",
+                "url": OFFICIAL + "linux-x64/cli_linux_x64.tar.gz",
                 "sha512": hashlib.sha512(linux).hexdigest(),
             },
             "arm64": {
-                "url": "https://example.test/antigravity/linux-arm/cli.tar.gz",
+                "url": OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz",
                 "sha512": hashlib.sha512(arm).hexdigest(),
             },
             "darwin-arm64": {
-                "url": "https://example.test/antigravity/darwin-arm/cli.tar.gz",
+                "url": OFFICIAL + "darwin-arm/cli_mac_arm64.tar.gz",
                 "sha512": hashlib.sha512(darwin).hexdigest(),
                 "team_id": pins.TEAM_ID,
             },
@@ -54,10 +55,10 @@ def test_checksum_mismatch_writes_nothing():
     manifest = {
         "version": "9.9.9",
         "platforms": {
-            "amd64": {"url": "https://example.test/linux-x64/cli.tar.gz", "sha512": "ab" * 64},
-            "arm64": {"url": "https://example.test/linux-arm/cli.tar.gz", "sha512": "cd" * 64},
+            "amd64": {"url": OFFICIAL + "linux-x64/cli_linux_x64.tar.gz", "sha512": "ab" * 64},
+            "arm64": {"url": OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz", "sha512": "cd" * 64},
             "darwin-arm64": {
-                "url": "https://example.test/darwin-arm/cli.tar.gz",
+                "url": OFFICIAL + "darwin-arm/cli_mac_arm64.tar.gz",
                 "sha512": "ef" * 64,
                 "team_id": pins.TEAM_ID,
             },
@@ -69,12 +70,12 @@ def test_checksum_mismatch_writes_nothing():
 
 def test_wrong_team_id_is_refused():
     body = b"darwin"
-    url = "https://example.test/darwin-arm/cli.tar.gz"
+    url = OFFICIAL + "darwin-arm/cli_mac_arm64.tar.gz"
     manifest = {
         "version": "1.2.3",
         "platforms": {
-            "amd64": {"url": "https://example.test/linux-x64/a.tar.gz", "sha512": hashlib.sha512(b"a").hexdigest()},
-            "arm64": {"url": "https://example.test/linux-arm/b.tar.gz", "sha512": hashlib.sha512(b"b").hexdigest()},
+            "amd64": {"url": OFFICIAL + "linux-x64/cli_linux_x64.tar.gz", "sha512": hashlib.sha512(b"a").hexdigest()},
+            "arm64": {"url": OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz", "sha512": hashlib.sha512(b"b").hexdigest()},
             "darwin-arm64": {"url": url, "sha512": hashlib.sha512(body).hexdigest(), "team_id": "NOTOURS123"},
         },
     }
@@ -87,16 +88,58 @@ def test_wrong_team_id_is_refused():
         pins.verified_agy_pins(manifest, blobs)
 
 
+def _official_manifest(**overrides: dict) -> tuple[dict, dict]:
+    bodies = {"amd64": b"a", "arm64": b"b", "darwin-arm64": b"c"}
+    paths = {"amd64": "linux-x64/cli_linux_x64.tar.gz", "arm64": "linux-arm/cli_linux_arm64.tar.gz", "darwin-arm64": "darwin-arm/cli_mac_arm64.tar.gz"}
+    platforms = {}
+    for arch, body in bodies.items():
+        row = {"url": OFFICIAL + paths[arch], "sha512": hashlib.sha512(body).hexdigest()}
+        if arch == "darwin-arm64":
+            row["team_id"] = pins.TEAM_ID
+        row.update(overrides.get(arch, {}))
+        platforms[arch] = row
+    manifest = {"version": "9.9.9", "platforms": platforms}
+    blobs = {platforms[arch]["url"]: body for arch, body in bodies.items()}
+    return manifest, blobs
+
+
+def test_foreign_host_artifact_url_is_refused_even_with_matching_checksum():
+    for arch, path in (("amd64", "linux-x64/cli_linux_x64.tar.gz"), ("darwin-arm64", "darwin-arm/cli_mac_arm64.tar.gz")):
+        manifest, blobs = _official_manifest(**{arch: {"url": "https://mirror.example.test/antigravity-cli/9.9.9-1234/" + path}})
+        with pytest.raises(ValueError, match="official"):
+            pins.verified_agy_pins(manifest, blobs)
+
+
+def test_official_url_check_rejects_lookalike_hosts_and_paths():
+    for url in (
+        "https://storage.googleapis.com.example.test/antigravity-public/antigravity-cli/9.9.9-1/linux-x64/cli_linux_x64.tar.gz",
+        "https://storage.googleapis.com/other-bucket/antigravity-cli/9.9.9-1/linux-x64/cli_linux_x64.tar.gz",
+        "http://storage.googleapis.com/antigravity-public/antigravity-cli/9.9.9-1/linux-x64/cli_linux_x64.tar.gz",
+        "https://storage.googleapis.com/antigravity-public/antigravity-cli/9.9.9-1/linux-x64/../cli_linux_x64.tar.gz",
+        "",
+    ):
+        with pytest.raises(ValueError, match="official"):
+            pins.require_official_url(url)
+    pins.require_official_url(OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz")
+
+
+def test_missing_darwin_team_id_is_refused():
+    manifest, blobs = _official_manifest()
+    del manifest["platforms"]["darwin-arm64"]["team_id"]
+    with pytest.raises(ValueError, match="team"):
+        pins.verified_agy_pins(manifest, blobs)
+
+
 def test_wrong_arch_token_is_refused():
     body = b"linux"
     digest = hashlib.sha512(body).hexdigest()
     manifest = {
         "version": "1.2.3",
         "platforms": {
-            "amd64": {"url": "https://example.test/windows-x64/a.tar.gz", "sha512": digest},
-            "arm64": {"url": "https://example.test/linux-arm/b.tar.gz", "sha512": digest},
+            "amd64": {"url": OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz", "sha512": digest},
+            "arm64": {"url": OFFICIAL + "linux-arm/cli_linux_arm64.tar.gz", "sha512": digest},
             "darwin-arm64": {
-                "url": "https://example.test/darwin-arm/c.tar.gz",
+                "url": OFFICIAL + "darwin-arm/cli_mac_arm64.tar.gz",
                 "sha512": digest,
                 "team_id": pins.TEAM_ID,
             },
