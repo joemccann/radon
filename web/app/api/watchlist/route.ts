@@ -24,6 +24,9 @@ function rowToWatch(row: WatchlistRow) {
 
 export const radonCapability = { GET: "read", POST: "mutate.workspace" };
 
+const MAX_SYMBOL_LENGTH = 32;
+const MAX_SECTOR_LENGTH = 128;
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const { userId } = await auth();
@@ -87,6 +90,12 @@ export async function POST(req: Request): Promise<Response> {
   const sector = typeof body.sector === "string" && body.sector.trim().length > 0
     ? body.sector.trim()
     : null;
+  if (symbol.length > MAX_SYMBOL_LENGTH || (sector !== null && sector.length > MAX_SECTOR_LENGTH)) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: "symbol or sector exceeds size limit", requestId }),
+      requestId,
+    );
+  }
 
   try {
     await dbExecute(
