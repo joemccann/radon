@@ -362,6 +362,15 @@ def test_root_never_chowns_or_chmods_the_daemon_log_by_path():
             assert "chown" not in line
 
 
+def test_standalone_logd_install_validates_the_source_before_running_it():
+    # --install-logd returns before main() reaches check_source, and the
+    # flag probe runs $SRC/runner_logd.py with the caller's privileges.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    assert body.index("check_source") < body.index("flag-status")
+    assert body.count("check_source") == 1
+
+
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
     # install -d by root follows a link planted by the service account that
     # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/

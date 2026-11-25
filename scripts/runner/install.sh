@@ -902,6 +902,9 @@ EOF
 # previously installed job so the six-hour updater cannot keep it active.
 install_log_daemon() {
   local status label=com.radon.runner-logd
+  # The flag probe runs a helper from the source tree with the caller's
+  # privileges, so the tree is validated before anything in it executes.
+  check_source
   status="$("$GUARD_PYTHON" -I "$SRC/runner_logd.py" flag-status --flag "$LOGD_FLAG")" || status=disabled
   if [[ "$status" != enabled ]]; then
     if [[ -f "$LOGD_PLIST" && ! -L "$LOGD_PLIST" ]]; then
@@ -912,7 +915,6 @@ install_log_daemon() {
     return 0
   fi
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; return 1; }
-  check_source
   ensure_logd_user
   refuse_link "$LOGD_ROOT" "$LOGD_ROOT/keys" "$LOGD_ROOT/repo" || return 77
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
