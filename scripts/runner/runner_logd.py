@@ -315,6 +315,32 @@ def _send(sock: socket.socket, socket_path: str, loop: str, line: str, env: dict
     return True
 
 
+_BLOCK_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]+-----")
+_BLOCK_END = re.compile(r"-----END [A-Z0-9 ]+-----")
+
+
+class LineScrubber:
+    """scrub_line per fragment, with the key-block state carried across lines.
+
+    A key printed one line at a time never shows BEGIN and END to the same
+    scrub call. Inside a block every line is dropped until its END.
+    """
+
+    def __init__(self, env: dict) -> None:
+        self.env = env
+        self.in_block = False
+
+    def feed(self, line: str) -> str | None:
+        if self.in_block:
+            if _BLOCK_END.search(line):
+                self.in_block = False
+            return None
+        if _BLOCK_BEGIN.search(line) and not _BLOCK_END.search(line):
+            self.in_block = True
+            return scrub_line(_BLOCK_BEGIN.sub("[redacted key block]", line), self.env)
+        return scrub_line(line, self.env)
+
+
 def follow(file_path: Path, socket_path: str, loop: str) -> int:
     """Stream each new log line. A missing daemon is recorded and does not raise."""
     try:
@@ -335,11 +361,15 @@ def follow(file_path: Path, socket_path: str, loop: str) -> int:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setblocking(False)
     sent = False
+    scrubber = LineScrubber(dict(os.environ))
     with file_path.open("r", encoding="utf-8", errors="replace") as handle:
         while True:
             line = handle.readline()
             if line:
-                if not _send(sock, socket_path, loop, line.rstrip("\n"), dict(os.environ)):
+                cleaned = scrubber.feed(line.rstrip("\n"))
+                if cleaned is None:
+                    continue
+                if not _send(sock, socket_path, loop, cleaned, dict(os.environ)):
                     return 1
                 sent = True
                 continue

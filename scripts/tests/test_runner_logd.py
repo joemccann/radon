@@ -272,6 +272,27 @@ def test_logd_install_is_gated_before_any_account_key_or_daemon():
     assert ">> \"$LOGD_FLAG\"" not in src
 
 
+def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
+    # follow() scrubs one readline fragment at a time. A key printed as
+    # separate lines never shows BEGIN and END to the same scrub call, so
+    # the block state must live across lines.
+    scrubber = logd.LineScrubber({})
+    marker = "-----{} OPENSSH PRIVATE KEY-----"
+    out = [scrubber.feed(line) for line in (
+        "before",
+        marker.format("BEGIN"),
+        "synthetic-body-line-one",
+        "synthetic-body-line-two",
+        marker.format("END"),
+        "after",
+    )]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "synthetic-body" not in joined
+    assert "before" in joined and "after" in joined
+    assert "redacted" in joined
+    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789") == "GH_TOKEN=[redacted]"
+
+
 def test_logd_plist_runs_as_its_own_account_without_secrets():
     out = subprocess.run([BASH, str(INSTALL), "--print-logd-plist"], capture_output=True, check=True)
     plist = plistlib.loads(out.stdout)
