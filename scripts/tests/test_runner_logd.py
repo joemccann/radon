@@ -340,6 +340,16 @@ def test_named_assignment_redaction_is_linear_on_a_long_word(logd):
     assert logd.scrub_line("token of appreciation", {}) == "token of appreciation"
 
 
+def test_follow_scrubs_a_block_scalar_body_across_lines(logd):
+    # The canonical scrubber consumes a YAML block body only when it sees
+    # the header. The follower gives it the recent lines as context.
+    scrubber = logd.LineScrubber({})
+    out = [scrubber.feed(line) for line in ("password: |\n", "  opaquevalue123\n", "  opaquevalue456\n", "next: ok\n")]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+
+
 def test_root_never_chowns_or_chmods_the_daemon_log_by_path():
     # daemon.log lives in the daemon account's directory: a check then a
     # root chown by path name can be raced with a link. The file is created
