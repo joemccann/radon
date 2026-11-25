@@ -86,6 +86,7 @@ def _forecast_rig(monkeypatch):
     {"past_covariates": {"c": [float("nan")] * 8}},
     {"past_covariates": {"c" * 65: [1.0] * 8}},
     {"future_covariates": [{"c": 1.0}] * 10_001},
+    {"future_covariates": [{f"c{i}": 1.0} for i in range(17)]},
     {"future_covariates": [{"c": "x" * 65}]},
     {"future_covariates": "c=1"},
 ])

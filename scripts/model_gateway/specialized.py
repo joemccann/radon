@@ -124,6 +124,7 @@ def _covariates(value: Any, name: str) -> Any:
     if isinstance(value, list):
         if not 1 <= len(value) <= MAX_COVARIATE_ROWS:
             raise ValueError(f"invalid {name} rows")
+        columns: set[str] = set()
         for row in value:
             if not isinstance(row, dict) or not 1 <= len(row) <= MAX_COVARIATE_COLUMNS:
                 raise ValueError(f"invalid {name} row")
@@ -131,6 +132,11 @@ def _covariates(value: Any, name: str) -> Any:
                 if not isinstance(column, str) or not 1 <= len(column) <= MAX_COVARIATE_TEXT:
                     raise ValueError(f"invalid {name} column")
                 _covariate_cell(cell)
+            # The frame is the union of every row's keys: bound that, not
+            # just each row, or sparse rows expand into a dense wide table.
+            columns.update(row)
+            if len(columns) > MAX_COVARIATE_COLUMNS:
+                raise ValueError(f"invalid {name} columns")
         return value
     raise ValueError(f"invalid {name}")
 
