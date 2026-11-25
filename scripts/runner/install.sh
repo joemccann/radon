@@ -913,12 +913,17 @@ install_log_daemon() {
   fi
   chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/daemon.log"
   chmod 600 "$LOGD_ROOT/daemon.log"
-  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" && ! -L "$LOGD_ROOT/keys/id_ed25519" ]]; then
+  # keys/ belongs to the daemon account. Root never chowns or chmods a
+  # name there it did not just create: a planted link would carry the
+  # change to whatever it points at.
+  [[ ! -L "$LOGD_ROOT/keys/id_ed25519" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
+  [[ ! -L "$LOGD_ROOT/keys/id_ed25519.pub" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
+  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" ]]; then
     sudo -u "$LOGD_USER" /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-runner-logd -f "$LOGD_ROOT/keys/id_ed25519"
+    chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
+    chmod 600 "$LOGD_ROOT/keys/id_ed25519"
+    chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
   fi
-  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
-  chmod 600 "$LOGD_ROOT/keys/id_ed25519"
-  chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
   write_logd_config
   atomic_text "$LOGD_PLIST" 644 print_logd_plist
   plutil -lint "$LOGD_PLIST" >/dev/null

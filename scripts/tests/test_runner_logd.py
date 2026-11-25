@@ -272,6 +272,26 @@ def test_logd_install_is_gated_before_any_account_key_or_daemon():
     assert ">> \"$LOGD_FLAG\"" not in src
 
 
+def test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key():
+    # install.sh re-runs as root every refresh. The keys/ directory belongs
+    # to the daemon account, so a chown/chmod by path name there must only
+    # ever land on a key root just generated, never on a planted link.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    keygen = body.index("ssh-keygen")
+    for leaf in ("keys/id_ed25519\"", "keys/id_ed25519.pub\""):
+        refusal = body.index(f'[[ ! -L "$LOGD_ROOT/{leaf}')
+        assert refusal < keygen
+    block = body[body.index("if [[ ! -e \"$LOGD_ROOT/keys/id_ed25519\" ]]"):]
+    block = block[: block.index("\n  fi\n")]
+    assert "ssh-keygen" in block
+    assert block.count("chown") == 1 and block.count("chmod") == 2
+    after = body[keygen:].split("\n  fi\n", 1)[1]
+    for line in after.splitlines():
+        if "id_ed25519" in line:
+            assert "chown" not in line and "chmod" not in line
+
+
 def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
     # follow() scrubs one readline fragment at a time. A key printed as
     # separate lines never shows BEGIN and END to the same scrub call, so
