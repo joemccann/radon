@@ -523,8 +523,57 @@ describe("account-derived fields never reach the demo database", () => {
     const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
     const byService = Object.fromEntries(statements.map((s) => [s.args[0], JSON.parse(s.args[2])]));
     const universe = byService["equibles-ats-venue-share"].universe;
-    expect(universe).toEqual({ order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"], this_cycle: 12, index_offset: 3 });
+    expect(universe).toEqual({ order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"] });
     expect(JSON.stringify(universe)).not.toMatch(/\b(?:47|147|7)\b/);
     expect(byService.gex).toEqual({ counts: { portfolio: 3 } });
+  });
+
+  it("drops the tagged private names and the cycle position from the mirrored ATS venue-share payload", async () => {
+    // A portfolio name outside every public tier reveals an open position
+    // by its presence; this_cycle minus the index_offset delta reveals the
+    // core size. Both are account-derived and stay in the production tier.
+    const payload = JSON.stringify({
+      count: 2,
+      tickers: ["AAPL", "XOFF"],
+      current: [{ ticker: "XOFF", z: 2 }, { ticker: "AAPL", z: 1 }],
+      series: { AAPL: [{ w: 1 }], XOFF: [{ w: 1 }] },
+      errors: [{ ticker: "XOFF", error: "late" }, { ticker: "MSFT", error: "404" }],
+      carried_forward: ["XOFF"],
+      universe: {
+        order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"],
+        private_tickers: ["XOFF"],
+        this_cycle: 12,
+        index_offset: 3,
+      },
+    });
+    const src = {
+      execute: vi.fn().mockResolvedValue({
+        columns: ["service", "scan_time", "payload", "rn"],
+        rows: [{ service: "equibles-ats-venue-share", scan_time: "2026-08-21T21:00:00Z", payload, rn: 1 }],
+      }),
+    };
+    const dst = { execute: vi.fn().mockResolvedValue({ rows: [] }), batch: vi.fn().mockResolvedValue(undefined) };
+
+    await runMarketMirror({
+      src,
+      dst,
+      tables: { latestOne: [], perKey: [PER_KEY.find((e) => e.table === "scan_snapshots")], history: [], purgedAccountTables: [] },
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      runId: "strip-private-names",
+    });
+
+    const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
+    const mirrored = JSON.parse(statements[0].args[2]);
+    expect(mirrored).toEqual({
+      count: 1,
+      tickers: ["AAPL"],
+      current: [{ ticker: "AAPL", z: 1 }],
+      series: { AAPL: [{ w: 1 }] },
+      errors: [{ ticker: "MSFT", error: "404" }],
+      carried_forward: [],
+      universe: { order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"] },
+    });
+    expect(statements[0].args[2]).not.toContain("XOFF");
   });
 });

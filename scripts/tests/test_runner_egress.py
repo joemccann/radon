@@ -481,6 +481,125 @@ def test_report_groups_would_block_hits_by_day(tmp_path):
     assert report.render(report.summarize("")) == "no would-block hits\n"
 
 
+def test_report_escapes_terminal_control_characters_in_destinations():
+    # The CONNECT host is logged before validation, so a local client can
+    # put any byte into decisions.log. The operator report shows it escaped.
+    report = load_report()
+    rows = [
+        {"day": "2026-11-20", "decision": "would_block", "host": "evil\x1b[2J\x1b[Hclean.invalid", "port": 443},
+        {"day": "2026-11-21\x07", "decision": "would_block", "host": "x.invalid", "port": 443},
+    ]
+    text = report.render(report.summarize("".join(json.dumps(row) + "\n" for row in rows)))
+    assert "\x1b" not in text and "\x07" not in text
+    assert "\\x1b[2J" in text and "\\x07" in text
+    assert "clean.invalid:443 1" in text
+
+
+def test_serve_loop_refuses_connections_past_the_cap_and_bounds_tunnel_idle(proxy, monkeypatch, tmp_path):
+    monkeypatch.setattr(proxy, "DECISION_LOG", tmp_path / "decisions.log")
+    server = socket.socket()
+    server.bind(("localhost", 0))
+    server.listen(8)
+    server.settimeout(0.2)
+    stop = threading.Event()
+    held = []
+
+    def hold(conn, allow, log_path, resolve, load_reason="ok", idle=None):
+        held.append(idle)
+        stop.wait(5)
+        conn.close()
+
+    monkeypatch.setattr(proxy, "handle_connection", hold)
+    monkeypatch.setattr(proxy, "load_allowlist", lambda path: (proxy.parse_allowlist(""), "ok"))
+    slots = threading.BoundedSemaphore(1)
+    thread = threading.Thread(target=proxy.serve_loop, args=(server, stop, slots), daemon=True)
+    thread.start()
+    port = server.getsockname()[1]
+    first = socket.create_connection(("localhost", port), 2)
+    deadline = __import__("time").monotonic() + 3
+    while not held and __import__("time").monotonic() < deadline:
+        __import__("time").sleep(0.02)
+    assert held == [proxy.TUNNEL_IDLE_SECS]
+    second = socket.create_connection(("localhost", port), 2)
+    second.settimeout(2)
+    assert second.recv(1024).startswith(b"HTTP/1.1 503")
+    assert second.recv(1024) == b""
+    stop.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    first.close()
+    second.close()
+    server.close()
+    assert proxy.MAX_CONNECTIONS >= 16
+    logged = [json.loads(line) for line in (tmp_path / "decisions.log").read_text().splitlines()]
+    assert [row["reason"] for row in logged] == ["busy"]
+
+
+def test_a_slow_header_is_cut_at_an_absolute_deadline(proxy, monkeypatch, tmp_path):
+    # The header timeout was per recv: one byte every few seconds held a
+    # connection slot for as long as the 8 KiB header bound allowed.
+    import time
+
+    monkeypatch.setattr(proxy, "HEADER_SECS", 1.0)
+    client, server_side = socket.socketpair()
+    ended: dict[str, float] = {}
+
+    def run() -> None:
+        proxy.handle_connection(server_side, proxy.parse_allowlist(""), tmp_path / "decisions.log", lambda h, p: [], idle=1)
+        ended["at"] = time.monotonic()
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    for _ in range(12):
+        try:
+            client.sendall(b"C")
+        except OSError:
+            break
+        time.sleep(0.25)
+    worker.join(5)
+    alive = worker.is_alive()
+    client.close()
+    assert not alive
+    assert ended["at"] - started < 2.5
+
+
+def test_relay_send_to_a_stalled_peer_is_bounded_by_the_idle_timeout(proxy):
+    # relay() switched the destination to blocking before sendall, so a peer
+    # that stops reading held the worker (and its connection slot) forever.
+    import time
+
+    client, relay_left = socket.socketpair()
+    relay_right, upstream = socket.socketpair()
+    for sock in (relay_right, upstream):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
+    ended: dict[str, float] = {}
+
+    def run() -> None:
+        proxy.relay(relay_left, relay_right, 0.5)
+        ended["at"] = time.monotonic()
+
+    def send() -> None:
+        try:
+            client.sendall(b"x" * (4 * 1024 * 1024))
+        except OSError:
+            pass
+
+    worker = threading.Thread(target=run, daemon=True)
+    sender = threading.Thread(target=send, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    sender.start()
+    worker.join(5)
+    alive = worker.is_alive()
+    for sock in (client, relay_left, relay_right, upstream):
+        sock.close()
+    sender.join(2)
+    assert not alive
+    assert ended["at"] - started < 4
+
+
 def test_runner_does_not_export_the_proxy_when_the_flag_is_absent(rig):
     proc = rig.run(STUB_GROK="echo 'RESULT: https://x/pull/7 - fixed a stale runbook'; exit 0")
     assert proc.returncode == 0, proc.stderr + rig.log()

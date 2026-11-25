@@ -31,12 +31,17 @@ _SECRET_NAME = re.compile(
     r"(?i)^(?:GH_TOKEN|GITHUB_TOKEN|PUSHOVER_USER|PUSHOVER_TOKEN|UW_TOKEN)$"
     r"|(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)$"
 )
+# The name is any whole word (anchored at its start, so a long word is
+# scanned once, not once per start and per split); whether it names a
+# credential is decided on the matched word. The earlier shape put the
+# keyword alternation between two unbounded runs and grew cubically.
 _ASSIGN = re.compile(
-    r"(?i)(?P<name>PUSHOVER_USER|[A-Za-z_][A-Za-z0-9_]*"
-    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)"
-    r"[A-Za-z0-9_]*)"
+    r"(?<![A-Za-z0-9_])(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
     r"(?P<sep>[ \t]*[=:][ \t]*)"
     r"(?P<val>\"[^\"\n]*\"|'[^'\n]*'|\S+)"
+)
+_ASSIGN_NAME = re.compile(
+    r"(?i)PUSHOVER_USER$|TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL"
 )
 _FALLBACK_SHAPES = (
     (re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----.*", re.S), "[redacted-private-key]"),
@@ -102,7 +107,12 @@ def _fallback_shapes(text: str) -> str:
 
 
 def _redact_named_assignments(text: str) -> str:
-    return _ASSIGN.sub(lambda m: m.group("name") + m.group("sep") + "[redacted]", text)
+    def repl(m: re.Match) -> str:
+        if _ASSIGN_NAME.search(m.group("name")) is None:
+            return m.group(0)
+        return m.group("name") + m.group("sep") + "[redacted]"
+
+    return _ASSIGN.sub(repl, text)
 
 
 def _redact_env_values(text: str, env: dict) -> str:
@@ -315,6 +325,77 @@ def _send(sock: socket.socket, socket_path: str, loop: str, line: str, env: dict
     return True
 
 
+_BLOCK_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]+-----")
+_BLOCK_END = re.compile(r"-----END [A-Z0-9 ]+-----")
+
+
+class LineScrubber:
+    """scrub_line per complete line, with the key-block state carried across lines.
+
+    readline on a growing file returns whatever is written so far, so a
+    fragment without its newline is held until the line completes (flush
+    releases it at stop). A key printed one line at a time never shows BEGIN
+    and END to the same scrub call: inside a block every line is dropped
+    until its END.
+    """
+
+    # Enough for a block body padded with blank lines; a header further back
+    # than this is out of context, which is the limit of streaming redaction.
+    CONTEXT_LINES = 64
+
+    def __init__(self, env: dict) -> None:
+        self.env = env
+        self.in_block = False
+        self.pending = ""
+        self.recent: list[str] = []
+
+    def feed(self, fragment: str) -> str | None:
+        self.pending += fragment
+        if not self.pending.endswith("\n"):
+            return None
+        line, self.pending = self.pending.rstrip("\n"), ""
+        return self._line(line)
+
+    def flush(self) -> str | None:
+        if not self.pending:
+            return None
+        line, self.pending = self.pending.rstrip("\n"), ""
+        return self._line(line)
+
+    def _line(self, line: str) -> str | None:
+        if self.in_block:
+            if _BLOCK_END.search(line):
+                self.in_block = False
+            return None
+        if _BLOCK_BEGIN.search(line) and not _BLOCK_END.search(line):
+            self.in_block = True
+            return scrub_line(_BLOCK_BEGIN.sub("[redacted key block]", line), self.env)
+        return self._with_context(line)
+
+    def _with_context(self, line: str) -> str | None:
+        """Scrub the line with the recent lines in front of it.
+
+        The canonical rules consume a YAML block body or a multi-line quoted
+        value only when they see its header. The line is what the context
+        gains by appending it; a line the context absorbs (or that rewrites
+        earlier output) is dropped.
+        """
+        scrub = _load_scrubber()
+        before = "".join(self.recent)
+        self.recent.append(line + "\n")
+        del self.recent[: -self.CONTEXT_LINES]
+        if scrub is None or not before:
+            return scrub_line(line, self.env)
+        prev = scrub(before)
+        cur = scrub(before + line + "\n")
+        if not cur.startswith(prev):
+            return None
+        delta = cur[len(prev):].strip("\n")
+        if not delta or "\n" in delta:
+            return None
+        return scrub_line(delta, self.env)
+
+
 def follow(file_path: Path, socket_path: str, loop: str) -> int:
     """Stream each new log line. A missing daemon is recorded and does not raise."""
     try:
@@ -335,15 +416,24 @@ def follow(file_path: Path, socket_path: str, loop: str) -> int:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setblocking(False)
     sent = False
+    scrubber = LineScrubber(dict(os.environ))
     with file_path.open("r", encoding="utf-8", errors="replace") as handle:
         while True:
             line = handle.readline()
             if line:
-                if not _send(sock, socket_path, loop, line.rstrip("\n"), dict(os.environ)):
+                cleaned = scrubber.feed(line)
+                if cleaned is None:
+                    continue
+                if not _send(sock, socket_path, loop, cleaned, dict(os.environ)):
                     return 1
                 sent = True
                 continue
             if stop["flag"]:
+                tail = scrubber.flush()
+                if tail is not None:
+                    if not _send(sock, socket_path, loop, tail, dict(os.environ)):
+                        return 1
+                    sent = True
                 if not sent and not _send(sock, socket_path, loop, "", dict(os.environ)):
                     return 1
                 return 0
