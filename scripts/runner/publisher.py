@@ -612,12 +612,23 @@ class RealOps:
 
     def edit_draft(self, caller: str, branch: str, pr: str, title: str, body: str) -> dict:
         del caller
-        viewed = self._gh(["pr", "view", pr, "--repo", RADON_REPO, "--json", "isDraft,headRefName"], stdin=None)
+        viewed = self._gh(
+            ["pr", "view", pr, "--repo", RADON_REPO, "--json", "isDraft,headRefName,isCrossRepository,headRepositoryOwner"],
+            stdin=None,
+        )
         try:
             payload = json.loads(viewed.stdout)
         except json.JSONDecodeError as exc:
             raise Rejected("pr_state") from exc
-        if payload.get("isDraft") is not True or payload.get("headRefName") != branch:
+        # A fork can reuse a runner branch name: the edit is confined to a
+        # draft whose head lives in this repository.
+        owner = payload.get("headRepositoryOwner") or {}
+        if (
+            payload.get("isDraft") is not True
+            or payload.get("headRefName") != branch
+            or payload.get("isCrossRepository") is not False
+            or owner.get("login") != RADON_REPO.split("/", 1)[0]
+        ):
             raise Rejected("not_draft")
         return self._gh_draft(["pr", "edit", pr, "--repo", RADON_REPO], title, body)
 

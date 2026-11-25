@@ -696,6 +696,32 @@ def test_confined_read_does_not_block_on_a_fifo(tmp_path: Path) -> None:
     assert result == ["path"]
 
 
+def test_edit_draft_refuses_a_fork_pull_request_with_the_same_branch_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # isDraft plus headRefName also match a fork's PR that reuses a runner
+    # branch name. The edit must be confined to this repository's own head.
+    cfg = _cfg(tmp_path)
+    ops = publisher.RealOps(cfg)
+    asked: list[list[str]] = []
+    state = {"isDraft": True, "headRefName": BRANCH, "isCrossRepository": True, "headRepositoryOwner": {"login": "someone"}}
+
+    def fake_gh(args: list[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        asked.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(state), stderr="")
+
+    edited: list[list[str]] = []
+    monkeypatch.setattr(ops, "_gh", fake_gh)
+    monkeypatch.setattr(ops, "_gh_draft", lambda args, title, body: edited.append(args) or {"url": "x"})
+    with pytest.raises(publisher.Rejected) as caught:
+        ops.edit_draft("security", BRANCH, "7", "t", "b")
+    assert caught.value.code == "not_draft"
+    assert edited == []
+    fields = asked[0][asked[0].index("--json") + 1].split(",")
+    assert "isCrossRepository" in fields and "headRepositoryOwner" in fields
+    state.update({"isCrossRepository": False, "headRepositoryOwner": {"login": "joemccann"}})
+    assert ops.edit_draft("security", BRANCH, "7", "t", "b") == {"url": "x"}
+    assert edited and edited[0][:3] == ["pr", "edit", "7"]
+
+
 def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> None:
     # One client that connects and sends nothing must not block every other
     # loop's push, draft and notify behind it.
