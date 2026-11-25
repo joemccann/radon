@@ -320,17 +320,34 @@ _BLOCK_END = re.compile(r"-----END [A-Z0-9 ]+-----")
 
 
 class LineScrubber:
-    """scrub_line per fragment, with the key-block state carried across lines.
+    """scrub_line per complete line, with the key-block state carried across lines.
 
-    A key printed one line at a time never shows BEGIN and END to the same
-    scrub call. Inside a block every line is dropped until its END.
+    readline on a growing file returns whatever is written so far, so a
+    fragment without its newline is held until the line completes (flush
+    releases it at stop). A key printed one line at a time never shows BEGIN
+    and END to the same scrub call: inside a block every line is dropped
+    until its END.
     """
 
     def __init__(self, env: dict) -> None:
         self.env = env
         self.in_block = False
+        self.pending = ""
 
-    def feed(self, line: str) -> str | None:
+    def feed(self, fragment: str) -> str | None:
+        self.pending += fragment
+        if not self.pending.endswith("\n"):
+            return None
+        line, self.pending = self.pending.rstrip("\n"), ""
+        return self._line(line)
+
+    def flush(self) -> str | None:
+        if not self.pending:
+            return None
+        line, self.pending = self.pending.rstrip("\n"), ""
+        return self._line(line)
+
+    def _line(self, line: str) -> str | None:
         if self.in_block:
             if _BLOCK_END.search(line):
                 self.in_block = False
@@ -366,7 +383,7 @@ def follow(file_path: Path, socket_path: str, loop: str) -> int:
         while True:
             line = handle.readline()
             if line:
-                cleaned = scrubber.feed(line.rstrip("\n"))
+                cleaned = scrubber.feed(line)
                 if cleaned is None:
                     continue
                 if not _send(sock, socket_path, loop, cleaned, dict(os.environ)):
@@ -374,6 +391,11 @@ def follow(file_path: Path, socket_path: str, loop: str) -> int:
                 sent = True
                 continue
             if stop["flag"]:
+                tail = scrubber.flush()
+                if tail is not None:
+                    if not _send(sock, socket_path, loop, tail, dict(os.environ)):
+                        return 1
+                    sent = True
                 if not sent and not _send(sock, socket_path, loop, "", dict(os.environ)):
                     return 1
                 return 0

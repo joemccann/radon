@@ -297,20 +297,33 @@ def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
     # separate lines never shows BEGIN and END to the same scrub call, so
     # the block state must live across lines.
     scrubber = logd.LineScrubber({})
-    marker = "-----{} OPENSSH PRIVATE KEY-----"
+    marker = "-----{} OPENSSH PRIVATE KEY-----\n"
     out = [scrubber.feed(line) for line in (
-        "before",
+        "before\n",
         marker.format("BEGIN"),
-        "synthetic-body-line-one",
-        "synthetic-body-line-two",
+        "synthetic-body-line-one\n",
+        "synthetic-body-line-two\n",
         marker.format("END"),
-        "after",
+        "after\n",
     )]
     joined = "\n".join(line for line in out if line is not None)
     assert "synthetic-body" not in joined
     assert "before" in joined and "after" in joined
     assert "redacted" in joined
-    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789") == "GH_TOKEN=[redacted]"
+    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n") == "GH_TOKEN=[redacted]"
+
+
+def test_follow_scrubs_a_line_only_once_it_is_complete(logd):
+    # readline on a growing file returns the bytes written so far. A value
+    # split across two reads must be assembled before it is scrubbed, or the
+    # first fragment leaves as a bare prefix the rules never saw whole.
+    scrubber = logd.LineScrubber({})
+    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijk") is None
+    assert scrubber.feed("lmnopqrstuvwxyz0123456789\n") == "GH_TOKEN=[redacted]"
+    assert scrubber.feed("plain") is None
+    assert scrubber.flush() == "plain"
+    assert scrubber.flush() is None
+    assert scrubber.feed("x=1\n") == "x=1"
 
 
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
