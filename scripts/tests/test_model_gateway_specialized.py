@@ -59,6 +59,58 @@ def test_forecast_optional_runtime_is_advertised(monkeypatch):
     assert specialized.forecast_available() is False
 
 
+def _forecast_rig(monkeypatch):
+    from model_gateway import _forecast_backend as backend
+    seen = {}
+
+    class Result:
+        def to_dict(self):
+            return {"ok": True}
+
+    def fake(series, horizon, **kw):
+        seen.update(kw)
+        return Result()
+
+    monkeypatch.setattr(backend, "forecast_quantiles", fake)
+    return seen
+
+
+@pytest.mark.parametrize("payload", [
+    {"quantile_levels": [0.5] * 33},
+    {"quantile_levels": []},
+    {"quantile_levels": [1.5]},
+    {"quantile_levels": ["0.5"]},
+    {"quantile_levels": 0.5},
+    {"past_covariates": {f"c{i}": [1.0] * 8 for i in range(17)}},
+    {"past_covariates": {"c": [1.0] * 10_001}},
+    {"past_covariates": {"c": [float("nan")] * 8}},
+    {"past_covariates": {"c" * 65: [1.0] * 8}},
+    {"future_covariates": [{"c": 1.0}] * 10_001},
+    {"future_covariates": [{"c": "x" * 65}]},
+    {"future_covariates": "c=1"},
+])
+def test_forecast_inputs_are_bounded_before_the_model_loads(monkeypatch, payload):
+    # A socket-authorized caller may not size the inference allocation at
+    # will: the levels list and both covariate frames carry hard bounds.
+    seen = _forecast_rig(monkeypatch)
+    with pytest.raises(ValueError):
+        specialized.forecast({"series": [1.0] * 8, "horizon": 3, **payload})
+    assert seen == {}
+
+
+def test_forecast_passes_bounded_inputs_through(monkeypatch):
+    seen = _forecast_rig(monkeypatch)
+    past = {"c": [1.0] * 8}
+    future = [{"c": 1.0} for _ in range(3)]
+    out = specialized.forecast({
+        "series": [1.0] * 8, "horizon": 3, "quantile_levels": [0.1, 0.5, 0.9],
+        "past_covariates": past, "future_covariates": future,
+    })
+    assert out == {"forecast": {"ok": True}}
+    assert seen["quantile_levels"] == [0.1, 0.5, 0.9]
+    assert seen["past_covariates"] == past and seen["future_covariates"] == future
+
+
 @pytest.mark.parametrize("payload", [{"provider": "other", "candidate": "x"}, {"provider": "nvidia", "candidate": "x\nInjected: header"}])
 def test_credential_validation_cannot_target_arbitrary_provider(payload):
     with pytest.raises(ValueError):

@@ -86,6 +86,55 @@ def x_search(payload: dict) -> dict:
     return {"payload": backend.xai_search(account, days=days)}
 
 
+MAX_QUANTILE_LEVELS = 32
+MAX_COVARIATE_COLUMNS = 16
+MAX_COVARIATE_ROWS = 10_000
+MAX_COVARIATE_TEXT = 64
+
+
+def _quantile_levels(value: Any) -> list[float]:
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_QUANTILE_LEVELS:
+        raise ValueError("invalid forecast quantile levels")
+    return [_bounded(level, 0.0, 1.0, "forecast quantile level") for level in value]
+
+
+def _covariate_cell(value: Any) -> None:
+    if isinstance(value, str):
+        if len(value) > MAX_COVARIATE_TEXT:
+            raise ValueError("invalid forecast covariate value")
+        return
+    _bounded(value, -1e20, 1e20, "forecast covariate value")
+
+
+def _covariates(value: Any, name: str) -> Any:
+    """A bounded column-oriented or row-oriented frame; the backend sizes nothing from it."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        if not 1 <= len(value) <= MAX_COVARIATE_COLUMNS:
+            raise ValueError(f"invalid {name} columns")
+        for column, cells in value.items():
+            if not isinstance(column, str) or not 1 <= len(column) <= MAX_COVARIATE_TEXT:
+                raise ValueError(f"invalid {name} column")
+            if not isinstance(cells, list) or not 1 <= len(cells) <= MAX_COVARIATE_ROWS:
+                raise ValueError(f"invalid {name} rows")
+            for cell in cells:
+                _covariate_cell(cell)
+        return value
+    if isinstance(value, list):
+        if not 1 <= len(value) <= MAX_COVARIATE_ROWS:
+            raise ValueError(f"invalid {name} rows")
+        for row in value:
+            if not isinstance(row, dict) or not 1 <= len(row) <= MAX_COVARIATE_COLUMNS:
+                raise ValueError(f"invalid {name} row")
+            for column, cell in row.items():
+                if not isinstance(column, str) or not 1 <= len(column) <= MAX_COVARIATE_TEXT:
+                    raise ValueError(f"invalid {name} column")
+                _covariate_cell(cell)
+        return value
+    raise ValueError(f"invalid {name}")
+
+
 def forecast_available() -> bool:
     from . import _forecast_backend as backend
     return backend.is_available()
@@ -107,10 +156,11 @@ def forecast(payload: dict) -> dict:
         raise ValueError("unsupported forecasting model")
     if payload.get("device") not in (None, "cpu"):
         raise ValueError("unsupported forecasting device")
-    result = backend.forecast_quantiles(series, horizon,
-        quantile_levels=payload.get("quantile_levels", backend.DEFAULT_QUANTILE_LEVELS),
-        future_covariates=payload.get("future_covariates"),
-        past_covariates=payload.get("past_covariates"), model_id=model, device="cpu")
+    levels = _quantile_levels(payload.get("quantile_levels", backend.DEFAULT_QUANTILE_LEVELS))
+    future = _covariates(payload.get("future_covariates"), "future covariates")
+    past = _covariates(payload.get("past_covariates"), "past covariates")
+    result = backend.forecast_quantiles(series, horizon, quantile_levels=levels,
+        future_covariates=future, past_covariates=past, model_id=model, device="cpu")
     return {"forecast": result.to_dict()}
 
 
