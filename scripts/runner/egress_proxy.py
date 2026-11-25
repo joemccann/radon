@@ -40,6 +40,10 @@ DECISION_LOG = LOG_DIR / "decisions.log"
 DAEMON_LOG = LOG_DIR / "daemon.log"
 LISTEN_HOST = "localhost"
 LISTEN_PORT = 8373
+# One thread per tunnel. Past the cap a new client gets 503 and is closed;
+# a tunnel with no traffic for this long is closed too.
+MAX_CONNECTIONS = 64
+TUNNEL_IDLE_SECS = 300
 LABEL = "com.radon.egress-proxy"
 _BEGIN = "# BEGIN com.radon.egress"
 _END = "# END com.radon.egress"
@@ -713,6 +717,9 @@ def peer_uid(conn: socket.socket) -> int | None:
 
 
 def peer_allowed(conn: socket.socket) -> bool:
+    # SO_PEERCRED exists on Linux only. On Darwin TCP there is no peer
+    # identity for a loopback connection, so uid is None and every local
+    # account passes: the proxy is a log-only observer, not an authenticator.
     uid = peer_uid(conn)
     if uid is None or uid <= 0 or uid == os.geteuid():
         return True
@@ -734,23 +741,39 @@ def cmd_serve() -> int:
     server.listen(64)
     server.settimeout(0.5)
     try:
-        while not stop.is_set():
-            try:
-                conn, _addr = server.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            allow, reason = load_allowlist(ALLOWLIST_PATH)
-            threading.Thread(
-                target=handle_connection,
-                args=(conn, allow, DECISION_LOG, resolve_system),
-                kwargs={"load_reason": reason},
-                daemon=True,
-            ).start()
+        serve_loop(server, stop, threading.BoundedSemaphore(MAX_CONNECTIONS))
     finally:
         server.close()
     return 0
+
+
+def serve_loop(server: socket.socket, stop: threading.Event, slots: threading.BoundedSemaphore) -> None:
+    def _run(conn, allow, reason):
+        try:
+            handle_connection(conn, allow, DECISION_LOG, resolve_system, load_reason=reason, idle=TUNNEL_IDLE_SECS)
+        finally:
+            slots.release()
+
+    while not stop.is_set():
+        try:
+            conn, _addr = server.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        if not slots.acquire(blocking=False):
+            try:
+                append_event(DECISION_LOG, _event("refuse", "close", "", 0, "busy"))
+                _reply(conn, 503, "Service Unavailable")
+            except OSError:
+                pass
+            try:
+                conn.close()
+            except OSError:
+                pass
+            continue
+        allow, reason = load_allowlist(ALLOWLIST_PATH)
+        threading.Thread(target=_run, args=(conn, allow, reason), daemon=True).start()
 
 
 def main(argv: list[str] | None = None) -> int:
