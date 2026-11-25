@@ -31,12 +31,17 @@ _SECRET_NAME = re.compile(
     r"(?i)^(?:GH_TOKEN|GITHUB_TOKEN|PUSHOVER_USER|PUSHOVER_TOKEN|UW_TOKEN)$"
     r"|(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)$"
 )
+# The name is any whole word (anchored at its start, so a long word is
+# scanned once, not once per start and per split); whether it names a
+# credential is decided on the matched word. The earlier shape put the
+# keyword alternation between two unbounded runs and grew cubically.
 _ASSIGN = re.compile(
-    r"(?i)(?P<name>PUSHOVER_USER|[A-Za-z_][A-Za-z0-9_]*"
-    r"(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)"
-    r"[A-Za-z0-9_]*)"
+    r"(?<![A-Za-z0-9_])(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
     r"(?P<sep>[ \t]*[=:][ \t]*)"
     r"(?P<val>\"[^\"\n]*\"|'[^'\n]*'|\S+)"
+)
+_ASSIGN_NAME = re.compile(
+    r"(?i)PUSHOVER_USER$|TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL"
 )
 _FALLBACK_SHAPES = (
     (re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----.*", re.S), "[redacted-private-key]"),
@@ -102,7 +107,12 @@ def _fallback_shapes(text: str) -> str:
 
 
 def _redact_named_assignments(text: str) -> str:
-    return _ASSIGN.sub(lambda m: m.group("name") + m.group("sep") + "[redacted]", text)
+    def repl(m: re.Match) -> str:
+        if _ASSIGN_NAME.search(m.group("name")) is None:
+            return m.group(0)
+        return m.group("name") + m.group("sep") + "[redacted]"
+
+    return _ASSIGN.sub(repl, text)
 
 
 def _redact_env_values(text: str, env: dict) -> str:
@@ -329,10 +339,13 @@ class LineScrubber:
     until its END.
     """
 
+    CONTEXT_LINES = 16
+
     def __init__(self, env: dict) -> None:
         self.env = env
         self.in_block = False
         self.pending = ""
+        self.recent: list[str] = []
 
     def feed(self, fragment: str) -> str | None:
         self.pending += fragment
@@ -355,7 +368,30 @@ class LineScrubber:
         if _BLOCK_BEGIN.search(line) and not _BLOCK_END.search(line):
             self.in_block = True
             return scrub_line(_BLOCK_BEGIN.sub("[redacted key block]", line), self.env)
-        return scrub_line(line, self.env)
+        return self._with_context(line)
+
+    def _with_context(self, line: str) -> str | None:
+        """Scrub the line with the recent lines in front of it.
+
+        The canonical rules consume a YAML block body or a multi-line quoted
+        value only when they see its header. The line is what the context
+        gains by appending it; a line the context absorbs (or that rewrites
+        earlier output) is dropped.
+        """
+        scrub = _load_scrubber()
+        before = "".join(self.recent)
+        self.recent.append(line + "\n")
+        del self.recent[: -self.CONTEXT_LINES]
+        if scrub is None or not before:
+            return scrub_line(line, self.env)
+        prev = scrub(before)
+        cur = scrub(before + line + "\n")
+        if not cur.startswith(prev):
+            return None
+        delta = cur[len(prev):].strip("\n")
+        if not delta or "\n" in delta:
+            return None
+        return scrub_line(delta, self.env)
 
 
 def follow(file_path: Path, socket_path: str, loop: str) -> int:

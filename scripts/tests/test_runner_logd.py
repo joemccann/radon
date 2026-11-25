@@ -326,6 +326,20 @@ def test_follow_scrubs_a_line_only_once_it_is_complete(logd):
     assert scrubber.feed("x=1\n") == "x=1"
 
 
+def test_named_assignment_redaction_is_linear_on_a_long_word(logd):
+    # One datagram is at most 8 KiB. A word made of repeated credential
+    # names with no separator must not stall the daemon or the follower.
+    import time
+
+    word = ("a_token" * 1200)[:8192]
+    started = time.perf_counter()
+    assert logd.scrub_line(word, {}) == word
+    assert time.perf_counter() - started < 1.0
+    assert logd.scrub_line("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789", {}) == "GH_TOKEN=[redacted]"
+    assert logd.scrub_line("fooAPI_KEY: abcdefgh", {}) == "fooAPI_KEY: [redacted]"
+    assert logd.scrub_line("token of appreciation", {}) == "token of appreciation"
+
+
 def test_root_never_chowns_or_chmods_the_daemon_log_by_path():
     # daemon.log lives in the daemon account's directory: a check then a
     # root chown by path name can be raced with a link. The file is created
