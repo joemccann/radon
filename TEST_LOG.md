@@ -1462,3 +1462,9 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
 | T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
+
+## 2026-11-25
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-603 | DONE | Live gateway call 1 failed in 43.41s (`/tmp/cta-serial-1.log`). Equality stayed green after one recorded `chat` (`/tmp/t603-harm.log`). Token-absent skip: 1 failed (`assert [] == ['chat']`, `/tmp/t603-red.log`), reverted. Green 33 passed ×3. Product source unchanged. Closing rounds: publisher AF_UNIX remains (T-602 on #1654). R1/r3 credentials xdist flake, serial 2 passed. Vitest 11,690 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `4d6687cf5`. |
