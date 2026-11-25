@@ -21,6 +21,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,6 +45,8 @@ LISTEN_PORT = 8373
 # a tunnel with no traffic for this long is closed too.
 MAX_CONNECTIONS = 64
 TUNNEL_IDLE_SECS = 300
+# The whole CONNECT header, not each recv, must arrive within this bound.
+HEADER_SECS = 10.0
 LABEL = "com.radon.egress-proxy"
 _BEGIN = "# BEGIN com.radon.egress"
 _END = "# END com.radon.egress"
@@ -632,10 +635,19 @@ def handle_connection(conn, allowlist, log_path, resolve, load_reason="ok", idle
             append_event(log_path, _event("refuse", "close", "", 0, "peer"))
             _reply(conn, 403, "Forbidden")
             return
-        conn.settimeout(10)
+        header_deadline = time.monotonic() + HEADER_SECS
         data = b""
         while b"\r\n\r\n" not in data:
-            chunk = conn.recv(1024)
+            remaining = header_deadline - time.monotonic()
+            if remaining <= 0:
+                _reply(conn, 408, "Request Timeout")
+                return
+            conn.settimeout(remaining)
+            try:
+                chunk = conn.recv(1024)
+            except socket.timeout:
+                _reply(conn, 408, "Request Timeout")
+                return
             if not chunk:
                 return
             data += chunk

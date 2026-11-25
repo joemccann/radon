@@ -535,6 +535,35 @@ def test_serve_loop_refuses_connections_past_the_cap_and_bounds_tunnel_idle(prox
     assert [row["reason"] for row in logged] == ["busy"]
 
 
+def test_a_slow_header_is_cut_at_an_absolute_deadline(proxy, monkeypatch, tmp_path):
+    # The header timeout was per recv: one byte every few seconds held a
+    # connection slot for as long as the 8 KiB header bound allowed.
+    import time
+
+    monkeypatch.setattr(proxy, "HEADER_SECS", 1.0)
+    client, server_side = socket.socketpair()
+    ended: dict[str, float] = {}
+
+    def run() -> None:
+        proxy.handle_connection(server_side, proxy.parse_allowlist(""), tmp_path / "decisions.log", lambda h, p: [], idle=1)
+        ended["at"] = time.monotonic()
+
+    worker = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    for _ in range(12):
+        try:
+            client.sendall(b"C")
+        except OSError:
+            break
+        time.sleep(0.25)
+    worker.join(5)
+    alive = worker.is_alive()
+    client.close()
+    assert not alive
+    assert ended["at"] - started < 2.5
+
+
 def test_relay_send_to_a_stalled_peer_is_bounded_by_the_idle_timeout(proxy):
     # relay() switched the destination to blocking before sendall, so a peer
     # that stops reading held the worker (and its connection slot) forever.
