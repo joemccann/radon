@@ -371,6 +371,16 @@ def test_standalone_logd_install_validates_the_source_before_running_it():
     assert body.count("check_source") == 1
 
 
+def test_follow_context_outlives_a_long_block_body(logd):
+    scrubber = logd.LineScrubber({})
+    lines = ["password: |\n"] + ["\n"] * 40 + ["  opaquevalue123\n", "next: ok\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+    assert logd.LineScrubber.CONTEXT_LINES >= 64
+
+
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
     # install -d by root follows a link planted by the service account that
     # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/

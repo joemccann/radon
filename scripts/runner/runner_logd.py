@@ -339,7 +339,9 @@ class LineScrubber:
     until its END.
     """
 
-    CONTEXT_LINES = 16
+    # Enough for a block body padded with blank lines; a header further back
+    # than this is out of context, which is the limit of streaming redaction.
+    CONTEXT_LINES = 64
 
     def __init__(self, env: dict) -> None:
         self.env = env
