@@ -326,6 +326,18 @@ def test_follow_scrubs_a_line_only_once_it_is_complete(logd):
     assert scrubber.feed("x=1\n") == "x=1"
 
 
+def test_root_never_chowns_or_chmods_the_daemon_log_by_path():
+    # daemon.log lives in the daemon account's directory: a check then a
+    # root chown by path name can be raced with a link. The file is created
+    # and tightened as the daemon account, which gains nothing from a swap.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    for line in body.splitlines():
+        if "daemon.log" in line and ("chown" in line or "chmod" in line):
+            assert 'sudo -u "$LOGD_USER"' in line, line
+            assert "chown" not in line
+
+
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
     # install -d by root follows a link planted by the service account that
     # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/

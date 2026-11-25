@@ -917,12 +917,13 @@ install_log_daemon() {
   refuse_link "$LOGD_ROOT" "$LOGD_ROOT/keys" "$LOGD_ROOT/repo" || return 77
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 700 "$LOGD_ROOT/keys" "$LOGD_ROOT/repo"
+  # Created and tightened as the daemon account: a link swapped in after a
+  # root check-by-path would otherwise receive root's chown and chmod.
   [[ ! -L "$LOGD_ROOT/daemon.log" ]] || { echo "log daemon output is a symlink" >&2; return 77; }
   if [[ ! -e "$LOGD_ROOT/daemon.log" ]]; then
     sudo -u "$LOGD_USER" /usr/bin/touch "$LOGD_ROOT/daemon.log"
   fi
-  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/daemon.log"
-  chmod 600 "$LOGD_ROOT/daemon.log"
+  sudo -u "$LOGD_USER" /bin/chmod 600 "$LOGD_ROOT/daemon.log"
   # keys/ belongs to the daemon account. Root never chowns or chmods a
   # name there it did not just create: a planted link would carry the
   # change to whatever it points at.
