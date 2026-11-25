@@ -272,6 +272,138 @@ def test_logd_install_is_gated_before_any_account_key_or_daemon():
     assert ">> \"$LOGD_FLAG\"" not in src
 
 
+def test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key():
+    # install.sh re-runs as root every refresh. The keys/ directory belongs
+    # to the daemon account, so a chown/chmod by path name there must only
+    # ever land on a key root just generated, never on a planted link.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    keygen = body.index("ssh-keygen")
+    for leaf in ("keys/id_ed25519\"", "keys/id_ed25519.pub\""):
+        refusal = body.index(f'[[ ! -L "$LOGD_ROOT/{leaf}')
+        assert refusal < keygen
+    block = body[body.index("if [[ ! -e \"$LOGD_ROOT/keys/id_ed25519\" ]]"):]
+    block = block[: block.index("\n  fi\n")]
+    assert "ssh-keygen" in block
+    assert block.count("chown") == 1 and block.count("chmod") == 2
+    after = body[keygen:].split("\n  fi\n", 1)[1]
+    for line in after.splitlines():
+        if "id_ed25519" in line:
+            assert "chown" not in line and "chmod" not in line
+
+
+def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
+    # follow() scrubs one readline fragment at a time. A key printed as
+    # separate lines never shows BEGIN and END to the same scrub call, so
+    # the block state must live across lines.
+    scrubber = logd.LineScrubber({})
+    marker = "-----{} OPENSSH PRIVATE KEY-----\n"
+    out = [scrubber.feed(line) for line in (
+        "before\n",
+        marker.format("BEGIN"),
+        "synthetic-body-line-one\n",
+        "synthetic-body-line-two\n",
+        marker.format("END"),
+        "after\n",
+    )]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "synthetic-body" not in joined
+    assert "before" in joined and "after" in joined
+    assert "redacted" in joined
+    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n") == "GH_TOKEN=[redacted]"
+
+
+def test_follow_scrubs_a_line_only_once_it_is_complete(logd):
+    # readline on a growing file returns the bytes written so far. A value
+    # split across two reads must be assembled before it is scrubbed, or the
+    # first fragment leaves as a bare prefix the rules never saw whole.
+    scrubber = logd.LineScrubber({})
+    assert scrubber.feed("GH_TOKEN=ghp_abcdefghijk") is None
+    assert scrubber.feed("lmnopqrstuvwxyz0123456789\n") == "GH_TOKEN=[redacted]"
+    assert scrubber.feed("plain") is None
+    assert scrubber.flush() == "plain"
+    assert scrubber.flush() is None
+    assert scrubber.feed("x=1\n") == "x=1"
+
+
+def test_named_assignment_redaction_is_linear_on_a_long_word(logd):
+    # One datagram is at most 8 KiB. A word made of repeated credential
+    # names with no separator must not stall the daemon or the follower.
+    import time
+
+    word = ("a_token" * 1200)[:8192]
+    started = time.perf_counter()
+    assert logd.scrub_line(word, {}) == word
+    assert time.perf_counter() - started < 1.0
+    assert logd.scrub_line("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789", {}) == "GH_TOKEN=[redacted]"
+    assert logd.scrub_line("fooAPI_KEY: abcdefgh", {}) == "fooAPI_KEY: [redacted]"
+    assert logd.scrub_line("token of appreciation", {}) == "token of appreciation"
+
+
+def test_follow_scrubs_a_block_scalar_body_across_lines(logd):
+    # The canonical scrubber consumes a YAML block body only when it sees
+    # the header. The follower gives it the recent lines as context.
+    scrubber = logd.LineScrubber({})
+    out = [scrubber.feed(line) for line in ("password: |\n", "  opaquevalue123\n", "  opaquevalue456\n", "next: ok\n")]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+
+
+def test_root_never_chowns_or_chmods_the_daemon_log_by_path():
+    # daemon.log lives in the daemon account's directory: a check then a
+    # root chown by path name can be raced with a link. The file is created
+    # and tightened as the daemon account, which gains nothing from a swap.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    for line in body.splitlines():
+        if "daemon.log" in line and ("chown" in line or "chmod" in line):
+            assert 'sudo -u "$LOGD_USER"' in line, line
+            assert "chown" not in line
+
+
+def test_standalone_logd_install_validates_the_source_before_running_it():
+    # --install-logd returns before main() reaches check_source, and the
+    # flag probe runs $SRC/runner_logd.py with the caller's privileges.
+    src = INSTALL.read_text()
+    body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    assert body.index("check_source") < body.index("flag-status")
+    assert body.count("check_source") == 1
+
+
+def test_follow_context_outlives_a_long_block_body(logd):
+    scrubber = logd.LineScrubber({})
+    lines = ["password: |\n"] + ["\n"] * 40 + ["  opaquevalue123\n", "next: ok\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+    assert logd.LineScrubber.CONTEXT_LINES >= 64
+
+
+def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
+    # install -d by root follows a link planted by the service account that
+    # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/
+    # run/ under the publisher). Each child is refused as a link first.
+    src = INSTALL.read_text()
+    assert "refuse_link() {" in src
+    helper = src.split("refuse_link() {", 1)[1].split("\n}\n", 1)[0]
+    assert "-L" in helper
+    logd_body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    pub_body = src.split("install_publisher() {", 1)[1].split("\n}\n", 1)[0]
+    for body, owner, children in (
+        (logd_body, "$LOGD_USER", ('"$LOGD_ROOT/keys"', '"$LOGD_ROOT/repo"')),
+        (pub_body, "$PUB_USER", ('"$PUB_ROOT/secrets"', '"$PUB_ROOT/log"', '"$PUB_ROOT/tmp"', '"$PUB_ROOT/run"')),
+    ):
+        guard = body.index("refuse_link ")
+        first_install = body.index(f'install -d -o "{owner}"')
+        assert guard < first_install
+        guard_line = body[guard:].split("\n", 1)[0]
+        for child in children:
+            assert child in guard_line
+        assert "|| return 77" in guard_line
+
+
 def test_logd_plist_runs_as_its_own_account_without_secrets():
     out = subprocess.run([BASH, str(INSTALL), "--print-logd-plist"], capture_output=True, check=True)
     plist = plistlib.loads(out.stdout)

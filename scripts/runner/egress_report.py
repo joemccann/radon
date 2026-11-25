@@ -11,6 +11,11 @@ from pathlib import Path
 DEFAULT_LOG = Path("/Library/Radon/egress/log/decisions.log")
 
 
+def _printable(text: str) -> str:
+    """Escape anything a client could put in a CONNECT host before it reaches a terminal."""
+    return text.encode("unicode_escape").decode("ascii")
+
+
 def summarize(text: str) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for raw in text.splitlines():
@@ -30,6 +35,7 @@ def summarize(text: str) -> dict[str, dict[str, int]]:
             continue
         if any(ch.isspace() for ch in host) or any(ch.isspace() for ch in day):
             continue
+        host, day = _printable(host), _printable(day)
         label = f"{host}:{port}" if isinstance(port, int) else host
         counts[day][label] += 1
     return {day: dict(hosts) for day, hosts in counts.items()}
