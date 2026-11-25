@@ -135,6 +135,19 @@ class TestAtsPriorityUniverse:
         assert merged["counts"]["unique"] == 6
         assert merged["counts"]["core"] == 3
 
+    def test_private_names_are_the_portfolio_tier_outside_every_public_tier(self):
+        # A portfolio name that no public tier (watchlist, index presets)
+        # carries is account-derived: its presence in the payload reveals
+        # an open position. The demo mirror needs the list to strip it.
+        merged = mod.merge_ats_universe(
+            portfolio=["NVDA", "AAPL", "XOFF"],
+            watchlist=["AAPL"],
+            ndx100=["NVDA"],
+            r2k=[],
+            sp500=[],
+        )
+        assert merged["private"] == ["XOFF"]
+
     def test_blank_and_non_ticker_tokens_are_dropped(self):
         merged = mod.merge_ats_universe(
             portfolio=["", None, "2026", "SPY"],
@@ -640,6 +653,38 @@ class TestRun:
         assert payload["count"] == 3
         assert payload["universe"]["counts"]["core"] == 2
         assert self.health == ["ok"]
+
+    def test_payload_tags_private_names_including_carried_prior_ones(self, monkeypatch):
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["XOFF", "AAPL"],
+                "core": ["XOFF", "AAPL"],
+                "walk": ["XOFF", "AAPL"],
+                "private": ["XOFF"],
+                "counts": {
+                    "portfolio": 1, "watchlist": 1, "ndx100": 0,
+                    "r2k": 0, "sp500": 0, "unique": 2, "core": 2,
+                },
+                "index_offset": 0,
+                "indexes": [],
+            },
+        )
+        prior_series = self._client(["YOFF"])
+        self.mod.ATS_VENUE_SHARE_JSON.write_text(json.dumps({
+            "series": {"YOFF": [{"week_start_date": "2026-01-05"}]},
+            "universe": {"private_tickers": ["YOFF"], "index_offset": 0},
+        }))
+        client = self._client(["XOFF", "AAPL"])
+        payload = self.mod.run(client=client)
+        assert payload["carried_forward"] == ["YOFF"]
+        assert payload["universe"]["private_tickers"] == ["XOFF", "YOFF"]
+
+    def test_override_run_tags_no_private_names(self):
+        client = self._client(["AAPL"])
+        payload = self.mod.run(client=client, tickers=["AAPL"])
+        assert payload["universe"]["private_tickers"] == []
 
     def test_index_tail_past_the_budget_does_not_fail_a_covered_core(
         self, monkeypatch,

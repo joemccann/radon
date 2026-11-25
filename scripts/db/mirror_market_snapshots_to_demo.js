@@ -132,12 +132,15 @@ async function retryOperation({
   throw new Error(`${phase} exhausted without a result`);
 }
 
-// The ATS venue-share universe meta counts the open-position book: the
-// portfolio tier directly, and every aggregate built from it (core, unique)
-// gives the same number back by subtraction from the public tiers. The whole
-// count block and the sibling core size are account-derived; the demo trial
-// tier keeps only the tier order and the cycle position. A payload that
-// cannot be parsed is dropped rather than copied unseen.
+// The ATS venue-share payload is built from the open-position book: the
+// universe counts (and every aggregate that gives them back by subtraction),
+// the cycle position (this_cycle minus the index_offset delta is the core
+// size), and the portfolio names no public tier carries, which the fetch
+// tags as universe.private_tickers and whose presence alone reveals an open
+// position. The demo trial tier keeps only the tier order and the public
+// names. A payload that cannot be parsed is dropped rather than copied unseen.
+const ATS_UNIVERSE_PRIVATE_KEYS = ["counts", "core", "this_cycle", "index_offset", "private_tickers"];
+
 export function stripAccountDerivedFields(table, row) {
   if (table !== "scan_snapshots" || row?.service !== "equibles-ats-venue-share") return row;
   let payload;
@@ -147,12 +150,21 @@ export function stripAccountDerivedFields(table, row) {
     return null;
   }
   const universe = payload?.universe;
-  if (universe && typeof universe === "object" && ("counts" in universe || "core" in universe)) {
-    delete universe.counts;
-    delete universe.core;
-    return { ...row, payload: JSON.stringify(payload) };
+  if (!universe || typeof universe !== "object") return row;
+  const hidden = new Set(Array.isArray(universe.private_tickers) ? universe.private_tickers : []);
+  const keep = (ticker) => !hidden.has(ticker);
+  if (hidden.size > 0) {
+    if (Array.isArray(payload.tickers)) payload.tickers = payload.tickers.filter(keep);
+    if (Array.isArray(payload.current)) payload.current = payload.current.filter((row) => keep(row?.ticker));
+    if (Array.isArray(payload.errors)) payload.errors = payload.errors.filter((row) => keep(row?.ticker));
+    if (Array.isArray(payload.carried_forward)) payload.carried_forward = payload.carried_forward.filter(keep);
+    if (payload.series && typeof payload.series === "object") {
+      for (const ticker of hidden) delete payload.series[ticker];
+    }
+    if (Array.isArray(payload.current)) payload.count = payload.current.length;
   }
-  return row;
+  for (const key of ATS_UNIVERSE_PRIVATE_KEYS) delete universe[key];
+  return { ...row, payload: JSON.stringify(payload) };
 }
 
 function upsertStatements(table, columns, rows) {
