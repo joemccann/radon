@@ -535,6 +535,42 @@ def test_serve_loop_refuses_connections_past_the_cap_and_bounds_tunnel_idle(prox
     assert [row["reason"] for row in logged] == ["busy"]
 
 
+def test_relay_send_to_a_stalled_peer_is_bounded_by_the_idle_timeout(proxy):
+    # relay() switched the destination to blocking before sendall, so a peer
+    # that stops reading held the worker (and its connection slot) forever.
+    import time
+
+    client, relay_left = socket.socketpair()
+    relay_right, upstream = socket.socketpair()
+    for sock in (relay_right, upstream):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
+    ended: dict[str, float] = {}
+
+    def run() -> None:
+        proxy.relay(relay_left, relay_right, 0.5)
+        ended["at"] = time.monotonic()
+
+    def send() -> None:
+        try:
+            client.sendall(b"x" * (4 * 1024 * 1024))
+        except OSError:
+            pass
+
+    worker = threading.Thread(target=run, daemon=True)
+    sender = threading.Thread(target=send, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    sender.start()
+    worker.join(5)
+    alive = worker.is_alive()
+    for sock in (client, relay_left, relay_right, upstream):
+        sock.close()
+    sender.join(2)
+    assert not alive
+    assert ended["at"] - started < 4
+
+
 def test_runner_does_not_export_the_proxy_when_the_flag_is_absent(rig):
     proc = rig.run(STUB_GROK="echo 'RESULT: https://x/pull/7 - fixed a stale runbook'; exit 0")
     assert proc.returncode == 0, proc.stderr + rig.log()

@@ -605,7 +605,9 @@ def relay(left: socket.socket, right: socket.socket, idle) -> None:
                     pass
                 continue
             try:
-                dst.setblocking(True)
+                # Bounded like the select above: a peer that stops reading
+                # must not hold the worker and its connection slot forever.
+                dst.settimeout(idle)
                 dst.sendall(data)
             except OSError:
                 return
