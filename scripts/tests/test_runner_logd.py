@@ -313,6 +313,29 @@ def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
     assert scrubber.feed("GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789") == "GH_TOKEN=[redacted]"
 
 
+def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
+    # install -d by root follows a link planted by the service account that
+    # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/
+    # run/ under the publisher). Each child is refused as a link first.
+    src = INSTALL.read_text()
+    assert "refuse_link() {" in src
+    helper = src.split("refuse_link() {", 1)[1].split("\n}\n", 1)[0]
+    assert "-L" in helper
+    logd_body = src.split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    pub_body = src.split("install_publisher() {", 1)[1].split("\n}\n", 1)[0]
+    for body, owner, children in (
+        (logd_body, "$LOGD_USER", ('"$LOGD_ROOT/keys"', '"$LOGD_ROOT/repo"')),
+        (pub_body, "$PUB_USER", ('"$PUB_ROOT/secrets"', '"$PUB_ROOT/log"', '"$PUB_ROOT/tmp"', '"$PUB_ROOT/run"')),
+    ):
+        guard = body.index("refuse_link ")
+        first_install = body.index(f'install -d -o "{owner}"')
+        assert guard < first_install
+        guard_line = body[guard:].split("\n", 1)[0]
+        for child in children:
+            assert child in guard_line
+        assert "|| return 77" in guard_line
+
+
 def test_logd_plist_runs_as_its_own_account_without_secrets():
     out = subprocess.run([BASH, str(INSTALL), "--print-logd-plist"], capture_output=True, check=True)
     plist = plistlib.loads(out.stdout)

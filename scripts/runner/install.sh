@@ -69,6 +69,15 @@ PUB_ROOT="${RADON_PUBLISHER_ROOT:-/Library/Radon/publisher}"
 # and the clone, scripts/ and everything copied held to the same bar with no
 # sticky exemption and no symlinks. RADON_RUNNER_INSTALL_TRUSTED_UID narrows
 # the trusted uid for tests and is ignored as root.
+# Root installs children inside a directory a service account owns. A link
+# planted there would carry install -d's owner and mode to its target.
+refuse_link() {
+  local path
+  for path in "$@"; do
+    [[ ! -L "$path" ]] || { echo "refusing to install: $path is a symlink" >&2; return 77; }
+  done
+}
+
 check_source() {
   local uid bad dir tree
   refuse() {
@@ -905,6 +914,7 @@ install_log_daemon() {
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; return 1; }
   check_source
   ensure_logd_user
+  refuse_link "$LOGD_ROOT" "$LOGD_ROOT/keys" "$LOGD_ROOT/repo" || return 77
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 700 "$LOGD_ROOT/keys" "$LOGD_ROOT/repo"
   [[ ! -L "$LOGD_ROOT/daemon.log" ]] || { echo "log daemon output is a symlink" >&2; return 77; }
@@ -959,6 +969,7 @@ install_publisher() {
   if [[ ! -d /Library/Radon ]]; then
     install -d -o root -g wheel -m 755 /Library/Radon
   fi
+  refuse_link "$PUB_ROOT" "$PUB_ROOT/secrets" "$PUB_ROOT/log" "$PUB_ROOT/tmp" "$PUB_ROOT/run" || return 77
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT"
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 700 "$PUB_ROOT/secrets" "$PUB_ROOT/log" "$PUB_ROOT/tmp"
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT/run"
