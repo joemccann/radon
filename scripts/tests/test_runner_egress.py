@@ -481,6 +481,60 @@ def test_report_groups_would_block_hits_by_day(tmp_path):
     assert report.render(report.summarize("")) == "no would-block hits\n"
 
 
+def test_report_escapes_terminal_control_characters_in_destinations():
+    # The CONNECT host is logged before validation, so a local client can
+    # put any byte into decisions.log. The operator report shows it escaped.
+    report = load_report()
+    rows = [
+        {"day": "2026-11-20", "decision": "would_block", "host": "evil\x1b[2J\x1b[Hclean.invalid", "port": 443},
+        {"day": "2026-11-21\x07", "decision": "would_block", "host": "x.invalid", "port": 443},
+    ]
+    text = report.render(report.summarize("".join(json.dumps(row) + "\n" for row in rows)))
+    assert "\x1b" not in text and "\x07" not in text
+    assert "\\x1b[2J" in text and "\\x07" in text
+    assert "clean.invalid:443 1" in text
+
+
+def test_serve_loop_refuses_connections_past_the_cap_and_bounds_tunnel_idle(proxy, monkeypatch, tmp_path):
+    monkeypatch.setattr(proxy, "DECISION_LOG", tmp_path / "decisions.log")
+    server = socket.socket()
+    server.bind(("localhost", 0))
+    server.listen(8)
+    server.settimeout(0.2)
+    stop = threading.Event()
+    held = []
+
+    def hold(conn, allow, log_path, resolve, load_reason="ok", idle=None):
+        held.append(idle)
+        stop.wait(5)
+        conn.close()
+
+    monkeypatch.setattr(proxy, "handle_connection", hold)
+    monkeypatch.setattr(proxy, "load_allowlist", lambda path: (proxy.parse_allowlist(""), "ok"))
+    slots = threading.BoundedSemaphore(1)
+    thread = threading.Thread(target=proxy.serve_loop, args=(server, stop, slots), daemon=True)
+    thread.start()
+    port = server.getsockname()[1]
+    first = socket.create_connection(("localhost", port), 2)
+    deadline = __import__("time").monotonic() + 3
+    while not held and __import__("time").monotonic() < deadline:
+        __import__("time").sleep(0.02)
+    assert held == [proxy.TUNNEL_IDLE_SECS]
+    second = socket.create_connection(("localhost", port), 2)
+    second.settimeout(2)
+    assert second.recv(1024).startswith(b"HTTP/1.1 503")
+    assert second.recv(1024) == b""
+    stop.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    first.close()
+    second.close()
+    server.close()
+    assert proxy.MAX_CONNECTIONS >= 16
+    logged = [json.loads(line) for line in (tmp_path / "decisions.log").read_text().splitlines()]
+    assert [row["reason"] for row in logged] == ["busy"]
+
+
 def test_runner_does_not_export_the_proxy_when_the_flag_is_absent(rig):
     proc = rig.run(STUB_GROK="echo 'RESULT: https://x/pull/7 - fixed a stale runbook'; exit 0")
     assert proc.returncode == 0, proc.stderr + rig.log()
