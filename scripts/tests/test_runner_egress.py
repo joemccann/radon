@@ -10,6 +10,7 @@ import json
 import os
 import plistlib
 import re
+import signal
 import socket
 import stat
 import subprocess
@@ -530,9 +531,35 @@ def test_serve_loop_refuses_connections_past_the_cap_and_bounds_tunnel_idle(prox
     first.close()
     second.close()
     server.close()
-    assert proxy.MAX_CONNECTIONS >= 16
+    assert proxy.MAX_CONNECTIONS == 64
     logged = [json.loads(line) for line in (tmp_path / "decisions.log").read_text().splitlines()]
     assert [row["reason"] for row in logged] == ["busy"]
+
+
+def test_the_serving_command_passes_a_64_slot_cap_into_the_loop(proxy, monkeypatch):
+    # serve_loop is tested with a semaphore the test builds. The production
+    # command is what binds the listener, and a billion-slot semaphore there
+    # left this file green.
+    seen = {}
+
+    def fake_serve(server, stop, slots):
+        del server
+        held = 0
+        while held < 65 and slots.acquire(blocking=False):
+            held += 1
+        seen["held"] = held
+        stop.set()
+
+    monkeypatch.setattr(proxy, "serve_loop", fake_serve)
+    monkeypatch.setattr(proxy, "LISTEN_PORT", 0)
+    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        assert proxy.cmd_serve() == 0
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    assert seen["held"] == 64
+    assert proxy.MAX_CONNECTIONS == 64
 
 
 def test_a_slow_header_is_cut_at_an_absolute_deadline(proxy, monkeypatch, tmp_path):
