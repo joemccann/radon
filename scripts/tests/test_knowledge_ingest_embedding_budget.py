@@ -18,6 +18,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from knowledge import ingest as ingest_mod  # noqa: E402
+from knowledge.distill import EnrichmentBudget  # noqa: E402
 from knowledge.embed import EMBEDDING_DIM, EMBEDDING_DIM_V2  # noqa: E402
 from knowledge.schema import KnowledgeDoc  # noqa: E402
 from knowledge.store import upsert_documents  # noqa: E402
@@ -158,19 +159,24 @@ def test_one_changed_document_ships_only_that_documents_vectors(monkeypatch):
         embeds.append(list(texts))
         return [[0.3] * EMBEDDING_DIM for _ in texts]
 
-    # embedding_text prefers the summary, so a content-only change reuses the
-    # stored vector when distill does not run. Stub distill so the re-embed
-    # does not depend on a live model key.
-    monkeypatch.setattr(
-        ingest_mod,
-        "distill",
-        lambda title, content, **kwargs: {"summary": f"distilled: {content}", "tickers": []},
-    )
+    # embedding_text prefers the summary. A content-only change reuses the
+    # stored vector unless distill returns a new summary. The real budget
+    # spawns a worker, so patching ingest.distill does not run in CI.
+    def _summary_runner(wave, _timeout):
+        return [{"summary": f"distilled: {content}", "tickers": []} for _title, content in wave]
+
     monkeypatch.setattr(ingest_mod, "get_embedder", lambda: embed_batch)
     monkeypatch.setattr(ingest_mod, "embed_passages", lambda texts: [[0.4] * EMBEDDING_DIM_V2 for _ in texts])
 
-    result = ingest_mod.ingest_source(counter, _module(fetched), distill_enabled=True, embed_enabled=True)
+    result = ingest_mod.ingest_source(
+        counter,
+        _module(fetched),
+        distill_enabled=True,
+        embed_enabled=True,
+        enrichment=EnrichmentBudget(runner=_summary_runner),
+    )
 
     assert result["skipped_docs"] == N_DOCS - 1
+    assert result["distilled"] == 1
     assert counter.blob_bytes == _ONE_VECTOR_BYTES
     assert len(embeds) == 1
