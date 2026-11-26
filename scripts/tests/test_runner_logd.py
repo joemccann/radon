@@ -285,11 +285,14 @@ def test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key():
     block = body[body.index("if [[ ! -e \"$LOGD_ROOT/keys/id_ed25519\" ]]"):]
     block = block[: block.index("\n  fi\n")]
     assert "ssh-keygen" in block
-    assert block.count("chown") == 1 and block.count("chmod") == 2
-    after = body[keygen:].split("\n  fi\n", 1)[1]
-    for line in after.splitlines():
-        if "id_ed25519" in line:
-            assert "chown" not in line and "chmod" not in line
+    assert 'sudo -u "$LOGD_USER"' in block
+    # The keygen runs as the daemon account and already leaves 600/644 files
+    # it owns. Root never chowns or chmods a keys/ name afterwards: the
+    # check-by-path above and a later root chown are two steps a link swap
+    # fits between.
+    for line in body.splitlines():
+        if "keys/" in line and not line.lstrip().startswith("#"):
+            assert "chown" not in line and "chmod" not in line, line
 
 
 def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
