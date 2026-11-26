@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-23T10:00:09Z",
-  "node_count": 4389,
-  "edge_count": 8936,
+  "generated_at": "2026-11-26T10:00:05Z",
+  "node_count": 4396,
+  "edge_count": 8950,
   "areas": {
-    "web": 2425,
+    "web": 2427,
     "site": 134,
-    "scripts": 1611,
+    "scripts": 1616,
     "cloud": 176,
     "lib": 25,
     "tests": 15,
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1177
+      "count": 1179
     },
     {
       "id": "site/app",
@@ -125,7 +125,7 @@
     {
       "id": "scripts/ci",
       "area": "scripts",
-      "count": 12
+      "count": 13
     },
     {
       "id": "scripts/clients",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/model_gateway",
       "area": "scripts",
-      "count": 22
+      "count": 23
     },
     {
       "id": "scripts/monitor_daemon",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 878
+      "count": 881
     },
     {
       "id": "scripts/trade_blotter",
@@ -422,7 +422,7 @@
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 65,
+      "in": 66,
       "out": 6,
       "test": false
     },
@@ -441,17 +441,24 @@
       "test": false
     },
     {
-      "id": "web/lib/db.ts",
-      "area": "web",
-      "in": 65,
-      "out": 2,
-      "test": false
-    },
-    {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
       "in": 64,
       "out": 2,
+      "test": false
+    },
+    {
+      "id": "web/lib/db.ts",
+      "area": "web",
+      "in": 62,
+      "out": 2,
+      "test": false
+    },
+    {
+      "id": "web/lib/dbExecute.ts",
+      "area": "web",
+      "in": 55,
+      "out": 5,
       "test": false
     },
     {
@@ -466,13 +473,6 @@
       "area": "web",
       "in": 57,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/dbExecute.ts",
-      "area": "web",
-      "in": 52,
-      "out": 5,
       "test": false
     },
     {
