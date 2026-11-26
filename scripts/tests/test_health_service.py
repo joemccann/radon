@@ -1152,13 +1152,22 @@ def _app_host_units(gateway):
 
 
 def _most_recent_weekday_at_10_et():
-    """Mid-session ET on the latest weekday, derived from one live anchor."""
+    """10:00 ET on the latest weekday the equity calendar calls an EXT session.
+
+    Weekend-only walk treats Thanksgiving as mid-session. The dwell test then
+    feeds a closed day into a market-hours escalation and the closed-market
+    suppression looks like a missed page.
+    """
+    from utils.market_calendar import is_equity_ext_session_et
+
     anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         hour=10, minute=0, second=0, microsecond=0
     )
-    while anchor.weekday() >= 5:
+    for _ in range(14):
+        if anchor.weekday() < 5 and is_equity_ext_session_et(anchor):
+            return anchor
         anchor -= datetime.timedelta(days=1)
-    return anchor
+    raise AssertionError("no equity EXT session in the last 14 days")
 
 
 class TestHostRoleApplicability:
@@ -1215,6 +1224,8 @@ class TestHostRoleApplicability:
         else:
             monkeypatch.setenv("RADON_HOST_ROLE", role)
         market_open = _most_recent_weekday_at_10_et()
+        from utils.market_calendar import is_equity_ext_session_et
+        assert is_equity_ext_session_et(market_open), market_open
         body = probes.build_status(
             _healthy_app_host_probes("down"),
             _app_host_units(self._ABSENT_GATEWAY_UNIT),
