@@ -1152,13 +1152,19 @@ def _app_host_units(gateway):
 
 
 def _most_recent_weekday_at_10_et():
-    """Mid-session ET on the latest weekday, derived from one live anchor."""
+    """10:00 ET on the latest open equity session, from one live anchor.
+
+    Weekday holidays are closed. Thanksgiving 2026-11-26 made "latest
+    weekday" a suppressed dwell, so the escalation assertion read degraded.
+    """
     anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         hour=10, minute=0, second=0, microsecond=0
     )
-    while anchor.weekday() >= 5:
+    for _ in range(14):
+        if anchor.weekday() < 5 and not probes._market_closed_et(anchor):
+            return anchor
         anchor -= datetime.timedelta(days=1)
-    return anchor
+    raise AssertionError("no open equity session in the last 14 days")
 
 
 class TestHostRoleApplicability:
