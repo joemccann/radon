@@ -1,6 +1,6 @@
 {
-  "version": "1.3.1",
-  "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.1-4582356770750464/darwin-arm/cli_mac_arm64.tar.gz",
-  "sha512": "f44ce2b9935c87966a842f45477b13e62e1ef8a22312ab1901b180bed88dd615fad5940968e80afc26540b5e02e5701b55521499e64c915ba3f736333698d69d",
+  "version": "1.5.18",
+  "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.18-6386224290725888/darwin-arm/cli_mac_arm64.tar.gz",
+  "sha512": "d10e124f5eb4da94ebb6c494cd2e7b38744f9f66e8e87145d2cbad1cbd3c4160fd88a79cd4220dfce7c9da0ddead652346bcc839914575f6447438ae8d1d5dcc",
   "team_id": "EQHXZ8M8AV"
 }
