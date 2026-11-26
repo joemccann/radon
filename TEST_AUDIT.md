@@ -12646,3 +12646,53 @@ Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | 20,141 passed / 11 skipped / 40 subtests (104.59s) | 11,681 passed / 21 skipped / 1,215 files (48.26s) | 58 failed / 4,293 passed / 23 skipped (951.52s) | 0 added / 0 removed |
 | 2 | 20,141 passed / 11 skipped / 40 subtests (179.28s) | 11,681 passed / 21 skipped / 1,215 files (170.56s) | 58 failed / 4,293 passed / 23 skipped (990.32s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 11 passed; 20,140 passed / 11 skipped / 40 subtests (165.20s) | 11,681 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,293 passed / 23 skipped (955.31s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-26
+
+Range `4d6687cf5d369389b9dd8375145537f4e81b6aee..6dd0418dea2ea8059eee17f3a11d3c72015e952c`: 20 commits / 21 paths. Newest trusted checkpoint on issue #83 is `audited-through: 4d6687cf5d369389b9dd8375145537f4e81b6aee` (2026-11-25). It carried no open verified finding. Open `testing/` PRs #1654 (T-600, T-601, T-602) and #1660 (T-603) are CI green; tonight skipped those. Highest id on those PRs is T-603. Next id was T-604.
+
+Codemap (`tools/codemap/codemap.json`, generated 2026-11-23) has a test importer for `scripts/db/mirror_market_snapshots_to_demo.js` (`scripts/lib/demoMirrorReliability.test.js`) and four for `scripts/fetch_equibles_ats_venue_share.py`. Runner modules and `scripts/ci/bump_vendor_cli_pins.py` have no node or no test edge. `rg` confirmed the gated importers: `scripts/tests/test_runner_egress.py`, `test_runner_logd.py`, `test_runner_publisher.py`, `test_runner_run_loop.py`, `test_model_gateway_specialized.py`, `test_vendor_cli_pin_bump.py`, `test_equibles_ats_venue_share.py`.
+
+Coverage thresholds (`vitest.config.ts:121-123` lines 75 / functions 71 / branches 65) are unchanged. `ci.yml` is unchanged. No new `skip` / `xfail` in the range. Re-triaged `TEST_LOG.md`: T-598 / T-599 remain DONE. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence.
+
+Delta Python files 3×: 1 failed / 377 passed each run. The failure is `test_an_idle_connection_does_not_wedge_the_serving_loop` (`scripts/tests/test_runner_publisher.py:725`), serial `OSError: AF_UNIX path too long` (`/tmp/t602-serial.log`). That is T-602 on #1654. Delta Vitest `scripts/lib/demoMirrorReliability.test.js` 18 passed ×3.
+
+Not filed: forecast column-union bound (`scripts/model_gateway/specialized.py:137-139`) — removing it fails the existing sparse-row case (`test_forecast_inputs_are_bounded_before_the_model_loads[payload10]`, 1 failed / 12 passed). Publisher `except Exception` (`scripts/runner/publisher.py:854`) — removing it fails `test_a_malformed_request_shape_is_rejected_not_raised` with `TypeError: unhashable type: 'list'`. Log-follower order and `check_source`-before-probe are source-order pins that fail if the call moves. CTA missing-key live call is T-603 on #1660.
+
+### T-604 — P1 — the egress serve command can drop the 64-tunnel cap and the suite stays green
+
+`scripts/runner/egress_proxy.py:758` passes `threading.BoundedSemaphore(MAX_CONNECTIONS)` into `serve_loop`. `MAX_CONNECTIONS = 64` at `scripts/runner/egress_proxy.py:46`. `scripts/tests/test_runner_egress.py` called `serve_loop` with a semaphore the test built and asserted `MAX_CONNECTIONS >= 16`. Replacing the production call with `BoundedSemaphore(10**9)` left the cap tests green (`/tmp/egress-unwire.log`, 4 passed). Raising the constant to 100000 also left them green (`/tmp/egress-cap-mutation.log`, 1 passed).
+
+Acceptance: `cmd_serve` passes a semaphore that drains at 64, and `MAX_CONNECTIONS == 64`. A billion-slot semaphore fails `assert 65 == 64`. A constant of 100000 fails `assert 100000 == 64`.
+
+### T-605 — P1 — install symlink refusals are source greps, so a success exit stays green
+
+`scripts/runner/install.sh:77` returns 77 from `refuse_link` when the path is a symlink. Inline checks at `scripts/runner/install.sh:924`, `:932`, and `:933` do the same for the log daemon output and key paths. `test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key` and `test_service_owned_children_refuse_a_symlink_before_root_installs_them` read the script text. Changing `return 77` to `return 0` in `refuse_link` left those greps green (`/tmp/refuse-link-mutation.log`, 4 passed). The same change on the key-path line left `test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key` green (`/tmp/key-return0.log`, 1 passed).
+
+Acceptance: running `refuse_link` against a symlink exits 77, and each inline `$LOGD_ROOT` check exits 77 on a symlink and 0 on a regular file. A `return 0` on either form fails `assert 0 == 77`.
+
+### T-606 — P1 — the dwell fixture treats Thanksgiving as mid-session, so a correct closed-market suppression looks like a missed page
+
+`scripts/tests/test_health_service.py` `_most_recent_weekday_at_10_et` (pre-fix) replaced the clock with 10:00 ET and walked weekends only. `scripts/health_service/probes.py:286-294` treats a holiday as closed via `is_equity_ext_session_et`. 2026-11-26 10:00 ET is not an EXT session; 2026-11-25 is. The helper returned Thanksgiving, and `test_every_other_role_keeps_the_dwell_escalation` failed `assert 'degraded' == 'down'` for broker, combined, and the default role (`/tmp/pytest-1-health-serial.log`, 3 failed / 3 passed).
+
+Acceptance: the instant passed as `now_et` is an equity EXT session, and those three roles still escalate a dwell past the bound to `down`. A weekend-only walk on 2026-11-26 fails the session precondition or the `down` assertion.
+
+Audited through: 6dd0418dea2ea8059eee17f3a11d3c72015e952c on 2026-11-26 — 3 new findings
+
+## Remediation 2026-11-26
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-604 | DONE | `cmd_serve` with `BoundedSemaphore(10**9)`: `assert 65 == 64` (`/tmp/t604-red.log`). Constant 100000: `assert 100000 == 64` (`/tmp/t604-red-constant.log`). Restored product source. Green: 3 passed (`/tmp/t604-t605-green.log`). Product source unchanged. |
+| T-605 | DONE | `refuse_link` `return 0`: `assert 0 == 77` (`/tmp/t605-red.log`). Key-path `return 0`: same assertion (`/tmp/t605-red-inline.log`). Restored product source. Green: the executing test passed in `/tmp/t604-t605-green.log`. Product source unchanged. |
+| T-606 | DONE | Standing serial 3 failed / 3 passed (`/tmp/pytest-1-health-serial.log`). Helper walks closed days with `is_equity_ext_session_et`. Green: 6 passed ×3 (`/tmp/t606-green.log`). Product source unchanged. |
+
+### Closing gates 2026-11-26
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH (`/opt/homebrew/bin/caddy`), node v26.12.1. Root pytest each round stayed red only on `test_an_idle_connection_does_not_wedge_the_serving_loop` (T-602 on #1654, Darwin `AF_UNIX path too long`). r2 and r3 also had the credentials xdist clock flake; that case passed serially (2 passed, `/tmp/pytest-2-serial-cred.log`, `/tmp/pytest-3-serial.log`). r2 also failed `test_missing_api_key_never_reaches_the_network` serially in 44.17s because the missing-key path called the live model (T-603 on #1660). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as the `6dd0418de` worktree (0 added / 0 removed). Linux CI is the authority for `cloud/tests`.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main `6dd0418de` |
+|---|---|---|---|---|
+| 1 | 1 failed (T-602) / 20,257 passed / 11 skipped / 40 subtests (123.86s) | 11,691 passed / 21 skipped / 1,218 files (50.09s) | 58 failed / 4,307 passed / 23 skipped (1031.01s) | 0 added / 0 removed |
+| 2 | credentials flake then serial 2 passed; T-603 live-model call; T-602. 3 failed / 20,255 passed / 11 skipped / 40 subtests (188.20s) | 11,691 passed / 21 skipped / 1,218 files (102.94s) | 58 failed / 4,307 passed / 23 skipped (975.91s) | 0 added / 0 removed |
+| 3 | credentials flake then serial 2 passed; T-602. 2 failed / 20,256 passed / 11 skipped / 40 subtests (188.14s) | 11,691 passed / 21 skipped / 1,218 files (104.15s) | 58 failed / 4,307 passed / 23 skipped (1173.24s) | 0 added / 0 removed |

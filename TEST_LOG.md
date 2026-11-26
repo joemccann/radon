@@ -1462,3 +1462,11 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
 | T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
+
+## 2026-11-26
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-604 | DONE | `cmd_serve` billion-slot semaphore: `assert 65 == 64` (`/tmp/t604-red.log`). Constant 100000: `assert 100000 == 64` (`/tmp/t604-red-constant.log`). Restored product source. Green 3 passed (`/tmp/t604-t605-green.log`). Product source unchanged. Closing rounds: root pytest red only on T-602 (and r2 T-603, r2/r3 credentials flake then serial 2 passed). Vitest 11,691 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `6dd0418de`. |
+| T-605 | DONE | `refuse_link` and the key-path check returning 0: `assert 0 == 77` (`/tmp/t605-red.log`, `/tmp/t605-red-inline.log`). Source greps had stayed green. Restored product source. Green in `/tmp/t604-t605-green.log`. Product source unchanged. Closing rounds: same as T-604. |
+| T-606 | DONE | Thanksgiving 10:00 ET is not an EXT session. Weekend-only helper: 3 failed / 3 passed, `assert 'degraded' == 'down'` (`/tmp/pytest-1-health-serial.log`). Helper walks closed days. Green 6 passed ×3 (`/tmp/t606-green.log`). Product source unchanged. Closing rounds: same as T-604. |
