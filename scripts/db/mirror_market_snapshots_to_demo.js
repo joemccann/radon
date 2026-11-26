@@ -138,8 +138,14 @@ async function retryOperation({
 // size), and the portfolio names no public tier carries, which the fetch
 // tags as universe.private_tickers and whose presence alone reveals an open
 // position. The demo trial tier keeps only the tier order and the public
-// names. A payload that cannot be parsed is dropped rather than copied unseen.
+// names. The tag is the only way to tell a public name from a portfolio one,
+// so a row without an array tag, like a payload that cannot be parsed or a
+// per-ticker entry that is not an object naming its ticker, is dropped
+// rather than copied unseen.
 const ATS_UNIVERSE_PRIVATE_KEYS = ["counts", "core", "this_cycle", "index_offset", "private_tickers"];
+
+const isName = (value) => typeof value === "string";
+const isRow = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && isName(value.ticker);
 
 export function stripAccountDerivedFields(table, row) {
   if (table !== "scan_snapshots" || row?.service !== "equibles-ats-venue-share") return row;
@@ -150,19 +156,25 @@ export function stripAccountDerivedFields(table, row) {
     return null;
   }
   const universe = payload?.universe;
-  if (!universe || typeof universe !== "object") return row;
-  const hidden = new Set(Array.isArray(universe.private_tickers) ? universe.private_tickers : []);
+  if (!universe || typeof universe !== "object" || Array.isArray(universe)) return null;
+  if (!Array.isArray(universe.private_tickers) || !universe.private_tickers.every(isName)) return null;
+  const hidden = new Set(universe.private_tickers);
   const keep = (ticker) => !hidden.has(ticker);
-  if (hidden.size > 0) {
-    if (Array.isArray(payload.tickers)) payload.tickers = payload.tickers.filter(keep);
-    if (Array.isArray(payload.current)) payload.current = payload.current.filter((row) => keep(row?.ticker));
-    if (Array.isArray(payload.errors)) payload.errors = payload.errors.filter((row) => keep(row?.ticker));
-    if (Array.isArray(payload.carried_forward)) payload.carried_forward = payload.carried_forward.filter(keep);
-    if (payload.series && typeof payload.series === "object") {
-      for (const ticker of hidden) delete payload.series[ticker];
-    }
-    if (Array.isArray(payload.current)) payload.count = payload.current.length;
+  for (const key of ["tickers", "carried_forward"]) {
+    if (payload[key] === undefined) continue;
+    if (!Array.isArray(payload[key]) || !payload[key].every(isName)) return null;
+    payload[key] = payload[key].filter(keep);
   }
+  for (const key of ["current", "errors"]) {
+    if (payload[key] === undefined) continue;
+    if (!Array.isArray(payload[key]) || !payload[key].every(isRow)) return null;
+    payload[key] = payload[key].filter((entry) => keep(entry.ticker));
+  }
+  if (payload.series !== undefined) {
+    if (!payload.series || typeof payload.series !== "object" || Array.isArray(payload.series)) return null;
+    for (const ticker of hidden) delete payload.series[ticker];
+  }
+  if (payload.current !== undefined) payload.count = payload.current.length;
   for (const key of ATS_UNIVERSE_PRIVATE_KEYS) delete universe[key];
   return { ...row, payload: JSON.stringify(payload) };
 }
