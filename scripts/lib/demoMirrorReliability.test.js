@@ -10,6 +10,7 @@ import {
   PER_KEY,
   PURGED_ACCOUNT_TABLES,
   isTransientTursoError,
+  stripAccountDerivedFields,
   runMarketMirror,
 } from "../db/mirror_market_snapshots_to_demo.js";
 
@@ -522,10 +523,41 @@ describe("account-derived fields never reach the demo database", () => {
 
     const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
     const byService = Object.fromEntries(statements.map((s) => [s.args[0], JSON.parse(s.args[2])]));
-    const universe = byService["equibles-ats-venue-share"].universe;
-    expect(universe).toEqual({ order: ["portfolio", "watchlist", "ndx100", "r2k", "sp500"] });
-    expect(JSON.stringify(universe)).not.toMatch(/\b(?:47|147|7)\b/);
+    // A row the fetch did not tag cannot be classified, so it is dropped
+    // whole rather than copied with only the counts removed.
+    expect(byService["equibles-ats-venue-share"]).toBeUndefined();
+    expect(JSON.stringify(statements)).not.toMatch(/\b(?:47|147|7)\b/);
     expect(byService.gex).toEqual({ counts: { portfolio: 3 } });
+  });
+
+  it("drops an ATS venue-share row whose private-name tag is missing or malformed", () => {
+    // Every open-position name is present only by the tag's say-so. Without
+    // an array tag the strip cannot tell a public name from a portfolio
+    // name, so the row is dropped like an unparsable one. Rows whose
+    // per-ticker entries are not objects are dropped for the same reason.
+    const row = (payload) => ({ service: "equibles-ats-venue-share", payload: JSON.stringify(payload) });
+    const dropped = [
+      { tickers: ["XOFF"], current: [{ ticker: "XOFF" }] },
+      { tickers: ["XOFF"], universe: { order: ["portfolio"] } },
+      { tickers: ["XOFF"], universe: { private_tickers: "XOFF", core: 1 } },
+      { tickers: ["XOFF"], universe: { private_tickers: { XOFF: true } } },
+      { tickers: ["XOFF"], universe: "portfolio" },
+      { current: ["XOFF", null, 5], universe: { private_tickers: ["XOFF"] } },
+      { errors: ["XOFF"], universe: { private_tickers: ["XOFF"] } },
+      { tickers: [{ ticker: "XOFF" }], universe: { private_tickers: ["XOFF"] } },
+    ];
+    for (const payload of dropped) {
+      expect(stripAccountDerivedFields("scan_snapshots", row(payload))).toBeNull();
+    }
+    const kept = stripAccountDerivedFields(
+      "scan_snapshots",
+      row({ tickers: ["AAPL"], universe: { order: ["watchlist"], private_tickers: [] } }),
+    );
+    expect(JSON.parse(kept.payload)).toEqual({ tickers: ["AAPL"], universe: { order: ["watchlist"] } });
+    expect(stripAccountDerivedFields("scan_snapshots", { service: "gex", payload: "{not json" })).toEqual({
+      service: "gex",
+      payload: "{not json",
+    });
   });
 
   it("drops the tagged private names and the cycle position from the mirrored ATS venue-share payload", async () => {
