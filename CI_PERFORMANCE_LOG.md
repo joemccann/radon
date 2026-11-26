@@ -3283,3 +3283,68 @@ higher. Status `VALIDATING`.
 (1 failed: rest still load) then green (4 passed). Related shard
 contracts 136 passed. YAML parses. Full suites, Vitest, Docker builds,
 and workflow lint are left to PR CI.
+
+## CIP-039 - read the client payload label from image inspect JSON (2026-11-26) - VALIDATING
+
+CIP-024 compares `radon.model-clients.payload-sha256` with
+`image inspect --format '{{index .Config.Labels "..."}}'`. Nine successful
+main deploys still printed `model clients staged from exact CI image`.
+The published gateway config for `6dd0418dea2ea8059eee17f3a11d3c72015e952c`
+(config blob `sha256:0c761a98183420663c28d931d493d36827a6785e9af758cc23f5724e2b6e102f`)
+carries that label at `f97da6b2177474da954357a2d9bdab76da07dfc5a9c663452094bed2ebe3a11e`.
+Podman, the host engine, prints `<no value>` for that Go template even when
+default `image inspect` JSON has `Config.Labels`. CIP-038 (open #1659)
+batches install-units; it does not touch this export.
+
+Evidence, attempt-1 deploy SSH logs, seconds from "exact image pair is
+local" to the staging line. Queue is 2-3s on these runs and is not part
+of the gain:
+
+| Run | Clock | Deploy job | Staging gap |
+|---|---|---|---|
+| [45638350375](https://github.com/joemccann/radon/actions/runs/45638350375) | 436s | 180s (job 139292529004) | 32.8s |
+| [45183187555](https://github.com/joemccann/radon/actions/runs/45183187555) | 385s | 163s | 22.3s |
+| [45181898751](https://github.com/joemccann/radon/actions/runs/45181898751) | 385s | 160s | 21.4s |
+| [45180408426](https://github.com/joemccann/radon/actions/runs/45180408426) | 415s | 131s | 21.7s |
+| [45179451125](https://github.com/joemccann/radon/actions/runs/45179451125) | 420s | 169s | 22.8s |
+| [45111366441](https://github.com/joemccann/radon/actions/runs/45111366441) | 392s | 162s | 18.1s |
+| [45109521405](https://github.com/joemccann/radon/actions/runs/45109521405) | 361s | 125s | 18.0s |
+| [45072047330](https://github.com/joemccann/radon/actions/runs/45072047330) | 643s | 167s | 19.9s |
+| [44979169331](https://github.com/joemccann/radon/actions/runs/44979169331) | 427s | 155s | 20.3s |
+
+Staging-gap p50 is 21.4s (n=9, all misses). Mixed successful clock p50 is
+417s (n=20); 10% is 42s. Replacing the export with a verified hardlink is
+expected to cut about 18-30s of Deploy to VPS, which clears 15s and is
+about 5% of the mixed clock. Acceptance may therefore stay unmet after
+five samples. A missing donor tag still exports. Runner minutes fall with
+the shorter deploy. The deploy job syncs the control plane before
+`stage-model-clients`, so the merge deploy installs this reader before it
+stages.
+
+**Change.** `_payload_label` reads default `image inspect` JSON
+(`Config.Labels`, else top-level `Labels` when `Config.Labels` is absent).
+Missing, malformed, or unequal labels still export. Image-id reuse, receipt
+keys, exact SHA admission, clone digest checks, health, recovery, rollback,
+and the 40-second stability window stay. No `needs` edge and no test
+inventory change.
+
+**Safety and revert trigger.** Fail closed to export. Revert if a reused
+receipt hash does not match an export of a payload-identical image, if a
+missing or malformed label reuses, or if five after-runs with an unchanged
+payload and a local donor tag still print `staged from exact CI image`.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS | 180s | pending | TBD until 5 samples |
+
+Before is the deploy job wall on run 45638350375 (job 139292529004).
+Acceptance remains five comparable mixed deploys before and five after:
+same-class p50 at least 10% and 15s faster; p95 no worse than 5% or 15s;
+cold p50 no worse than 10%; runner minutes no more than 20% higher. The
+expected save clears 15s and not 10% of the 417s mixed p50. Status
+`VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip039_payload_label_json.py` was red
+(3 failed: template `<no value>` still missed a JSON label) then green
+(6 passed). Related reuse, stage, and install tests 46 passed. Full
+suites, Vitest, Docker builds, and workflow lint are left to PR CI.
