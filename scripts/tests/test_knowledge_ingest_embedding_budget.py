@@ -158,6 +158,14 @@ def test_one_changed_document_ships_only_that_documents_vectors(monkeypatch):
         embeds.append(list(texts))
         return [[0.3] * EMBEDDING_DIM for _ in texts]
 
+    # embedding_text prefers the summary, so a content-only change reuses the
+    # stored vector when distill does not run. Stub distill so the re-embed
+    # does not depend on a live model key.
+    monkeypatch.setattr(
+        ingest_mod,
+        "distill",
+        lambda title, content, **kwargs: {"summary": f"distilled: {content}", "tickers": []},
+    )
     monkeypatch.setattr(ingest_mod, "get_embedder", lambda: embed_batch)
     monkeypatch.setattr(ingest_mod, "embed_passages", lambda texts: [[0.4] * EMBEDDING_DIM_V2 for _ in texts])
 

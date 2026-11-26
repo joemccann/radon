@@ -1152,11 +1152,18 @@ def _app_host_units(gateway):
 
 
 def _most_recent_weekday_at_10_et():
-    """Mid-session ET on the latest weekday, derived from one live anchor."""
+    """10:00 ET on the latest day the equity session is actually open.
+
+    A holiday weekday is not a session. Thanksgiving 2026-11-26 is a Thursday,
+    so walking only to the latest weekday left the dwell fixture on a closed
+    day and the escalation correctly stayed degraded.
+    """
+    from utils.market_calendar import is_equity_ext_session_et
+
     anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         hour=10, minute=0, second=0, microsecond=0
     )
-    while anchor.weekday() >= 5:
+    while not is_equity_ext_session_et(anchor):
         anchor -= datetime.timedelta(days=1)
     return anchor
 
