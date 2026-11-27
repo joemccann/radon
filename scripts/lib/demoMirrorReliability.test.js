@@ -545,6 +545,12 @@ describe("account-derived fields never reach the demo database", () => {
       { current: ["XOFF", null, 5], universe: { private_tickers: ["XOFF"] } },
       { errors: ["XOFF"], universe: { private_tickers: ["XOFF"] } },
       { tickers: [{ ticker: "XOFF" }], universe: { private_tickers: ["XOFF"] } },
+      // series is a map. A string or array still carries the private name,
+      // and a non-array carried_forward does too. Both drop whole.
+      { series: "book XOFF", universe: { private_tickers: ["XOFF"], order: ["watchlist"] } },
+      { series: ["XOFF", "AAPL"], universe: { private_tickers: ["XOFF"] } },
+      { series: null, universe: { private_tickers: [] } },
+      { carried_forward: "XOFF", universe: { private_tickers: ["XOFF"] } },
     ];
     for (const payload of dropped) {
       expect(stripAccountDerivedFields("scan_snapshots", row(payload))).toBeNull();
