@@ -4,8 +4,8 @@
   "private": true,
   "description": "Immutable CLI dependencies for isolated subscription credential probes",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.311",
-    "@openai/codex": "0.160.1",
-    "@xai-official/grok": "1.0.70"
+    "@anthropic-ai/claude-code": "2.1.332",
+    "@openai/codex": "0.172.0",
+    "@xai-official/grok": "1.0.92"
   }
 }
