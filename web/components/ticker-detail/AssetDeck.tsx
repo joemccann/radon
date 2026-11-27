@@ -1,19 +1,28 @@
 "use client";
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import views from "./InstrumentViews.module.css";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 import type { DeckKey } from "./AssetCockpit";
-import OptionsChainTab from "./OptionsChainTab";
-import PositionTab from "./PositionTab";
 import OrderTab from "./OrderTab";
-import NewsTab from "./NewsTab";
-import RatingsTab from "./RatingsTab";
-import SeasonalityTab from "./SeasonalityTab";
-import CompanyTab from "./CompanyTab";
-import SmartMoney13FPanel from "@/components/equibles/SmartMoney13FPanel";
-import FilingForensicsDossier from "@/components/equibles/FilingForensicsDossier";
+import InstrumentSkeleton from "@/components/ui/InstrumentSkeleton";
+
+function DeckSkeleton() {
+  return <InstrumentSkeleton testId="asset-deck-skeleton" />;
+}
+
+// Flyout decks are closed on the book-first paint. A static import put their
+// graphs on every ticker load (PERF-072). The docked order ticket stays eager.
+const OptionsChainTab = dynamic(() => import("./OptionsChainTab"), { loading: DeckSkeleton });
+const PositionTab = dynamic(() => import("./PositionTab"), { loading: DeckSkeleton });
+const NewsTab = dynamic(() => import("./NewsTab"), { loading: DeckSkeleton });
+const RatingsTab = dynamic(() => import("./RatingsTab"), { loading: DeckSkeleton });
+const SeasonalityTab = dynamic(() => import("./SeasonalityTab"), { loading: DeckSkeleton });
+const CompanyTab = dynamic(() => import("./CompanyTab"), { loading: DeckSkeleton });
+const SmartMoney13FPanel = dynamic(() => import("@/components/equibles/SmartMoney13FPanel"), { loading: DeckSkeleton });
+const FilingForensicsDossier = dynamic(() => import("@/components/equibles/FilingForensicsDossier"), { loading: DeckSkeleton });
 
 const DECK_TITLE: Record<DeckKey, string> = {
   c: "Chain",
