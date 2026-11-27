@@ -722,13 +722,17 @@ def test_edit_draft_refuses_a_fork_pull_request_with_the_same_branch_name(tmp_pa
     assert edited and edited[0][:3] == ["pr", "edit", "7"]
 
 
-def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> None:
+def test_an_idle_connection_does_not_wedge_the_serving_loop() -> None:
     # One client that connects and sends nothing must not block every other
-    # loop's push, draft and notify behind it.
+    # loop's push, draft and notify behind it. AF_UNIX paths are capped near
+    # 104 bytes on macOS; pytest tmp_path is too long, so the bind never
+    # happens and the wedge contract is not reached.
     import socket
 
-    cfg = _cfg(tmp_path)
+    base = Path(tempfile.mkdtemp(prefix="pub", dir="/tmp"))
+    cfg = _cfg(base)
     cfg.socket_path.parent.mkdir()
+    assert len(str(cfg.socket_path)) < 104, cfg.socket_path
     bundle = _owned(cfg.work_root("security") / "branch.bundle", "bundle\n")
     ops = FakeOps()
     before = os.umask(0)
@@ -746,5 +750,6 @@ def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> N
     finally:
         idle.close()
         os.umask(before)
+        shutil.rmtree(base, ignore_errors=True)
     assert response["ok"] is True
     assert response["pushed"] == BRANCH
