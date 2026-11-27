@@ -12646,3 +12646,55 @@ Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | 20,141 passed / 11 skipped / 40 subtests (104.59s) | 11,681 passed / 21 skipped / 1,215 files (48.26s) | 58 failed / 4,293 passed / 23 skipped (951.52s) | 0 added / 0 removed |
 | 2 | 20,141 passed / 11 skipped / 40 subtests (179.28s) | 11,681 passed / 21 skipped / 1,215 files (170.56s) | 58 failed / 4,293 passed / 23 skipped (990.32s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 11 passed; 20,140 passed / 11 skipped / 40 subtests (165.20s) | 11,681 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,293 passed / 23 skipped (955.31s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-27
+
+Range `6dd0418dea2ea8059eee17f3a11d3c72015e952c..2a4616f1277f2eabfcd77e7e35103775fd7101c0`: 3 non-merge commits / 7 paths. Checkpoint on issue #83 is `audited-through: 6dd0418dea2ea8059eee17f3a11d3c72015e952c`. It carried no open verified finding. Open `testing/` PRs #1654 (T-600, T-601, T-602), #1660 (T-603) and #1665 (T-604, T-605, T-606) are CI-green; tonight skipped those. Highest id before tonight T-606. Next id T-607.
+
+Codemap importers: `scripts/db/mirror_market_snapshots_to_demo.js` is imported by `scripts/lib/demoMirrorReliability.test.js` only. `scripts/health_service/probes.py` is imported by `scripts/tests/test_health_service.py`, `test_rel135_dependency_dwell.py`, `test_rel140_recovery_evidence_and_heartbeats.py`, `test_rel181_gateway_suppression.py` and `test_rel243_role_suppression_precondition.py`. `scripts/runner/install.sh` is not a codemap node; `scripts/tests/test_runner_logd.py` reads it. The sibling gateway tests pin fixed Tuesday and Saturday instants, not a live weekday walk.
+
+Coverage thresholds (`vitest.config.ts` lines 75 / functions 71 / branches 65) are unchanged. No new unlinked `skip` / `xfail`. `scripts/lib/**/*.test.js` is in the Vitest include. Re-triaged `TEST_LOG.md`: historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence. T-598 and T-599 remain DONE.
+
+Not filed: `scripts/health_service/probes.py:207` still says holidays are not calendared. `_market_closed_et` at `probes.py:286` calls `is_equity_ext_session_et`. The new case at `scripts/tests/test_health_service.py:1235` executes `build_status` and expects `down` on 2026-11-25 and `degraded` on 2026-11-26. The comment is documentation drift. T-605 already executes the symlink refusals on #1665.
+
+Standing root pytest before the fix: 1 failed / 20,257 passed / 11 skipped / 40 subtests (`/tmp/pytest-standing.log`). Serial of that node: `OSError: AF_UNIX path too long` (`/tmp/t607-serial.log`). Standing Vitest: 11,692 passed / 21 skipped / 1,218 files. Standing cloud: 58 failed / 4,307 passed / 23 skipped, same sorted FAILED nodes as a worktree of `6dd0418de` (0 added / 0 removed). Linux CI is the authority for that suite.
+
+### T-607 — P1 — the idle publisher socket binds under pytest tmp_path, so Darwin never runs the wedge contract
+
+`scripts/tests/test_runner_publisher.py:730` (pre-fix) called `_cfg(tmp_path)`, whose socket is `tmp_path / "run" / "publisher.sock"` (`test_runner_publisher.py:82`). The sibling at `test_runner_publisher.py:633` already binds under `/tmp`. This host's basetemp is `/Users/_radonbot/radon-runner/tmp/pytest-of-_radonbot/...`. Serial: `idle.connect` raised `OSError: AF_UNIX path too long` (`/tmp/t607-serial.log`) and `publisher.serve` raised the same at `scripts/runner/publisher.py:916`. The assertion that an idle client does not wedge the loop was never reached.
+
+Acceptance: the socket path is under `/tmp` and shorter than 104 bytes, and the idle client still gets `ok` / `pushed`. Putting the socket back under pytest `tmp_path` fails with `AF_UNIX path too long` on this host.
+
+### T-608 — P1 — a reshaped ATS series still copies a private name, and the new fail-closed test stays green
+
+`scripts/db/mirror_market_snapshots_to_demo.js:173` drops a `series` that is not a name-keyed object. The new cases at `scripts/lib/demoMirrorReliability.test.js:539` cover a missing tag and malformed per-ticker rows, not `series`. Removing the type check left that file 19 passed (`/tmp/t608-mutation.log`) and `stripAccountDerivedFields` returned `{"series":"book XOFF","universe":{"order":["watchlist"]}}`.
+
+Acceptance: a string series, an array series, a null series, and a non-array `carried_forward` each return null. Removing the series type check fails the string-series case with the private name still in the payload.
+
+### T-609 — P1 — the key-ownership test greps source lines, so a chown through a variable stays green
+
+`scripts/tests/test_runner_logd.py:293` (pre-fix) rejects a line that contains both `keys/` and `chown` or `chmod`. `scripts/runner/install.sh:936` generates the key as `$LOGD_USER` and does not chown it. Assigning the key path to `key` and then `chown "$key"` left that grep 1 passed (`/tmp/t609-mutation.log`). T-605 on #1665 executes the symlink exit codes, not this chown.
+
+Acceptance: running the key block invokes `sudo -u daemonacct /usr/bin/ssh-keygen` and creates the key file. A root `chown` of the expanded key path fails. The same-line grep may stay.
+
+Audited through: 2a4616f1277f2eabfcd77e7e35103775fd7101c0 on 2026-11-27 — 3 new findings
+
+## Remediation 2026-11-27
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-607 | DONE | Serial `OSError: AF_UNIX path too long` (`/tmp/t607-serial.log`). Socket under `/tmp/pub*`, length asserted `< 104`. Green: 1 passed (`/tmp/t607-green.log`); file 35 passed. Product source unchanged. |
+| T-608 | DONE | Series type-check removed: existing file 19 passed and copied `series: "book XOFF"` (`/tmp/t608-mutation.log`). New cases: 1 failed / 18 passed (`/tmp/t608-red.log`). Restored product source. Green: 19 passed (`/tmp/t608-green.log`) ×3. |
+| T-609 | DONE | Split-line `chown` of the expanded key path: grep 1 passed, executing test failed (`/tmp/t609-red.log`). Restored product source. Green: file 24 passed (`/tmp/t609-green.log`). |
+
+Delta files, three serial runs: Python 145 passed each (`/tmp/delta-pytest-1.log` through `-3`); Vitest 19 passed each. Product source unchanged.
+
+### Closing gates 2026-11-27
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Each full pytest round had one xdist load flake; the unchanged file passed alone. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as the worktree of `6dd0418de` (0 added / 0 removed). Linux CI is the authority for that suite.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs `6dd0418de` |
+|---|---|---|---|---|
+| 1 | credentials clock flake and hundred-commit git 128, then serial 2 passed and 1 passed; 20,257 passed / 2 failed / 11 skipped / 40 subtests (175.83s) | 11,692 passed / 21 skipped / 1,218 files (101.18s) | 58 failed / 4,307 passed / 23 skipped (974.17s) | 0 added / 0 removed |
+| 2 | credentials clock flake then serial 11 passed; 20,258 passed / 1 failed / 11 skipped / 40 subtests (181.99s) | 11,692 passed / 21 skipped / 1,218 files (113.09s) | 58 failed / 4,307 passed / 23 skipped (1,141.10s) | 0 added / 0 removed |
+| 3 | CTA missing-key string flake then serial 33 passed; 20,258 passed / 1 failed / 11 skipped / 40 subtests (193.26s) | 11,692 passed / 21 skipped / 1,218 files (109.68s) | 58 failed / 4,307 passed / 23 skipped (973.64s) | 0 added / 0 removed |

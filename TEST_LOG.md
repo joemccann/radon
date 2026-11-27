@@ -1462,3 +1462,11 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
 | T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
+
+## 2026-11-27
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-607 | DONE | Serial `OSError: AF_UNIX path too long` at `idle.connect` (`/tmp/t607-serial.log`). Socket under `/tmp`. Green 1 passed; file 35 passed. Product source unchanged. Closing rounds: each full pytest had one xdist flake then a serial pass; 20,257/20,258/20,258 passed with 11 skipped and 40 subtests. Vitest 11,692 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed against `6dd0418de`. |
+| T-608 | DONE | Series type-check removed: 19 passed and payload kept `book XOFF` (`/tmp/t608-mutation.log`). New cases 1 failed / 18 passed (`/tmp/t608-red.log`). Restored product source. Green 19 passed ×3. Closing rounds: same as T-607. |
+| T-609 | DONE | Split-line `chown` of the expanded key: grep 1 passed, executing test failed (`/tmp/t609-red.log`). Restored product source. Green file 24 passed. Closing rounds: same as T-607. |
