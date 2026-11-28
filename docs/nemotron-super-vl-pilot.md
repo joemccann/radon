@@ -1,22 +1,25 @@
 # Hosted Nemotron 3.5 Super VL pilot
 
-Super VL (`nvidia/nemotron-3.5-super-vl-120b-a12b`) became the default NVIDIA
+Super VL (`nvidia/nemotron-3.5-super-vl-120b-a12b`) was pinned as the NVIDIA
 vision model on 2026-11-01, ahead of the gates below: the prior chain was not
 callable on the production key (Llama 11B answered 404 for the account, Llama
-90B timed out on every production call over 24h). Llama 90B is now the
-fallback. The gates below remain the quality check still owed. Provider order,
-PDF parser, embeddings, web assistant and Qwen GPU adapters are unchanged.
+90B timed out on every production call over 24h). That pin is gone. Unset
+NVIDIA ids follow [model-gateway.md](model-gateway.md#latest-model): an env
+override, otherwise the catalog's newest flagship. A second vision id is an
+explicit `NVIDIA_VISION_MODEL`. NVIDIA stays paused in every environment
+(`engine.PAUSED_BY_DEFAULT`). The gates below remain the quality check owed
+before an operator sets that variable to Super VL.
 
 ## Request contract
 
-Only Super VL and Nemotron 3 Ultra (the text default), when called through the
-NVIDIA provider, get `reasoning_effort: "none"` and API `stream: false`. Small extraction budgets
-are reserved for final answers. HTTP transport reading remains bounded and
-streamed internally; the response is parsed as one JSON document, not SSE.
-The Llama 90B fallback and other providers receive no new fields.
-Existing array/object parsing, semantic validators, rate limits, response
-byte limits and provider fallbacks remain in effect. No JSON schema is forced:
-CTA extraction returns arrays while research review returns objects.
+Any NVIDIA id that starts with `nvidia/nemotron` gets `reasoning_effort: "none"`
+and API `stream: false` (`engine._nvidia_request_extras`). The check follows
+whichever Nemotron the catalog resolved. Small extraction budgets are reserved
+for final answers. HTTP transport reading remains bounded and streamed
+internally; the response is parsed as one JSON document, not SSE. Existing
+array/object parsing, semantic validators, rate limits and response byte
+limits remain in effect. No JSON schema is forced: CTA extraction returns
+arrays while research review returns objects.
 
 References: [hosted API](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3_5-super-vl-120b-a12b-infer),
 [model-specific limitations](https://docs.nvidia.com/nim/large-language-models/latest/get-started/advanced/get-started-nemotron-3.5-super-vl.html).
@@ -57,13 +60,17 @@ The short tagging/distillation budgets are unchanged.
 
 ## Rollback and limits
 
-Set `NVIDIA_VISION_MODEL=meta/llama-3.2-90b-vision-instruct` to bypass Super VL; regenerate the affected runtime environment and restart the
-affected consumer. A code rollback is the ordinary prior-release rollback.
+To leave an explicit Super VL pin, remove `NVIDIA_VISION_MODEL` or set another
+id, regenerate the runtime environment, and restart `radon-model-gateway.service`.
+Removing the variable returns to the catalog policy in
+[model-gateway.md](model-gateway.md#latest-model). Setting
+`NVIDIA_VISION_MODEL=meta/llama-3.2-90b-vision-instruct` is an explicit pin.
+A code rollback is the ordinary prior-release rollback.
 No data migration or re-embedding is needed.
 
-This does not change nightly CLI model discovery: it still prefers the largest
-catalog model and needs a separate explicit-selection change before a CLI pilot.
-Never point `RADON_RESEARCH_PARSE_MODELS` at Super VL: the specialized Parse
-adapter expects a different output contract. Hosted entitlement, production
+Unset model ids follow that same policy, including CLI-backed rungs. This
+page does not choose the unset id. Never point `RADON_RESEARCH_PARSE_MODELS`
+at Super VL: the specialized Parse adapter expects a different output
+contract. Hosted entitlement, production
 service terms, latency, cost and real chart quality must be measured before
 promotion. No live workload evaluation is claimed by mocked regression tests.

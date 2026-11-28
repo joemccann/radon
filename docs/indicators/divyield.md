@@ -141,8 +141,8 @@ ordered ascending by date, monthly `approximate:1` rows then daily rows.
 ## API — `web/app/api/divyield/route.ts`
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only.
-- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'div-yield'`,
-  `fromDisk` = `data/divyield.json`, fresher content timestamp wins.
+- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'div-yield'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` — daily timer with slack; older than 48h means the writer is down.
 - Missing contract: HTTP 200 + frozen
   `{ missing: true, scan_time: null, data_date: null, current: null, series: [], backfill_cutover: null }`.
@@ -202,8 +202,7 @@ ordered ascending by date, monthly `approximate:1` rows then daily rows.
   degenerate-payload guard (constituents < 400 raises), payload contract keys,
   window-relative dates for freshness.
 - `web/tests/divyield-api.test.ts` (`@vitest-environment node`) — in-memory
-  `@libsql/client` seeded from the real snapshot shape: Turso-beats-older-disk, disk
-  fallback, exact `missing: true` object at 200, no cross-service leak
+  `@libsql/client` seeded from the real snapshot shape: exact `missing: true` object at 200, no cross-service leak
   (`yield-curve` snapshot must not serve), `route.dynamic === "force-dynamic"`.
 - `web/tests/divyield-panel.test.tsx` (`@vitest-environment jsdom`) — mock
   `@/lib/useDivYield`; assert loader label, empty state, strip values (`3.78%`,

@@ -156,8 +156,8 @@ on 2025-01-09); never forward-fill or interpolate them.
 ## API — `web/app/api/hyad/route.ts`
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only.
-- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'hy-ad'`,
-  `fromDisk` = `data/hyad.json`.
+- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'hy-ad'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 120h`, commented: T+1 publication plus 3-day weekends and
   bond-market-only holidays; older than 120h means the writer is down.
 - Missing contract: HTTP 200 + frozen
@@ -220,7 +220,7 @@ on 2025-01-09); never forward-fill or interpolate them.
   unchanged-day heartbeat path (no row upsert, snapshot + heartbeat written);
   migration 0056 pin (schema, version 56, idempotent upsert); writer arity;
   payload contract keys; window-relative freshness dates.
-- `web/tests/hyad-api.test.ts` — in-memory libsql: Turso-beats-disk, disk fallback,
+- `web/tests/hyad-api.test.ts` — in-memory libsql:
   exact frozen missing object at 200, no cross-service leak (a `credit-spread`
   snapshot must not serve), `route.dynamic === "force-dynamic"`.
 - `web/tests/hyad-panel.test.tsx` — mock `@/lib/useHyAd`; loader label, empty state,
