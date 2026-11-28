@@ -35,6 +35,9 @@ def _inspect(mapping):
         if argv[1] == "images":
             Result.returncode = 0
             return Result()
+        if argv[1:3] == ["image", "inspect"] and "--format" not in argv:
+            Result.returncode = 1
+            return Result()
         assert argv[1:4] == ["image", "inspect", "--format"]
         tag = argv[-1].rsplit(":", 1)[-1]
         Result.returncode = 0 if tag in mapping else 1
@@ -220,6 +223,14 @@ def _inspect_id_and_label(ids, labels=None):
             stdout = ""
             stderr = ""
 
+        if argv[1:3] == ["image", "inspect"] and "--format" not in argv:
+            tag = argv[-1].rsplit(":", 1)[-1]
+            if tag not in ids:
+                return Result()
+            value = labels.get(tag, "")
+            Result.returncode = 0
+            Result.stdout = json.dumps([{"Id": ids[tag], "Config": {"Labels": {PAYLOAD_LABEL: value}}}])
+            return Result()
         if argv[1:4] != ["image", "inspect", "--format"]:
             return Result()
         fmt = argv[4]
@@ -227,11 +238,6 @@ def _inspect_id_and_label(ids, labels=None):
         if "{{.Id}}" in fmt:
             Result.returncode = 0 if tag in ids else 1
             Result.stdout = (ids[tag] + "\n") if tag in ids else ""
-            return Result()
-        if PAYLOAD_LABEL in fmt:
-            value = labels.get(tag, "")
-            Result.returncode = 0 if tag in ids else 1
-            Result.stdout = (value + "\n") if tag in ids else ""
             return Result()
         return Result()
 
