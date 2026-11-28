@@ -33,6 +33,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from utils.market_calendar import is_market_open_et
+
 INDEX_TICKERS = {"SPX", "NDX"}
 BUCKET_SIZE_INDEX = 25      # $25 buckets for SPX/NDX
 BUCKET_SIZE_ETF = 5         # $5 buckets for SPY/QQQ
@@ -628,11 +630,6 @@ def merge_history(
     return sorted_entries[-max_days:]
 
 
-def is_market_open() -> bool:
-    from utils.market_calendar import is_market_open_et
-    return is_market_open_et()
-
-
 def build_gex_output(
     ticker: str,
     strike_data: List[Dict[str, Any]],
@@ -820,7 +817,7 @@ def main():
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
-    market_open = is_market_open()
+    market_open = is_market_open_et()
 
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"GEX SCANNER — {ticker}", file=sys.stderr)

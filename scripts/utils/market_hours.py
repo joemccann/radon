@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Market-hours adapter for the free-trade and portfolio reports.
+"""Report-facing market status for the free-trade and portfolio reports.
 
-Thin delegations to ``utils.market_calendar``, the one holiday-aware source.
+Session open/closed is ``utils.market_calendar.is_market_open_et``. This
+module only maps that state onto the labels and last-close timestamp the
+reports print.
 
 Usage:
-    from utils.market_hours import is_market_open, get_market_status
+    from utils.market_hours import get_market_status, get_last_market_close
 """
 
 from datetime import datetime, time
 from typing import Tuple
 from zoneinfo import ZoneInfo
 
-from utils.market_calendar import is_market_open_et, last_completed_session_date, market_state
+from utils.market_calendar import last_completed_session_date, market_state
 
 EASTERN = ZoneInfo("America/New_York")
 MARKET_CLOSE = time(16, 0)
@@ -21,10 +23,6 @@ _CLOSED_LABELS = {
     "static:holiday": "CLOSED (holiday)",
     "ibkr:closed": "CLOSED (holiday)",
 }
-
-
-def is_market_open(dt: datetime = None) -> bool:
-    return is_market_open_et(dt)
 
 
 def get_market_status(dt: datetime = None) -> Tuple[bool, str]:

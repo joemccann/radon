@@ -15,7 +15,6 @@ with patch("os.makedirs"):
         cache_key_stock,
         cache_key_option,
         _filename,
-        is_market_hours,
         read_cache,
         write_cache,
         prune_cache,
@@ -152,39 +151,6 @@ class TestReadWriteCache:
             result = read_cache(stocks_dir, key)
 
         assert "_checksum" not in (result or {})
-
-
-class TestMarketHours:
-    def test_weekday_during_hours(self):
-        """Mock a Tuesday at 10:00 ET — should be market hours."""
-        from datetime import datetime as dt
-        from zoneinfo import ZoneInfo
-        mock_now = dt(2026, 3, 17, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.market_calendar.datetime") as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.fromisoformat = dt.fromisoformat
-            assert is_market_hours() is True
-
-    def test_weekday_after_close(self):
-        """Mock a Tuesday at 17:00 ET — market closed."""
-        from datetime import datetime as dt
-        from zoneinfo import ZoneInfo
-        mock_now = dt(2026, 3, 17, 17, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.market_calendar.datetime") as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.fromisoformat = dt.fromisoformat
-            assert is_market_hours() is False
-
-    def test_weekend(self):
-        """Mock a Saturday — market closed."""
-        from datetime import datetime as dt
-        from zoneinfo import ZoneInfo
-        # 2026-03-14 is a Saturday
-        mock_now = dt(2026, 3, 14, 12, 0, 0, tzinfo=ZoneInfo("America/New_York"))
-        with patch("utils.market_calendar.datetime") as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.fromisoformat = dt.fromisoformat
-            assert is_market_hours() is False
 
 
 class TestPruneCache:
