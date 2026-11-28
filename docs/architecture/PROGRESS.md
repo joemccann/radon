@@ -1,6 +1,6 @@
 # Architecture entropy progress
 
-Branch: `cursor/architecture-entropy-1906`
+Branch: `cursor/architecture-entropy-a8d8`
 
 ## Map
 
@@ -37,3 +37,48 @@ Evidence: the check failed while both modules defined the grammar, then
 `22 passed` on the grammar and research date tests, `69 passed` on the
 model-gateway consumer and specialized suites, `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## Round 3
+
+Deleted the unused frontier selectors, picker label, and second catalog
+store from `scripts/refresh_model_catalog.py`. The app job imports
+`load_previous`, `persist_result`, and `_record_cycle_failure` from
+`scripts/model_gateway/_catalog_backend.py`. Discovery still goes through
+the gateway socket. The app seed now keeps NVIDIA and Cerebras rows, which
+the old three-provider filter dropped before carry-forward.
+
+Anti-regression: `test_catalog_frontier_rules_have_one_definition` and
+`test_app_previous_seed_keeps_every_catalog_provider`.
+
+Evidence: the definition check failed while both modules defined the four
+functions, then `66 passed` on the catalog suites and `6 passed` on
+`cloud/tests/test_model_gateway_package.py`.
+
+## Round 4
+
+Moved the knowledge query decision into `scripts/model_gateway/embed_rules.py`:
+embedding text, backend choice, dual-write, the v2 coverage cache, and
+`resolve_query_vector`. The app module and the native embedding client each
+bind their own `embed_query`. HTTP and fastembed stay in the native client.
+The app still calls the gateway.
+
+Anti-regression: `test_embed_query_policy_has_one_definition` and
+`test_embed_query_policy_markers_have_one_home`.
+
+Evidence: both checks failed while the two modules still defined the policy,
+then `95 passed` across the embed-rules, v2, pipeline, ingest-budget, and
+write-bounds suites, and `6 passed` on
+`cloud/tests/test_model_gateway_package.py`.
+
+## Round 5
+
+`read_json_dict` in `scripts/utils/json_dict.py` is now the miss / corrupt /
+non-object rule for the five scanner caches and the off-hours scan gate.
+Checksum writes stay on `atomic_save`.
+
+Anti-regression: `test_scanner_cache_reader_is_not_redefined` and
+`test_read_json_dict_contract`.
+
+Evidence: the redefinition check failed on the five scanners, then
+`164 passed` across the reader, the scan-cache gate, and the five scanner
+suites.

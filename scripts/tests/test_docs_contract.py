@@ -257,8 +257,8 @@ class TestRecoveryInstructions:
             client = types.ModuleType("scripts.db.client")
             client.get_db = lambda: db
             monkeypatch.setitem(sys.modules, "scripts.db.client", client)
-            from scripts.knowledge import embed
-            monkeypatch.setattr(embed, "_coverage_cache", {"at": None, "ready": None})
+            from scripts.model_gateway import embed_rules
+            monkeypatch.setattr(embed_rules, "_coverage_cache", {"at": None, "ready": None})
             exec(program, {})
             assert capsys.readouterr().out.strip() == "True"
 

@@ -49,7 +49,12 @@ EXEMPT: dict[str, str] = {}
 # cutover disables these mutable installers. CLI upgrades belong to immutable CI.
 RETIRED_UNITS = {"radon-grok-upgrade", "radon-grok-responder-upgrade"}
 # This fixed RPC client delegates actual durable writes to the gateway keeper.
-HEALTH_DELEGATES = {"scripts/model_gateway/refresh_cli.py": "scripts/subscription_tokens.py"}
+HEALTH_DELEGATES = {
+    "scripts/model_gateway/refresh_cli.py": "scripts/subscription_tokens.py",
+    # The catalog timer's ExecStart only asks the gateway, then calls the
+    # store in _catalog_backend. That module writes the model-catalog row.
+    "scripts/refresh_model_catalog.py": "scripts/model_gateway/_catalog_backend.py",
+}
 
 
 def _timer_backed_services() -> set[str]:

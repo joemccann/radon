@@ -1,3 +1,14 @@
+# Architecture entropy (2026-11-28)
+
+- [x] T1 depends_on: [] One catalog store. App job no longer copies frontier selection.
+- [x] T2 depends_on: [T1] One knowledge query policy. Two transports, one decision.
+- [x] T3 depends_on: [T2] One JSON-object cache reader. Checksum writers stay put.
+- [x] T4 depends_on: [T3] Half-day clocks stay in PENDING_CONFIRMATION.md. Not changed.
+
+## Review
+
+Catalog selectors and the Turso/JSON store now live in the gateway module. The app job writes that store after `refresh-catalog`. The knowledge query decision lives in `embed_rules`; each transport only binds `embed_query`. Scanner cache reads share `read_json_dict`.
+
 # Repair gateway model resolution on both hosts
 
 - [x] T1 depends_on: [] Compare deployed Mac and VPS behavior with main.

@@ -15,11 +15,11 @@ bypasses the gate for the rare manual off-hours refresh.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from utils.json_dict import read_json_dict
 from utils.market_calendar import is_market_open_et, most_recent_session_date
 
 
@@ -77,14 +77,8 @@ def cached_scan_if_fresh(
     if is_market_open_et(now):
         return None
 
-    path = Path(cache_path)
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
+    data = read_json_dict(Path(cache_path))
+    if data is None:
         return None
 
     session_date = _session_date_from_payload(data)

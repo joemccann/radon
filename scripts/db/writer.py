@@ -1405,7 +1405,7 @@ def get_llm_model_catalog_rows() -> list[dict[str, Any]]:
     """Every ``llm_model_catalog`` row in the dict shape
     ``upsert_llm_model_catalog_rows`` accepts.
 
-    Seeds ``refresh_model_catalog.load_previous`` so a provider whose poll
+    Seeds ``model_gateway._catalog_backend.load_previous`` so a provider whose poll
     fails is carried forward from Turso, not from a host-local JSON that is
     ephemeral on the VPS (R-456). Raises on DB errors; the caller falls back
     to the JSON cache.

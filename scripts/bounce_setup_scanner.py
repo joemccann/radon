@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from clients.uw_client import UWClient, UWRateLimitError
 from strength_confirmation_scanner import resolve_tickers
+from utils.json_dict import read_json_dict
 from utils.scan_health import (
     SCAN_STATUS_BUDGET_BLOCKED,
     SCAN_STATUS_COVERAGE_FAILED,
@@ -284,7 +285,7 @@ def load_flow_payload() -> Optional[Dict[str, Any]]:
                 return payload
     except Exception as exc:  # noqa: BLE001 - flow join is best-effort
         print(f"  flow snapshot unavailable from Turso ({exc})", file=sys.stderr)
-    return _read_cache_file(_FLOW_CACHE_PATH)
+    return read_json_dict(_FLOW_CACHE_PATH)
 
 
 def _strikes(payload: Any, expiry: str, want: str) -> List[float]:
@@ -505,7 +506,7 @@ def scan_universe(
             f"UW daily budget block; bounce-setup stage 2 skipped ({source})",
             next_attempt_at=next_quota_reset_iso(),
         )
-        prior = _read_cache_file(_CACHE_PATH)
+        prior = read_json_dict(_CACHE_PATH)
         if prior and prior.get("results"):
             return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}
         blocked = build_output([], as_of=as_of_str, universe=universe, coverage=coverage)
@@ -549,14 +550,6 @@ def scan_universe(
             f"stage 2 failed {failed}/{len(picked)} ({source})",
         )
     return payload
-
-
-def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
 
 
 def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> bool:

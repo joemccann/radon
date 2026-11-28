@@ -111,7 +111,7 @@ def test_non_2048_payload_is_rejected(monkeypatch):
 def test_nvidia_failure_falls_back_to_bge_then_fts(monkeypatch):
     monkeypatch.setenv("RADON_KB_EMBED_BACKEND", "nvidia")
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("model_gateway._embedding_backend.time.sleep", lambda _seconds: None)
     local_calls = []
 
     def local(texts):
@@ -192,7 +192,7 @@ def test_v2_coverage_check_is_cached_until_the_ttl(monkeypatch):
 def test_complete_v2_coverage_uses_nvidia_then_384_on_429(monkeypatch):
     monkeypatch.delenv("RADON_KB_EMBED_BACKEND", raising=False)
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("model_gateway._embedding_backend.time.sleep", lambda _seconds: None)
     reset_v2_coverage_cache()
     db = _db()
     upsert_documents(db, [KnowledgeDoc(
@@ -470,7 +470,7 @@ def test_embed_sends_nothing_when_the_budget_is_spent(monkeypatch):
 
 def test_embed_429_and_403_feed_the_shared_limiter(monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    monkeypatch.setattr("knowledge.embed.time.sleep", lambda _s: None)
+    monkeypatch.setattr("model_gateway._embedding_backend.time.sleep", lambda _s: None)
     limiter = _Limiter()
     _pace_with(monkeypatch, limiter)
     with pytest.raises(RuntimeError):
