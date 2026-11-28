@@ -59,10 +59,20 @@ class HardCloseHandler(BaseHandler):
 
 
 def recent_trading_day():
-    from utils.market_calendar import load_holidays
+    """Most recent full (16:00 ET close) session before today.
+
+    Early-close days are skipped too: ``at_close_plus(day, 10)`` probes
+    16:10 ET, which is three hours dark on a 13:00 close (the day after
+    Thanksgiving turned this red on 2026-11-28).
+    """
+    from utils.market_calendar import _load_early_closes, load_holidays
 
     day = datetime.now(ET).date() - timedelta(days=1)
-    while day.weekday() >= 5 or day.strftime("%Y-%m-%d") in load_holidays(day.year):
+    while (
+        day.weekday() >= 5
+        or day.strftime("%Y-%m-%d") in load_holidays(day.year)
+        or day.strftime("%Y-%m-%d") in _load_early_closes()
+    ):
         day -= timedelta(days=1)
     return day
 
@@ -112,6 +122,20 @@ def run_once_at(handler, et_now):
 def at_close_plus(day, minutes):
     close = datetime(day.year, day.month, day.day, 16, 0, tzinfo=ET)
     return close + timedelta(minutes=minutes)
+
+
+class TestWindowRelativeDates:
+    def test_recent_trading_day_is_a_full_session(self):
+        """The probe day must have closed at 16:00 — never a weekend, holiday
+        or early-close day — or the close+10 assertions rot on the calendar."""
+        from utils.market_calendar import _load_early_closes, load_holidays, market_state
+
+        day = recent_trading_day()
+        iso = day.strftime("%Y-%m-%d")
+        assert day.weekday() < 5
+        assert iso not in load_holidays(day.year)
+        assert iso not in _load_early_closes()
+        assert market_state(at_close_plus(day, -1))["state"] == "open"
 
 
 class TestPostCloseGraceGate:
