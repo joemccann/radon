@@ -33,6 +33,9 @@ function rowToBookmark(row: BookmarkRow) {
 
 export const radonCapability = { GET: "read", POST: "mutate.workspace" };
 
+const MAX_POST_ID_LENGTH = 256;
+const MAX_SNAPSHOT_LENGTH = 32 * 1024; // serialized JSON; keeps Turso rows sane
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const { userId } = await auth();
@@ -91,9 +94,21 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const postId = body.post_id.trim();
+  if (postId.length > MAX_POST_ID_LENGTH) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: "post_id exceeds size limit", requestId }),
+      requestId,
+    );
+  }
   const snapshot = body.snapshot === undefined || body.snapshot === null
     ? null
     : JSON.stringify(body.snapshot);
+  if (snapshot !== null && snapshot.length > MAX_SNAPSHOT_LENGTH) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: "snapshot exceeds size limit", requestId }),
+      requestId,
+    );
+  }
 
   try {
     await dbExecute(
