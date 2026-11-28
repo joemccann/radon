@@ -681,6 +681,41 @@ class TestRun:
         assert payload["carried_forward"] == ["YOFF"]
         assert payload["universe"]["private_tickers"] == ["XOFF", "YOFF"]
 
+    def test_a_carried_name_outside_every_public_tier_is_tagged_even_when_the_prior_cache_did_not(
+        self, monkeypatch,
+    ):
+        # A prior cache written before the tag existed carries no
+        # private_tickers. A carried name the current public tiers do not
+        # hold is account-derived by elimination and must be tagged; a
+        # carried name a public tier holds stays public.
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["AAPL", "TSLA"],
+                "core": ["AAPL"],
+                "walk": ["AAPL"],
+                "private": [],
+                "counts": {
+                    "portfolio": 1, "watchlist": 0, "ndx100": 1,
+                    "r2k": 0, "sp500": 0, "unique": 2, "core": 1,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA"],
+            },
+        )
+        self.mod.ATS_VENUE_SHARE_JSON.write_text(json.dumps({
+            "series": {
+                "YOFF": [{"week_start_date": "2026-01-05"}],
+                "TSLA": [{"week_start_date": "2026-01-05"}],
+            },
+            "universe": {"index_offset": 0},
+        }))
+        client = self._client(["AAPL"])
+        payload = self.mod.run(client=client)
+        assert payload["carried_forward"] == ["TSLA", "YOFF"]
+        assert payload["universe"]["private_tickers"] == ["YOFF"]
+
     def test_override_run_tags_no_private_names(self):
         client = self._client(["AAPL"])
         payload = self.mod.run(client=client, tickers=["AAPL"])

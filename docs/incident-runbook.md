@@ -2656,9 +2656,10 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   platform; stand down.
 - **Remediation (code):** bounded retries on transient Turso source/dest
   errors (`MIRROR_MAX_ATTEMPTS`, default 3), same class as the newsfeed
-  demo mirror. Persistent 502 still fails the unit. Do not restart-flap;
-  next timer (Mon–Fri 21:45 UTC) or one `radon unit restart
-  radon-demo-mirror` after the fix deploys.
+  demo mirror. Persistent 502 still fails the unit. Do not restart-flap.
+  The timer fires every day at 21:45 UTC and retries at 23:30 UTC, weekends
+  included. After the fix deploys, one `radon unit restart
+  radon-demo-mirror.service`. A bare name exits 2.
 - **Regression:** `scripts/lib/demoMirrorReliability.test.js` market suite
   (`retries a transient scan_snapshots source 502 then mirrors`,
   `still fails the unit when scan_snapshots 502 persists past the budget`,
@@ -2837,10 +2838,14 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 - **Remediation (code):** `migrate.py --demo` applies
   `scripts/db/migrations` to `TURSO_DEMO_*` (refuses the prod marker;
   requires `radon-demo`). `radon-demo-mirror.service` runs it as
-  `ExecStartPre` before the Node mirror. The unit is on
-  `RERUNNABLE_ONESHOT_UNITS` so the page responder can
-  `reset-failed` + `start` after a green deploy (next timer is ~24h).
-  Manual: `python3.13 scripts/db/migrate.py --demo` then start the unit.
+  `ExecStartPre` before the Node mirror. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The page responder does not
+  `reset-failed` or `start` it, because that `ExecStartPre` applies
+  migrations ([`grok-page-responder.md`](grok-page-responder.md)). The timer
+  fires every day at 21:45 UTC and retries at 23:30 UTC, weekends included.
+  After the fix deploys, one `radon unit restart radon-demo-mirror.service`.
+  A bare name exits 2. That restart runs the unit's `ExecStartPre`, including
+  `migrate.py --demo`.
 - **Regression:** `test_migrate.py::TestMigrateDemoTarget`;
   `test_systemd_services.py::TestDemoMirrorSchemaGate`.
 - **Code:** `scripts/db/migrate.py` (`resolve_target`,
@@ -5862,3 +5867,14 @@ The article path must not request a PDF. It persists every discovered reference 
 - **Remediation (code):** a one-session gap before 20:00 ET records a warning, keeps the retained snapshot, and exits 0. The 20:15 ET calendar retries. That pass still exits 1 if the expected session is missing, as does any hole older than one session. Do not `reset-failed` as the fix.
 - **Regression:** `scripts/tests/test_record_high_breadth.py::test_18_15_et_single_session_lag_does_not_fail_the_oneshot`, `test_20_15_et_single_session_lag_still_fails`, `test_multi_session_hole_fails_at_18_15_et`.
 - **Code:** `scripts/record_high_breadth_scan.py` (`single_session_publication_lag`, `run`), `cloud/services/radon-record-high-breadth.timer`.
+
+## marketdesk-incomplete-rung-aborts-ladder
+
+**`radon-marketdesk.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`) when one provider returns an incomplete model reply and the ladder never tries the next live rung.**
+
+- **Observed:** page `58ebcea2da2e002401a126012a0ae34a` at 2026-11-24T21:45:00.853824Z. The oneshot started 2026-11-24T21:44:41Z and went inactive at 2026-11-24T21:44:59Z, `ExecMainStatus=1`, about 18 seconds, `NRestarts=0`. `marketdesk-research` `last_error` was `1 of 1 articles failed; last error: Gateway returned an incomplete or invalid model response`, with `next_attempt_at` 2026-11-24T21:49:59Z. `marketdesk-dropbox` was `ok` at that same second. `marketdesk-pdf` was `ok` from 21:42Z. Edge `/status` was `up`. `/sign-in` was HTTP 200. `:8321/health/lite` returned the auth perimeter. `nextjs-db-read` was `ok`. The model gateway status was `ok` with providers `antigravity`, `anthropic`, `grok`, and `codex`. IB gateway was inactive and `not_applicable`. `radon-deploy.service` was inactive. Journal text was not readable from this account. This was not a Turso platform outage and not IB.
+- **Mechanism:** MarketDesk copy and Humanizer set `require_end_turn`. An Anthropic reply whose `stop_reason` is not `end_turn` raises `ModelResponseError` code `incomplete`. `_run_ladder` re-raised that error before grok or codex ran. The gateway mapped it to code `incomplete`. The client turned that into `Gateway returned an incomplete or invalid model response`. `write_copy` and `certify` treat `ModelResponseError` as `CopyUnavailable`, which spends an attempt. Nothing published, so `ArticlesFailed` made `main` return 1. `Type=oneshot` has no `Restart=`. The timer is `*:04/5:41`, so each fire is a new `InactiveEnterTimestamp` and the unit watchdog pages P1. An 18-second span is one rung, not a full ladder. A stream over the byte cap (`response_too_large`) aborted the same way.
+- **Discriminating check:** the health message is exactly that gateway sentence, `marketdesk-dropbox` is `ok` in the same cycle, the oneshot span is seconds rather than `TimeoutStartSec=270`, and the gateway status lists a later live provider. A cycle whose only article failure is `no_summary` is `marketdesk-summary-deadline-oneshot`. A health message of exactly `TimeoutError: The read operation timed out` is `marketdesk-research-read-timeout-oneshot`. `Result=signal` or exit 143 inside a deploy window is `deploy-stop-clean-oneshot-signal`. A gateway status that is not `ok`, or a Turso `SELECT 1` failure in the same minute with siblings also failing, is a platform outage: stand down, do not restart-flap. A sole keyed provider that returns incomplete still fails closed. Do not `reset-failed` as the fix.
+- **Remediation (code):** `incomplete` and `response_too_large` are recorded on that rung and the next live rung runs. Cancellation and a spent request deadline still abort. If every tried rung fails only that way, the original `ModelResponseError` is still raised, so partial JSON is not accepted. The article still spends an attempt and the oneshot still exits 1 when the gateway returns that error after failover. Do not `reset-failed`. After deploy, the next timer retries the pending article.
+- **Regression:** `scripts/tests/test_model_ladder.py::TestMultimodalReviewFailover::test_incomplete_anthropic_falls_through_to_the_next_live_rung`, `test_oversized_anthropic_stream_falls_through_to_the_next_live_rung`. The sole-provider incomplete and oversized tests still raise `ModelResponseError`.
+- **Code:** `scripts/model_gateway/engine.py` (`_RUNG_RESPONSE_CODES`, `_run_ladder`). The owner docs are `docs/model-gateway.md` and `docs/marketdesk-research.md`.

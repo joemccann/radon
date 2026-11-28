@@ -406,10 +406,10 @@ def load_prior_payload() -> Optional[dict[str, Any]]:
 
 
 def persist_json(payload: dict[str, Any]) -> None:
-    """Atomic write of data/ivrank.json."""
+    """Atomic write of data/ivrank.json — compact separators (PERF-065)."""
     IVRANK_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = IVRANK_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, IVRANK_JSON)
 
 

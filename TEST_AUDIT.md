@@ -12647,6 +12647,53 @@ Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, no
 | 2 | 20,141 passed / 11 skipped / 40 subtests (179.28s) | 11,681 passed / 21 skipped / 1,215 files (170.56s) | 58 failed / 4,293 passed / 23 skipped (990.32s) | 0 added / 0 removed |
 | 3 | credentials xdist flake then serial 11 passed; 20,140 passed / 11 skipped / 40 subtests (165.20s) | 11,681 passed / 21 skipped / 1,215 files (95.87s) | 58 failed / 4,293 passed / 23 skipped (955.31s) | 0 added / 0 removed |
 
+## Delta audit 2026-11-24
+
+Range `194f6206015ca08fa9cea41f4c5adacf3bb7deb6..4d6687cf5d369389b9dd8375145537f4e81b6aee`: 146 commits / 108 paths. Newest trusted checkpoint on issue #83 is `audited-through: 194f6206015ca08fa9cea41f4c5adacf3bb7deb6` (2026-11-22). It carried no open verified finding. No open `testing/` PR. Highest merged id T-599. Next id T-600.
+
+Codemap (generated 2026-11-23, before `scripts/model_gateway/latest.py`) has no node for that module. `rg` confirmed importers: `scripts/tests/test_model_latest_discovery.py`, `test_model_ladder.py`, `test_model_gateway_native.py`. `web/lib/useIvSpread.ts` has no test importer; `web/tests/iv-spread-panel.test.tsx:153` mocks the hook. `scripts/generate_gex_share.py` and `scripts/generate_vcg_share.py` have no codemap test importer; the share-card budget test reads them as text.
+
+Coverage thresholds (`vitest.config.ts:120-124`, lines 75 / functions 71 / branches 65) are unchanged and not in the diff. No new unlinked `skip` / `xfail`. New tests sit in collected paths (`web/tests`, `scripts/tests`, `scripts/lib`, `cloud/tests`). Re-triaged `TEST_LOG.md`: historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence. Checkpoint carried none forward.
+
+Not filed: `web/tests/llm-latest-model-policy.test.ts` greps `catalog.ts`, and `scripts/tests/test_model_latest_discovery.py` already calls `resolved_default`. The IV spread rail countdown is pinned at `web/tests/iv-spread-panel.test.tsx:396` (`3m 00s`). Gateway recheck and intraday restatement are behavioral in `scripts/tests/test_iv_spread.py:645-718`. The vixcor live-row test asserts one `batch` of two snapshot reads (`web/tests/vixcor-live-snapshot-pipeline-budget.test.ts:98-122`).
+
+### T-600 — P2 — useIvSpread 5-minute poll is untested, so an hourly revert stays green
+
+`web/lib/useIvSpread.ts:12` is `interval: 300_000` (was `3_600_000`). Codemap lists no test importer. `web/tests/iv-spread-panel.test.tsx:153` mocks `useIvSpread`. Mutation `300_000` → `3_600_000`: panel 27 passed; new poll case 1 failed (`expected 1 to be 2` at 5 minutes, `/tmp/t600-red.log`).
+
+Acceptance: render `useIvSpread`, one GET at mount, none at 2.5 minutes, one more GET at 5. Restoring `3_600_000` fails the 5-minute GET.
+
+### T-601 — P2 — the share-card wrapper check is a substring the import already satisfies
+
+`scripts/tests/test_card_screenshot_browser_budget.py:84-91` (pre-fix) asserted `"shared_browser" in source`. Each generator imports the name (`scripts/generate_gex_share.py:30`). Replacing `with shared_browser():` at `scripts/generate_gex_share.py:654` with `if True:` left the old test 3 passed (`/tmp/t601-harm-green.log`). The four screenshots would each launch Chromium again.
+
+Acceptance: every `screenshot_card` call in the four generators sits inside `with shared_browser()`. Dropping that wrapper fails the generator case. The import line alone does not pass.
+
+### T-602 — P1 — the new idle publisher socket still binds under pytest tmp_path
+
+`scripts/tests/test_runner_publisher.py:588-589` (pre-fix) used `_cfg(tmp_path)` and `cfg.socket_path.parent.mkdir()`. Siblings call `_short_socket` (`:332-336`) because this host's basetemp exceeds Darwin's 104-byte `sockaddr_un`. Full pytest and a serial re-run both failed `test_an_idle_connection_does_not_wedge_the_serving_loop` with `OSError: AF_UNIX path too long` (`/tmp/pytest-1.log`, `/tmp/pytest-1-serial.log`). The serving-loop contract never ran.
+
+Acceptance: the idle case binds under `/tmp` and passes on Darwin. Reintroducing `tmp_path` for that socket path fails with `AF_UNIX path too long` here.
+
+Audited through: 4d6687cf5d369389b9dd8375145537f4e81b6aee on 2026-11-24 — 3 new findings
+
+## Remediation 2026-11-24
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-600 | DONE | Hourly mutation: panel 27 passed, hook poll 1 failed (`/tmp/t600-red.log`). Restored `300_000`. Green: 2 passed ×3 (`/tmp/t600-green-1.log`). Product source unchanged. |
+| T-601 | DONE | Dropped wrapper: old grep 3 passed (`/tmp/t601-harm-green.log`). AST walk 1 failed at `generate_gex_share.py:663` (`/tmp/t601-red.log`). Restored wrapper. Green: 4 passed ×3. Product source unchanged. |
+| T-602 | DONE | Serial `AF_UNIX path too long` (`/tmp/pytest-1-serial.log`). Socket via `_short_socket`. Green: 1 passed; file 23 passed ×3 (`/tmp/t602-file-1.log`). Product source unchanged. |
+
+### Closing gates 2026-11-24
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Root pytest each round had one load flake, then the failing file passed serially. Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as origin/main `194f62060` (0 added / 0 removed; base worktree 58 failed / 4,293 passed / 23 skipped). Linux CI is the authority for that suite.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | CTA copy xdist flake then serial 1 passed; 20,201 passed / 11 skipped / 40 subtests (99.10s) | 11,692 passed / 21 skipped / 1,220 files (49.49s) | 58 failed / 4,307 passed / 23 skipped (1,002.13s) | 0 added / 0 removed |
+| 2 | vault deadline xdist flake, first serial miss, second serial 2 passed; 20,201 passed / 11 skipped / 40 subtests (225.14s) | 11,692 passed / 21 skipped / 1,220 files (155.64s) | 58 failed / 4,307 passed / 23 skipped (983.67s) | 0 added / 0 removed |
+| 3 | vault deadline xdist flake then serial 2 passed; 20,201 passed / 11 skipped / 40 subtests (176.23s) | 11,692 passed / 21 skipped / 1,220 files (103.70s) | 58 failed / 4,307 passed / 23 skipped (1,159.56s) | 0 added / 0 removed |
 ## Delta audit 2026-11-26
 
 Range `4d6687cf5d369389b9dd8375145537f4e81b6aee..6dd0418dea2ea8059eee17f3a11d3c72015e952c`: 20 commits / 21 paths. Newest trusted checkpoint on issue #83 is `audited-through: 4d6687cf5d369389b9dd8375145537f4e81b6aee` (2026-11-25). It carried no open verified finding. Open `testing/` PRs #1654 (T-600, T-601, T-602) and #1660 (T-603) are CI green; tonight skipped those. Highest id on those PRs is T-603. Next id was T-604.

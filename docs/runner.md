@@ -65,7 +65,7 @@ The seven loops in [Migration](#migration-from-the-per-loop-wrappers) use the bo
 
 `com.radon.runner-logd` copies each run log out of the bot home. It stays uninstalled until `/usr/local/radon-runner/enable-runner-logd` exists as a regular file owned by root and not group- or world-writable. `install.sh` does not create that flag, the `_radonlog` account, `/Library/Radon/runner-logs`, the deploy key, or the LaunchDaemon. `com.radon.runner-update` calls the same installer every six hours, so a host without the flag stays inactive. Removing the flag and running the installer again unloads the job.
 
-`_radonlog` is a hidden account with a disabled login shell. It owns `/Library/Radon/runner-logs`. The bot can send datagrams to `ingest.sock` and cannot read the stored logs or the deploy key. One datagram is stored as one line (embedded line breaks become spaces). Lines are scrubbed before they are stored: credential shapes, assignments whose names are tokens, keys, or passwords, and values of environment variables with those names. The daemon pushes the store to the private repo named by `repo=` in `/usr/local/radon-runner/runner-logd.conf`. The installer writes `joemccann/radon-runner-logs` only when that file is absent. The key is mode 600 under `keys/` and only `_radonlog` can read it.
+`_radonlog` is a hidden account with a disabled login shell. It owns `/Library/Radon/runner-logs`. The bot can send datagrams to `ingest.sock` and cannot read the stored logs or the deploy key. One datagram is stored as one line (embedded line breaks become spaces). Lines are scrubbed before they are stored: credential shapes, assignments whose names are tokens, keys, or passwords, and values of environment variables with those names. A value spread over several lines (a YAML block scalar or a quoted value continued on the next lines) is hidden from its header to its last line: the follower keeps the header in its scrub context until a line leaves the value, with the kept context bounded in bytes, so a body longer than the context window cannot outlive the header that hides it. The daemon pushes the store to the private repo named by `repo=` in `/usr/local/radon-runner/runner-logd.conf`. The installer writes `joemccann/radon-runner-logs` only when that file is absent. The key is generated as `_radonlog`, which leaves it mode 600 under `keys/` where only that account can read it; root never changes the owner or mode of a name in that directory.
 
 `run_loop.sh` keeps the local log in the bot home either way. If the socket is missing, the run continues and the local log records `runner-logd: streaming unavailable`. Logging never blocks a run.
 
@@ -297,7 +297,7 @@ a client upgrade. A provider requiring new consent shows up as `no_key` or a
 
 ### 6. Model readiness (bot shell)
 
-The installed gateway needs the same model resolver as the VPS. After an update, check provider status and run a generation through the local socket. The health endpoint alone does not exercise model selection.
+The installed gateway copies `model_gateway/latest.py` with the rest of `GATEWAY_FILES`, the same resolver the VPS uses. After an update, the `status` command below lists wired providers and capabilities.
 
 ```bash
 RADON_MODEL_GATEWAY_SOCKET=/Library/Radon/model-gateway-local/run/gateway.sock \
