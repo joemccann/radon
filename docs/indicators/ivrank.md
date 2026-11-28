@@ -377,9 +377,10 @@ const MISSING_IVRANK = {
 const IVRANK_MAX_AGE_MS = 48 * 60 * 60_000;
 ```
 
-`dbFirstRead({ fromDb, fromDisk, maxAgeMs: IVRANK_MAX_AGE_MS, label: "ivrank" })`
-where `fromDb` selects the latest `scan_snapshots` row for `service = 'ivrank'`
-and `fromDisk` reads `data/ivrank.json`; respond through
+`dbFirstRead({ fromDb, maxAgeMs: IVRANK_MAX_AGE_MS, label: "ivrank" })`
+where `fromDb` selects the latest `scan_snapshots` row for `service = 'ivrank'`.
+No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
+Respond through
 `setCacheResponseHeaders(..., { maxAgeSeconds: 300,
 staleWhileRevalidateSeconds: 3600, requestId, cacheState: "HIT", tags:
 ["ivrank"] })`. The route never transforms, never recomputes, never 4xx.
@@ -484,7 +485,7 @@ intraday timer line.
    Stubs injected via `run()` params; window-relative dates; no real
    connections under `PYTEST_CURRENT_TEST` (enforced by `db.client`).
 2. `web/tests/ivrank-api.test.ts` — in-memory `@libsql/client` seeded from the
-   real migration file; Turso-beats-older-disk; disk fallback; exact
+   real migration file; exact
    `MISSING_IVRANK` object at HTTP 200 for absent + >48h-stale data; no
    cross-service snapshot leak; `route.dynamic === "force-dynamic"`.
 3. `web/tests/ivrank-panel.test.tsx` — loader label; empty state on missing;

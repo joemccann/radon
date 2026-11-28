@@ -1,19 +1,22 @@
 # Nemotron 3.5 Super VL pilot results (2026-11-01)
 
 Results of the comparison that [the pilot doc](nemotron-super-vl-pilot.md)
-defines, run after Super VL had already become the default NVIDIA vision model
-(PR #1379). Super VL (`nvidia/nemotron-3.5-super-vl-120b-a12b`) is compared
-with the Llama 90B fallback (`meta/llama-3.2-90b-vision-instruct`), the only
-other vision model the production key can call. Llama 11B answers 404 for this
-account, so it is not a baseline.
+defines, run after Super VL had been pinned as the NVIDIA vision model
+(PR #1379). Super VL (`nvidia/nemotron-3.5-super-vl-120b-a12b`) was compared
+with Llama 90B (`meta/llama-3.2-90b-vision-instruct`), the other vision model
+the production key could call on that date. Llama 11B answered 404 for this
+account, so it was not a baseline. Current resolution is the status note below.
 
 Status: the NVIDIA rung has been paused in every environment since PR #1383
-(`engine.PAUSED_BY_DEFAULT`). The verdict below applies if it is unpaused.
+(`engine.PAUSED_BY_DEFAULT`). The verdict below is about the measured pair.
+The pinned Super VL default and Llama 90B fallback this run compared are not
+in the gateway. Unset ids follow [model-gateway.md](model-gateway.md#latest-model).
 
 ## Verdict
 
-**Keep Super VL first. Do not swap the order or revert to 90B.** No code or
-environment change follows from this run.
+**On the measured pair, Super VL first beat 90B first.** Swapping that order
+or reverting to 90B was the worse result. Those pins are not in the gateway.
+See the status note.
 
 Neither model passes every gate in the pilot doc:
 
@@ -207,17 +210,16 @@ shared key. Production pacing state was not touched.
   qualifiers: it doubles `~`, `<` and `>` and adds a minus after `~`. Any
   consumer that sends such tables to the NVIDIA rung needs a validator that
   rejects repeated qualifiers, or must not trust those cells.
-- Research figure matching on NVIDIA is unsafe in either order. Super VL fails
-  the JSON contract about half the time. The 90B fallback then approves almost
-  anything, including non-data images, and Super VL itself approved 3 of 10
-  injected incomplete crops. Earlier subscription rungs normally answer research
-  review first. Removing the 90B fallback from multimodal research calls, or
-  having the gateway retry Super VL once on `unparseable`, would each need a
-  separate change and its own test.
-- If an operator still wants 90B first, swap two constants in
-  `scripts/model_gateway/engine.py`: set `_NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"`
-  and `_NVIDIA_VISION_FALLBACK = _NVIDIA_SUPER_VL`. This report recommends
-  against it.
+- Research figure matching on NVIDIA was unsafe in either measured order.
+  Super VL failed the JSON contract about half the time. The 90B fallback then
+  approved almost anything, including non-data images, and Super VL itself
+  approved 3 of 10 injected incomplete crops. Earlier subscription rungs
+  normally answer research review first. That 90B fallback is no longer pinned.
+- Those constants are absent from `scripts/model_gateway/engine.py`. An
+  operator who wants a specific NVIDIA id sets `NVIDIA_VISION_MODEL` or
+  `NVIDIA_TEXT_MODEL` and restarts the gateway. Unset ids follow
+  [model-gateway.md](model-gateway.md#latest-model). This report recommends
+  against pinning Llama 90B first.
 
 ## Reproduce
 
