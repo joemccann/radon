@@ -63,7 +63,37 @@ def test_antigravity_pins_both_architectures_without_mutable_installer() -> None
 
 @pytest.mark.parametrize("machine", ["x86_64", "aarch64"])
 def test_changed_native_payload_is_rejected_before_extraction(machine: str) -> None:
-    with patch("platform.machine", return_value=machine), patch("urllib.request.urlopen", return_value=io.BytesIO(b"tampered native artifact")), patch("tarfile.open") as archive:
+    pins = json.loads((VENDORS / "antigravity.json").read_text())
+    response = io.BytesIO(b"tampered native artifact")
+    response.geturl = lambda: pins["platforms"][{"x86_64": "amd64", "aarch64": "arm64"}[machine]]["url"]
+    with patch("platform.machine", return_value=machine), patch("urllib.request.urlopen", return_value=response), patch("tarfile.open") as archive:
         with pytest.raises(RuntimeError, match="checksum mismatch"):
             runpy.run_path(str(VENDORS / "install-antigravity.py"))
+        archive.assert_not_called()
+
+
+def test_installer_refuses_a_foreign_host_pin_before_any_download(tmp_path) -> None:
+    pins = json.loads((VENDORS / "antigravity.json").read_text())
+    for pin in pins["platforms"].values():
+        pin["url"] = pin["url"].replace("https://storage.googleapis.com/antigravity-public/", "https://mirror.example.test/")
+    (tmp_path / "antigravity.json").write_text(json.dumps(pins))
+    installer = tmp_path / "install-antigravity.py"
+    installer.write_text((VENDORS / "install-antigravity.py").read_text())
+    with patch("platform.machine", return_value="x86_64"), patch("urllib.request.urlopen") as urlopen, patch("tarfile.open") as archive:
+        with pytest.raises(RuntimeError, match="official"):
+            runpy.run_path(str(installer))
+        urlopen.assert_not_called()
+        archive.assert_not_called()
+
+
+def test_installer_refuses_a_redirected_download(tmp_path) -> None:
+    pins = json.loads((VENDORS / "antigravity.json").read_text())
+    (tmp_path / "antigravity.json").write_text(json.dumps(pins))
+    installer = tmp_path / "install-antigravity.py"
+    installer.write_text((VENDORS / "install-antigravity.py").read_text())
+    response = io.BytesIO(b"payload")
+    response.geturl = lambda: "https://mirror.example.test/elsewhere.tar.gz"
+    with patch("platform.machine", return_value="x86_64"), patch("urllib.request.urlopen", return_value=response), patch("tarfile.open") as archive:
+        with pytest.raises(RuntimeError, match="redirect"):
+            runpy.run_path(str(installer))
         archive.assert_not_called()
