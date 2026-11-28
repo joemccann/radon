@@ -413,6 +413,67 @@ def test_follow_pinned_context_is_bounded_in_bytes(logd):
     assert "opaquevalue" not in joined
     assert "xxxx" not in joined
     assert "next: ok" in joined
+def _shell_function(name: str) -> str:
+    src = INSTALL.read_text()
+    start = src.index(f"{name}() {{")
+    end = src.index("\n}\n", start)
+    return src[start:end + 2]
+
+
+def _inline_symlink_refusals() -> list[str]:
+    # Match the check, not the exit status. A line that still says
+    # `[[ ! -L` and returns 0 must fail here, not drop out of the list.
+    lines = [
+        line.strip()
+        for line in INSTALL.read_text().splitlines()
+        if '[[ ! -L "$LOGD_ROOT/' in line
+    ]
+    assert len(lines) == 3, lines
+    return lines
+
+
+def test_a_planted_symlink_is_refused_with_exit_77(tmp_path):
+    # The source greps accept a refusal that notices the link and returns
+    # success. Run the function and each inline check against a real link.
+    planted = tmp_path / "planted"
+    planted.symlink_to(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    missing = tmp_path / "missing"
+    fn = _shell_function("refuse_link")
+    refused = subprocess.run(
+        [BASH, "-c", fn + "\nrefuse_link \"$1\" \"$2\" \"$3\"\n", "refuse", str(real), str(missing), str(planted)],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert refused.returncode == 77, refused.stderr
+    assert "symlink" in refused.stderr
+    clear = subprocess.run(
+        [BASH, "-c", fn + "\nrefuse_link \"$1\" \"$2\"\n", "refuse", str(real), str(missing)],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert clear.returncode == 0, clear.stderr
+
+    for line in _inline_symlink_refusals():
+        rel = re.search(r'\$LOGD_ROOT/([^"]+)', line).group(1)
+        root = tmp_path / rel.replace("/", "-")
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(tmp_path)
+        script = "check() {\n  " + line + "\n}\ncheck\n"
+        hit = subprocess.run(
+            [BASH, "-c", script],
+            capture_output=True, text=True, timeout=10,
+            env={"LOGD_ROOT": str(root)},
+        )
+        assert hit.returncode == 77, (line, hit.returncode, hit.stderr)
+        target.unlink()
+        target.write_text("regular\n")
+        miss = subprocess.run(
+            [BASH, "-c", script],
+            capture_output=True, text=True, timeout=10,
+            env={"LOGD_ROOT": str(root)},
+        )
+        assert miss.returncode == 0, (line, miss.returncode, miss.stderr)
 
 
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
