@@ -329,6 +329,31 @@ _BLOCK_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]+-----")
 _BLOCK_END = re.compile(r"-----END [A-Z0-9 ]+-----")
 
 
+_ASSIGNED_QUOTE = re.compile(r"""[=:]\s*[A-Za-z]{0,2}(["'])""")
+
+
+def _closes_quote(line: str, quote: str) -> bool:
+    """Whether ``line`` holds an unescaped ``quote``."""
+    index = 0
+    while index < len(line):
+        if line[index] == "\\":
+            index += 2
+            continue
+        if line[index] == quote:
+            return True
+        index += 1
+    return False
+
+
+def _opened_quote(line: str) -> str | None:
+    """The quote an assignment on ``line`` opens and does not close, or None."""
+    match = _ASSIGNED_QUOTE.search(line)
+    if match is None:
+        return None
+    quote = match.group(1)
+    return None if _closes_quote(line[match.end():], quote) else quote
+
+
 class LineScrubber:
     """scrub_line per complete line, with the key-block state carried across lines.
 
@@ -353,6 +378,10 @@ class LineScrubber:
         self.pending = ""
         self.recent: list[str] = []
         self.absorbing = False
+        # The quote a redacted line opened and did not close, and how many
+        # lines have been held back for it since.
+        self.open_quote: str | None = None
+        self.held = 0
 
     def feed(self, fragment: str) -> str | None:
         self.pending += fragment
@@ -389,20 +418,38 @@ class LineScrubber:
         before = "".join(self.recent)
         self.recent.append(line + "\n")
         self._trim()
+        if self.open_quote is not None:
+            # The canonical rules redact an unclosed quoted value only through
+            # its opening line, so until the close arrives the lines inside
+            # it are plain text to them. Hold those lines back; the close
+            # makes the rules re-read the whole value and absorb it. A quote
+            # that never closes releases the stream after the context window.
+            if _closes_quote(line, self.open_quote) or self.held >= self.CONTEXT_LINES:
+                self.open_quote = None
+            else:
+                self.held += 1
+                if not self.absorbing:
+                    del self.recent[:-2]
+                self.absorbing = True
+                return None
         if scrub is None or not before:
-            return scrub_line(line, self.env)
-        prev = scrub(before)
-        cur = scrub(before + line + "\n")
-        delta = cur[len(prev):].strip("\n") if cur.startswith(prev) else ""
-        absorbed = not delta or "\n" in delta
-        if absorbed and not self.absorbing:
-            # The line before this one opened the value: keep it as the
-            # pinned header and let the context before it go.
-            del self.recent[:-2]
-        self.absorbing = absorbed
-        if absorbed:
-            return None
-        return scrub_line(delta, self.env)
+            emitted = scrub_line(line, self.env)
+        else:
+            prev = scrub(before)
+            cur = scrub(before + line + "\n")
+            delta = cur[len(prev):].strip("\n") if cur.startswith(prev) else ""
+            absorbed = not delta or "\n" in delta
+            if absorbed and not self.absorbing:
+                # The line before this one opened the value: keep it as the
+                # pinned header and let the context before it go.
+                del self.recent[:-2]
+            self.absorbing = absorbed
+            if absorbed:
+                return None
+            emitted = scrub_line(delta, self.env)
+        self.open_quote = _opened_quote(line) if emitted != line else None
+        self.held = 0
+        return emitted
 
     def _trim(self) -> None:
         if not self.absorbing:
