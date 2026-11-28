@@ -40,6 +40,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from utils.payload_rows import rows_from_payload as _rows_from_payload  # noqa: E402
+
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
     load_dotenv(_PROJECT_DIR / ".env")
@@ -103,16 +105,6 @@ def _parse_day(value: Any) -> Optional[date]:
 
 def _days_until(event_day: date, today: date) -> int:
     return (event_day - today).days
-
-
-def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, dict):
-        data = payload.get("data")
-        if isinstance(data, list):
-            return [r for r in data if isinstance(r, dict)]
-    if isinstance(payload, list):
-        return [r for r in payload if isinstance(r, dict)]
-    return []
 
 
 def _to_float(value: Any) -> Optional[float]:

@@ -37,3 +37,17 @@ Evidence: the check failed while both modules defined the grammar, then
 `22 passed` on the grammar and research date tests, `69 passed` on the
 model-gateway consumer and specialized suites, `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## UW payload rows
+
+Branch: `cursor/payload-rows-a8d8`. Independent of #1675.
+
+`rows_from_payload` is the only UW row-list reader. The three scanners
+and earnings, catalysts, and informed flow bind that function.
+
+Anti-regression: `test_uw_row_list_has_one_definition` and
+`test_rows_from_payload_keeps_dict_rows_only`.
+
+Evidence: the definition check failed on six copies, then `179 passed`
+across the row reader, earnings, catalysts, informed flow, and the four
+scanner suites.
