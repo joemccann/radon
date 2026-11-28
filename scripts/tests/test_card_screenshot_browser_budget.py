@@ -7,6 +7,7 @@ generator process must reuse a single `chromium.launch`.
 """
 from __future__ import annotations
 
+import ast
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -81,11 +82,60 @@ def test_four_cards_share_one_chromium_launch():
     assert written == [PNG_BYTES] * 4
 
 
+def _shared_browser_with(node: ast.AST) -> bool:
+    if not isinstance(node, ast.With):
+        return False
+    for item in node.items:
+        ctx = item.context_expr
+        func = ctx.func if isinstance(ctx, ast.Call) else ctx
+        if isinstance(func, ast.Name) and func.id == "shared_browser":
+            return True
+    return False
+
+
+def screenshot_calls_outside_shared_browser(source: str) -> list[int]:
+    """Line numbers of screenshot_card() calls not inside `with shared_browser()`."""
+    tree = ast.parse(source)
+    outside: list[int] = []
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.depth = 0
+
+        def visit_With(self, node: ast.With) -> None:
+            shared = _shared_browser_with(node)
+            if shared:
+                self.depth += 1
+            self.generic_visit(node)
+            if shared:
+                self.depth -= 1
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "screenshot_card" and self.depth == 0:
+                outside.append(node.lineno)
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return outside
+
+
+def test_import_line_does_not_count_as_the_wrapper():
+    """The old substring check stayed green when the with-block was dropped."""
+    source = (
+        "from utils.card_screenshot import screenshot_card, shared_browser\n"
+        "def main():\n"
+        "    screenshot_card('a.html', 'a.png')\n"
+    )
+    assert "shared_browser" in source
+    assert screenshot_calls_outside_shared_browser(source) == [3]
+
+
 def test_share_generators_open_one_browser_for_the_four_cards():
     scripts = Path(__file__).resolve().parents[1]
     for name in GENERATORS:
         source = (scripts / name).read_text(encoding="utf-8")
-        assert "shared_browser" in source, (
-            f"{name} must wrap its four screenshots in shared_browser"
+        outside = screenshot_calls_outside_shared_browser(source)
+        assert outside == [], (
+            f"{name} calls screenshot_card outside shared_browser at lines {outside}"
         )
-        assert "screenshot_card(" in source

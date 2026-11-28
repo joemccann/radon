@@ -138,8 +138,14 @@ async function retryOperation({
 // size), and the portfolio names no public tier carries, which the fetch
 // tags as universe.private_tickers and whose presence alone reveals an open
 // position. The demo trial tier keeps only the tier order and the public
-// names. A payload that cannot be parsed is dropped rather than copied unseen.
+// names. The tag is the only way to tell a public name from a portfolio one,
+// so a row without an array tag, like a payload that cannot be parsed or a
+// per-ticker entry that is not an object naming its ticker, is dropped
+// rather than copied unseen.
 const ATS_UNIVERSE_PRIVATE_KEYS = ["counts", "core", "this_cycle", "index_offset", "private_tickers"];
+
+const isName = (value) => typeof value === "string";
+const isRow = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && isName(value.ticker);
 
 export function stripAccountDerivedFields(table, row) {
   if (table !== "scan_snapshots" || row?.service !== "equibles-ats-venue-share") return row;
@@ -150,35 +156,51 @@ export function stripAccountDerivedFields(table, row) {
     return null;
   }
   const universe = payload?.universe;
-  if (!universe || typeof universe !== "object") return row;
-  const hidden = new Set(Array.isArray(universe.private_tickers) ? universe.private_tickers : []);
+  if (!universe || typeof universe !== "object" || Array.isArray(universe)) return null;
+  if (!Array.isArray(universe.private_tickers) || !universe.private_tickers.every(isName)) return null;
+  const hidden = new Set(universe.private_tickers);
   const keep = (ticker) => !hidden.has(ticker);
-  if (hidden.size > 0) {
-    if (Array.isArray(payload.tickers)) payload.tickers = payload.tickers.filter(keep);
-    if (Array.isArray(payload.current)) payload.current = payload.current.filter((row) => keep(row?.ticker));
-    if (Array.isArray(payload.errors)) payload.errors = payload.errors.filter((row) => keep(row?.ticker));
-    if (Array.isArray(payload.carried_forward)) payload.carried_forward = payload.carried_forward.filter(keep);
-    if (payload.series && typeof payload.series === "object") {
-      for (const ticker of hidden) delete payload.series[ticker];
-    }
-    if (Array.isArray(payload.current)) payload.count = payload.current.length;
+  for (const key of ["tickers", "carried_forward"]) {
+    if (payload[key] === undefined) continue;
+    if (!Array.isArray(payload[key]) || !payload[key].every(isName)) return null;
+    payload[key] = payload[key].filter(keep);
   }
+  for (const key of ["current", "errors"]) {
+    if (payload[key] === undefined) continue;
+    if (!Array.isArray(payload[key]) || !payload[key].every(isRow)) return null;
+    payload[key] = payload[key].filter((entry) => keep(entry.ticker));
+  }
+  if (payload.series !== undefined) {
+    if (!payload.series || typeof payload.series !== "object" || Array.isArray(payload.series)) return null;
+    for (const ticker of hidden) delete payload.series[ticker];
+  }
+  if (payload.current !== undefined) payload.count = payload.current.length;
   for (const key of ATS_UNIVERSE_PRIVATE_KEYS) delete universe[key];
   return { ...row, payload: JSON.stringify(payload) };
 }
 
-function upsertStatements(table, columns, rows) {
+// A row the strip rejects is not written, and the prune keeps the newest
+// DESTINATION row per key, so a row mirrored before it would keep serving.
+// rejectSql(row) deletes that key in the same batch: the demo panel goes
+// empty rather than stale.
+function upsertStatements(table, columns, rows, rejectSql) {
   const cols = columns.filter((c) => c !== "rn");
   const placeholders = cols.map(() => "?").join(", ");
   const sql = `INSERT OR REPLACE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`;
-  return rows
-    .map((r) => stripAccountDerivedFields(table, r))
-    .filter((r) => r !== null)
-    .map((r) => ({ sql, args: cols.map((c) => r[c] ?? null) }));
+  const statements = [];
+  for (const row of rows) {
+    const stripped = stripAccountDerivedFields(table, row);
+    if (stripped === null) {
+      if (rejectSql) statements.push(rejectSql(row));
+      continue;
+    }
+    statements.push({ sql, args: cols.map((c) => stripped[c] ?? null) });
+  }
+  return statements;
 }
 
 async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
-  const { maxAttempts, sleep, log, now, runId } = opts;
+  const { maxAttempts, sleep, log, now, runId, rejectSql } = opts;
   let result;
   try {
     result = await retryOperation({
@@ -199,7 +221,7 @@ async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
     return 0;
   }
   try {
-    const statements = upsertStatements(table, result.columns, result.rows);
+    const statements = upsertStatements(table, result.columns, result.rows, rejectSql);
     if (pruneSql) statements.push(pruneSql);
     await retryOperation({
       phase: `${table}:destination_write`,
@@ -289,7 +311,7 @@ export async function runMarketMirror({
          ) WHERE rn = 1`,
         `DELETE FROM ${table} WHERE (${key}, ${orderCol}) NOT IN (` +
           `SELECT ${key}, MAX(${orderCol}) FROM ${table} GROUP BY ${key})`,
-        opts,
+        { ...opts, rejectSql: (row) => ({ sql: `DELETE FROM ${table} WHERE ${key} = ?`, args: [row[key]] }) },
       );
     } catch { failures.push(table); }
   }

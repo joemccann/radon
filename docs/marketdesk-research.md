@@ -278,9 +278,10 @@ A reply the caller's `accept` rejects resumes the next rung. Each later live
 rung then gets 60 seconds, so a rejected draft can run past the 120 second
 copy timeout. An accepted draft does not. The short `copy_problems` codes are
 stored on `marketdesk_articles.last_error` (truncated, no draft body) and are
-included in the `marketdesk-research` health error. An incomplete
-or invalid gateway reply raises `ModelResponseError` and stops the article
-(`CopyUnavailable`). Captions obey the same
+included in the `marketdesk-research` health error. An incomplete provider reply is a rung failure: the gateway tries the next
+live provider before the article stops. A gateway envelope that is still
+incomplete or invalid after that failover raises `ModelResponseError` and
+stops the article (`CopyUnavailable`). Captions obey the same
 numeric rule as the content (system rule 26), since chart values are not in
 the source text.
 
