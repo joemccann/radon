@@ -37,3 +37,14 @@ Evidence: the check failed while both modules defined the grammar, then
 `22 passed` on the grammar and research date tests, `69 passed` on the
 model-gateway consumer and specialized suites, `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## Scanner historical vol
+
+Branch: `cursor/scanner-hv-a8d8`. Independent of the other entropy PRs.
+
+Strength and theta call `utils.close_to_close_hv.close_to_close_hv`.
+The leap scanner and `utils.realized_vol` stay separate. Their filters differ.
+
+Anti-regression: `test_scanner_hv_formula_has_one_home`.
+
+Evidence: `52 passed` on the HV reader and the strength and theta suites.
