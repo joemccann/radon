@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Verify a vendor CLI release before any pin file changes.
 
-SHA-512 stays on every pin. Antigravity's Darwin pin keeps Google's team id.
-Architecture is taken from the artifact URL or the npm os/cpu fields. A
-mismatch raises and writes nothing. Cursor has no pin file; the rung is unwired.
+SHA-512 stays on every pin and is checked against the bytes fetched from
+the publisher's own host: manifests come only from the pinned manifest
+host, artifacts only from the allowlisted download hosts. Antigravity's
+Darwin pin keeps Google's team id for the installer's codesign check; this
+script verifies no signature. Architecture is taken from the artifact URL
+or the npm os/cpu fields. A mismatch raises and writes nothing. Cursor has
+no pin file; the rung is unwired.
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ import base64
 import hashlib
 import json
 import re
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -54,6 +59,21 @@ def require_arch(url: str, arch: str) -> None:
     token = ARCH_TOKEN[arch]
     if token not in (url or ""):
         raise ValueError(f"arch {arch} is not in the artifact url")
+
+
+# host -> required path prefix. Manifests name the download url, so the
+# download hosts are pinned here and not taken from the manifest.
+TRUSTED_DOWNLOADS = {"storage.googleapis.com": "/antigravity-public/", "registry.npmjs.org": "/"}
+TRUSTED_MANIFESTS = {"antigravity-cli-auto-updater-974169037036.us-central1.run.app": "/manifests/"}
+
+
+def require_trusted_url(url: str, trusted: dict[str, str] = TRUSTED_DOWNLOADS) -> None:
+    parsed = urllib.parse.urlsplit(url or "")
+    host = parsed.hostname or ""
+    if parsed.scheme != "https" or parsed.netloc != host or host not in trusted:
+        raise ValueError("url host is not trusted")
+    if not parsed.path.startswith(trusted[host]):
+        raise ValueError("url host path is not trusted")
 
 
 def require_team(team_id: str) -> None:
@@ -161,11 +181,13 @@ def apply_agy() -> bool:
     base = str(current["manifest_base"])
     if not base.endswith("/"):
         base += "/"
+    require_trusted_url(base, TRUSTED_MANIFESTS)
     combined: dict = {"version": None, "platforms": {}}
     blobs: dict[str, bytes] = {}
     for arch, filename in PLATFORM_MANIFEST.items():
         doc = json.loads(fetch_bytes(base + filename).decode("utf-8"))
         url, digest = doc["url"], doc["sha512"]
+        require_trusted_url(url)
         require_arch(url, arch)
         payload = fetch_bytes(url)
         require_sha512_hex(payload, digest)
@@ -175,8 +197,8 @@ def apply_agy() -> bool:
         elif combined["version"] != version:
             raise ValueError("Antigravity platform versions disagree")
         row = {"url": url, "sha512": digest}
-        if arch == "darwin-arm64":
-            row["team_id"] = TEAM_ID
+        if doc.get("team_id"):
+            row["team_id"] = str(doc["team_id"])
         combined["platforms"][arch] = row
         blobs[url] = payload
     linux_pin, darwin_pin = verified_agy_pins(combined, blobs)
@@ -184,7 +206,7 @@ def apply_agy() -> bool:
     changed = current.get("version") != linux_pin["version"] or previous.get("sha512") != darwin_pin["sha512"]
     if changed:
         write_pins(linux_pin, darwin_pin)
-    print(f"antigravity {linux_pin['version']} checksum, team {TEAM_ID}, arches ok")
+    print(f"antigravity {linux_pin['version']} checksum, host and arches ok; darwin team id pinned for the installer")
     return changed
 
 
@@ -199,6 +221,7 @@ def apply_npm() -> bool:
         meta = json.loads(fetch_bytes(f"https://registry.npmjs.org/{name}/latest").decode("utf-8"))
         require_npm_arches(meta)
         dist = meta["dist"]
+        require_trusted_url(dist["tarball"])
         require_npm_integrity(fetch_bytes(dist["tarball"]), dist["integrity"])
         version = str(meta["version"])
         versions[name] = version

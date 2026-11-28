@@ -1,6 +1,6 @@
 name: vendor-cli-latest
 
-# Daily check of the pinned subscription CLIs. Checksum, team id, and
+# Daily check of the pinned subscription CLIs. Publisher host, checksum, and
 # architecture are verified before any pin file changes. The pull request
 # uses a factory/ branch, which the runner-bot-nightly-only ruleset allows.
 # Cursor has no pin file. Nothing here merges.

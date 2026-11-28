@@ -865,9 +865,9 @@ const VIXCOR_MAX_AGE_MS = 48 * 60 * 60_000;
 `readVixcorFromDb()` selects
 `scan_time, payload FROM scan_snapshots WHERE service = 'vixcor' ORDER BY scan_time DESC LIMIT 1`
 and returns `{ data: JSON.parse(row.payload), timestampMs: contentTimestampMs(row.scan_time) }`.
-`readVixcorFromDisk()` reads `CACHE_PATH`. `GET()` runs `dbFirstRead({ fromDb,
-fromDisk, maxAgeMs: VIXCOR_MAX_AGE_MS, label: "vixcor" })` and returns
-`NextResponse.json(result.ok ? result.data : MISSING_VIXCOR)` through
+`GET()` runs `dbFirstRead({ fromDb, maxAgeMs, label: "vixcor", isDegraded: isMissingPayload })`.
+No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
+The JSON body is `result.ok && result.fresh ? result.data : staleCollapse(MISSING_VIXCOR, result)`, through
 `setCacheResponseHeaders(response, { maxAgeSeconds: 300,
 staleWhileRevalidateSeconds: 3600, requestId, cacheState: "HIT", tags:
 ["vixcor"] })`.
@@ -1392,14 +1392,13 @@ Also add `"vixcor"` to the expected set in
 **`web/tests/vixcor-api.test.ts`** (`@vitest-environment node`, mocks `@/lib/db`
 with a real in-memory `@libsql/client` seeded from the migration):
 
-1. Turso snapshot beats an older disk file.
-2. Disk fallback when Turso is empty.
-3. Absent everywhere returns HTTP **200** and exactly `MISSING_VIXCOR`
+1. The route does not read a disk file.
+2. Absent everywhere returns HTTP **200** and exactly `MISSING_VIXCOR`
    (`missing: true`, `status: "missing"`, `series: []`, `episodes: []`).
-4. `only reads the vixcor service's snapshots` — a `cor` snapshot in the table
+3. `only reads the vixcor service's snapshots` — a `cor` snapshot in the table
    does not leak in.
-5. `route.dynamic === "force-dynamic"`.
-6. A `holding` payload passes through verbatim, still HTTP 200, `missing`
+4. `route.dynamic === "force-dynamic"`.
+5. A `holding` payload passes through verbatim, still HTTP 200, `missing`
    absent.
 
 **`web/tests/vixcor-panel.test.tsx`** (`@vitest-environment jsdom`, stub

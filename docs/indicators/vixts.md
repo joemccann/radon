@@ -423,9 +423,8 @@ Writer: `upsert_vixts_rows(rows, recorded_at=None)`, chunked,
 Copy `web/app/api/hhlev/route.ts` verbatim in shape.
 
 - `export const dynamic = "force-dynamic"; export const runtime = "nodejs";` GET only.
-- `dbFirstRead({ fromDb, fromDisk, maxAgeMs: VIXTS_MAX_AGE_MS, label: "vixts" })`.
+- `dbFirstRead({ fromDb, maxAgeMs: VIXTS_MAX_AGE_MS, label: "vixts" })`. No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `fromDb`: `SELECT scan_time, payload FROM scan_snapshots WHERE service = 'vixts' ORDER BY scan_time DESC LIMIT 1`.
-- `fromDisk`: `data/vixts.json`.
 - **`VIXTS_MAX_AGE_MS = 48 * 60 * 60_000`**, commented: the timer runs daily at
   02:45 UTC every calendar day, so a snapshot older than 48h means the writer is
   down, not that the data is merely stale over a weekend.
@@ -652,8 +651,7 @@ import; expected values derived by inspecting fixtures, never mental arithmetic:
 - window-relative dates for anything freshness-related
 
 **`web/tests/vixts-api.test.ts`** (`@vitest-environment node`) — mock `@/lib/db`
-with a real in-memory `@libsql/client` seeded from the migration: Turso beats older
-disk, disk fallback works, the exact `missing:true` object at **200**, no
+with a real in-memory `@libsql/client` seeded from the migration: the exact `missing:true` object at **200**, no
 cross-service snapshot leak, `route.dynamic === "force-dynamic"`.
 
 **`web/tests/vixts-panel.test.tsx`** (`@vitest-environment jsdom`) — stub
