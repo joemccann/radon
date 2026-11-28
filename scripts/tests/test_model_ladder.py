@@ -435,6 +435,71 @@ class TestTextJsonPath:
 
 
 class TestMultimodalReviewFailover:
+    def test_incomplete_anthropic_falls_through_to_the_next_live_rung(self):
+        """One incomplete Anthropic reply must not abort while another provider is live.
+
+        2026-11-24 21:44Z: radon-marketdesk.service exited 1 in 18s with
+        marketdesk-research last_error ending in
+        "Gateway returned an incomplete or invalid model response".
+        The gateway had anthropic, grok and codex live. require_end_turn
+        raised ModelResponseError("incomplete") and _run_ladder re-raised
+        it before the next rung. A sole incomplete provider still fails
+        closed; it does not accept the partial JSON.
+        """
+        router = _Router(
+            {
+                "api.anthropic.com": _Resp(
+                    200,
+                    {
+                        "stop_reason": "max_tokens",
+                        "content": [{"type": "text", "text": "{}"}],
+                    },
+                ),
+                "api.x.ai": _openai_obj_ok(),
+            }
+        )
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV},
+            post=router,
+            stream_anthropic=True,
+            read_timeout=120.0,
+            max_response_bytes=2_000_000,
+            require_end_turn=True,
+        )
+        assert result.provider == "grok"
+        assert result.data == OBJ
+        assert any("api.anthropic.com" in url for url in router.calls)
+        assert any("api.x.ai" in url for url in router.calls)
+        assert "anthropic:incomplete" in result.attempted
+
+    def test_oversized_anthropic_stream_falls_through_to_the_next_live_rung(self):
+        oversized = _StreamingResponse({}, chunks=[b"x" * 17, b"x" * 17])
+        calls: list[str] = []
+
+        def post(url, **kwargs):
+            calls.append(url)
+            if "api.anthropic.com" in url:
+                return oversized
+            if "api.x.ai" in url:
+                return _openai_obj_ok()
+            return _Resp(599, {"error": {"message": "unmocked"}})
+
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "a", **GROK_ENV},
+            post=post,
+            stream_anthropic=True,
+            read_timeout=120.0,
+            max_response_bytes=32,
+            require_end_turn=True,
+        )
+        assert result.provider == "grok"
+        assert result.data == OBJ
+        assert oversized.closed
+        assert any("api.x.ai" in url for url in calls)
+        assert "anthropic:response_too_large" in result.attempted
+
     def test_reviewer_falls_through_anthropic_credit(self):
         router = _Router(
             {"api.anthropic.com": _credit_low(), "api.x.ai": _openai_obj_ok()}

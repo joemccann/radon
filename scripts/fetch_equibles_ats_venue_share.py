@@ -1123,8 +1123,16 @@ def run(
     else:
         merged, carried = _merge_prior_series(series_by_ticker, prior_series)
     if carried:
-        prior_private = ((prior or {}).get("universe") or {}).get("private_tickers") or []
-        private_tickers.update(name for name in prior_private if name in carried)
+        # A carried name is outside this run's walk, so the tag cannot come
+        # from the fetch. The prior tag is honoured, and a name no public
+        # tier of the current universe holds is account-derived by
+        # elimination (a prior cache written before the tag existed, or a
+        # tag lost along the way, must not publish it).
+        prior_private = set(((prior or {}).get("universe") or {}).get("private_tickers") or [])
+        public_names = set(schedule.get("tickers") or []) - set(schedule.get("private") or [])
+        private_tickers.update(
+            name for name in carried if name in prior_private or name not in public_names
+        )
         universe_meta["private_tickers"] = sorted(private_tickers)
         payload = {
             **build_payload(merged, scan_time, errors),
