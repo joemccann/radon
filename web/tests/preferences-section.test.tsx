@@ -237,7 +237,12 @@ describe("shell registration", () => {
   it("4. WorkspaceSections renders the preferences arm", () => {
     const src = read("components/WorkspaceSections.tsx");
     expect(src).toContain('case "preferences"');
-    expect(src).toMatch(/import PreferencesSection from/);
+    // PERF-071 loads this one-section panel through next/dynamic. The arm
+    // stays wired: the loader names the module, and the case returns it.
+    expect(src).toMatch(
+      /const PreferencesSection = dynamic\(\(\) => import\("\.\/PreferencesSection"\)/,
+    );
+    expect(src).toContain("return <PreferencesSection />");
   });
 
   it("5. WorkspaceShell excludes MetricCards and leaves headerOwnsPageHeading alone", () => {

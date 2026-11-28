@@ -143,13 +143,6 @@ import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import InstrumentSkeleton from "@/components/ui/InstrumentSkeleton";
-import AiInfrastructurePanel from "./AiInfrastructurePanel";
-import CtaPage from "./CtaPage";
-import AdminWorkspace from "./admin/AdminWorkspace";
-import PreferencesSection from "./PreferencesSection";
-import ProfileContent from "./profile/ProfileContent";
-import WatchlistContent from "./watchlist/WatchlistContent";
-import OptionsWorkspacePanel from "./OptionsWorkspacePanel";
 import InfoTooltip from "./InfoTooltip";
 import SharePnlButton, { type SharePnlData } from "./SharePnlButton";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
@@ -166,12 +159,44 @@ import VolConePanel from "./VolConePanel";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import FlowScanSummary from "./flow-analysis/FlowScanSummary";
-import { AlertsPanel } from "./alerts/AlertsPanel";
-import ResearchWorkbench from "@/components/research/ResearchWorkbench";
 import { MarketState } from "@/lib/useMarketHours";
 
+function SectionSkeleton({ testId }: { testId: string }) {
+  return <InstrumentSkeleton testId={testId} />;
+}
+
 const RegimePanel = dynamic(() => import("./RegimePanel"), {
-  loading: () => <InstrumentSkeleton testId="regime-panel-skeleton" />,
+  loading: () => <SectionSkeleton testId="regime-panel-skeleton" />,
+});
+// These panels render for one section each. A static import put their graphs
+// on every orders, journal, scanner, flow and ticker load (PERF-071).
+const OptionsWorkspacePanel = dynamic(() => import("./OptionsWorkspacePanel"), {
+  loading: () => <SectionSkeleton testId="options-workspace-skeleton" />,
+});
+const AiInfrastructurePanel = dynamic(() => import("./AiInfrastructurePanel"), {
+  loading: () => <SectionSkeleton testId="ai-infrastructure-skeleton" />,
+});
+const CtaPage = dynamic(() => import("./CtaPage"), {
+  loading: () => <SectionSkeleton testId="cta-page-skeleton" />,
+});
+const AlertsPanel = dynamic(
+  () => import("./alerts/AlertsPanel").then((mod) => ({ default: mod.AlertsPanel })),
+  { loading: () => <SectionSkeleton testId="alerts-panel-skeleton" /> },
+);
+const ResearchWorkbench = dynamic(() => import("./research/ResearchWorkbench"), {
+  loading: () => <SectionSkeleton testId="research-workbench-skeleton" />,
+});
+const AdminWorkspace = dynamic(() => import("./admin/AdminWorkspace"), {
+  loading: () => <SectionSkeleton testId="admin-workspace-skeleton" />,
+});
+const PreferencesSection = dynamic(() => import("./PreferencesSection"), {
+  loading: () => <SectionSkeleton testId="preferences-section-skeleton" />,
+});
+const ProfileContent = dynamic(() => import("./profile/ProfileContent"), {
+  loading: () => <SectionSkeleton testId="profile-content-skeleton" />,
+});
+const WatchlistContent = dynamic(() => import("./watchlist/WatchlistContent"), {
+  loading: () => <SectionSkeleton testId="watchlist-content-skeleton" />,
 });
 
 /** Build a human-readable description from an ExecutedOrder.
