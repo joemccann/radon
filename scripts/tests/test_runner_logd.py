@@ -614,3 +614,38 @@ def test_ingest_keeps_an_embedded_line_break_from_forging_a_second_line(logd, tm
     lines = stored[0].read_text().splitlines()
     assert len(lines) == 1
     assert "first" in lines[0] and "forged" in lines[0] and "more" in lines[0]
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_follow_hides_a_quoted_value_continued_on_unindented_lines(logd, quote):
+    # The whole-text scrubber hides a quoted value that closes on a later
+    # line. The follower sees the lines one at a time: the opener is
+    # redacted through its line end, and while the quote stays open the
+    # interior lines are held back instead of streamed as plain text.
+    scrubber = logd.LineScrubber({})
+    lines = ["x=1\n", f"API_TOKEN={quote}opaquevalue111\n", "opaquevalue222\n", "opaquevalue333\n", "opaquevalue444\n", f"opaquevalue555{quote}\n", "next harmless\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "x=1" in joined
+    assert "next harmless" in joined
+
+
+def test_follow_releases_lines_after_an_unclosed_quote_within_the_bound(logd):
+    # A quote that never closes must not swallow the log for good: after
+    # the context window the follower stops holding lines.
+    scrubber = logd.LineScrubber({})
+    lines = ['API_TOKEN="opaquevalue111\n'] + [f"filler {i}\n" for i in range(logd.LineScrubber.CONTEXT_LINES + 8)] + ["next harmless\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next harmless" in joined
+
+
+def test_follow_quote_inside_a_redacted_closed_value_does_not_hold_lines(logd):
+    # A value closed on its own line opens nothing: the next line streams.
+    scrubber = logd.LineScrubber({})
+    out = [scrubber.feed(line) for line in ('API_TOKEN="opaquevalue111"\n', "next harmless\n", "also fine\n")]
+    assert "opaquevalue" not in (out[0] or "")
+    assert out[1] == "next harmless"
+    assert out[2] == "also fine"
