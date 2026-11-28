@@ -170,8 +170,9 @@ multi-row (same Hrana bounding as SKEW).
 ## API — `web/app/api/skew2d/route.ts`
 
 Copy the SKEW route: GET only, `dynamic="force-dynamic"`, `runtime="nodejs"`,
-`dbFirstRead` (Turso `scan_snapshots service='skew2d'` latest, disk
-`data/skew2d.json`), `MAX_AGE_MS = 48h` (daily timer with weekend heartbeats;
+`dbFirstRead` (Turso `scan_snapshots service='skew2d'` latest). No disk
+read. A failed Turso read serves the last good in-memory snapshot for that
+label. `MAX_AGE_MS = 48h` (daily timer with weekend heartbeats;
 older than two days means the writer is down), exact missing contract above,
 `setNoStoreResponseHeaders`.
 

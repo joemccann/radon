@@ -19,32 +19,18 @@ the operator. Do not clear a hold or lease to make a command succeed.
 Run this first to classify the failure:
 
 ```bash
-# 1. Is the Gateway container running on the broker?
+# 1. Broker Gateway status. This is the process check. A local lsof or
+# connect to 127.0.0.1:4001 on radon-app does not reach the broker Gateway.
+# A refused local port is not Scenario A or B, and it is not a restart.
 ssh root@radon-broker radon ib status
 
-# 2. Is port 4001 listening?
-lsof -iTCP:4001 -sTCP:LISTEN
+# 2. FastAPI health on the app host. Read ib_gateway.auth_state,
+# port_listening, upstream_dead, and ib_pool. An open TCP port is not
+# authentication. Owner: ib-gateway-recovery.md#readiness-verification
+curl -s http://radon-app:8321/health | python3.13 -m json.tool
 
-# 3. Is the port accepting connections?
-python3.13 -c "
-import socket, time
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.settimeout(3)
-start = time.time()
-try:
-    s.connect(('127.0.0.1', 4001))
-    print(f'CONNECTED in {time.time()-start:.1f}s')
-except Exception as e:
-    print(f'FAILED in {time.time()-start:.1f}s: {e}')
-finally:
-    s.close()
-"
-
-# 4. Is the realtime WS server running?
+# 3. Relay bind on the app host (127.0.0.1:8765). This is not the Gateway.
 lsof -iTCP:8765 -sTCP:LISTEN
-
-# 5. What does the web UI report?
-curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
 ```
 
 ## Failure Classification
@@ -54,8 +40,8 @@ Match your diagnostic results to one of these scenarios:
 ### Scenario A: Process not running
 
 **Symptoms:**
-- `status-secure-ibc-service.sh` shows no PID or "could not find service"
-- Port 4001 not listening
+- `ssh root@radon-broker radon ib status` shows the Gateway is not running
+- Do not classify this from `lsof` or a connect to `127.0.0.1:4001` on radon-app. That port is not the broker Gateway.
 
 **Root cause:** Gateway crashed, the container exited, or the operator hold released it.
 
@@ -76,10 +62,9 @@ ssh root@radon-broker sudo -n /usr/local/sbin/radon-docker-gw logs
 ### Scenario B: Process running, port listening, connections refused/timeout
 
 **Symptoms:**
-- `status-secure-ibc-service.sh` shows running with PID
-- `lsof` shows Java listening on port 4001
-- `python3` connect test times out or returns ECONNREFUSED
-- Web logs: `TimeoutError(60, "Connect call failed ('127.0.0.1', 4001)")`
+- Broker `radon ib status` shows the Gateway running
+- `/health` reports `port_listening` true with `upstream_dead` true, or the API handshake times out after TCP accept
+- Do not classify this from a connect to `127.0.0.1:4001` on radon-app
 
 **Root cause:** Gateway is in a zombie/CLOSE_WAIT state -- Java process is alive and the socket is bound, but the API layer is not accepting connections. This happens when:
 1. **2FA expired** -- IB session timed out, Gateway needs re-authentication
@@ -147,20 +132,11 @@ killing processes by name.
 
 **Symptoms:**
 - Web UI shows prices as "---" or stale
-- `lsof -iTCP:8765` shows nothing listening
-- Web logs: `WebSocket connection to 'ws://localhost:8765' failed`
+- On the app host, `lsof -iTCP:8765` shows nothing listening (`radon-relay.service` binds `127.0.0.1:8765`)
 
-**Root cause:** `ib_realtime_server.js` crashed or wasn't started.
+**Root cause:** `radon-relay.service` is down. A browser does not open `ws://localhost:8765`.
 
-**Fix:**
-```bash
-# The dev server auto-starts it. If running standalone:
-node scripts/ib_realtime_server.js
-
-# If port conflict:
-lsof -iTCP:8765 -sTCP:LISTEN
-# Kill the conflicting process, then restart
-```
+**Fix:** follow [relay recovery](ib-gateway-recovery.md#relay-recovery). Do not start a second `node scripts/ib_realtime_server.js`, and do not kill a process by name to free the port. A Gateway restart can request 2FA; stop if a hold or lease is active.
 
 ---
 
@@ -198,10 +174,9 @@ Understanding where time goes when Gateway is unreachable:
 
 | Layer | Default Timeout | Notes |
 |-------|----------------|-------|
-| `IBClient.connect()` | **3s** | `ib_insync` TCP + handshake timeout |
+| `IBClient.connect()` | **3s** | Default in `scripts/clients/ib_client.py`. Callers may pass a longer timeout. |
 | `runScript()` (Node wrapper) | 30s | Python script spawn + execution |
-| Cached fallback read | <50ms | Read JSON from disk |
-| **Total worst case (unreachable)** | **~3.5s** | Sync fails at 3s, fallback serves cached data |
+| Portfolio and orders sync wait | 20s | `PRODUCER_SYNC_WAIT_MS` in `web/lib/edgeBudget.ts`, then the latest Turso snapshot. Not a disk JSON read. |
 
 Scripts that need longer timeouts pass them explicitly:
 - `ib_place_order.py`: `timeout=10` (order placement must be reliable)
@@ -211,7 +186,9 @@ Scripts that need longer timeouts pass them explicitly:
 
 ## Cached Data Fallback
 
-When sync fails, API routes serve the latest Turso snapshot with an `X-Sync-Warning` header instead of returning 502. The UI should always render.
+A failed portfolio or orders sync POST serves the latest Turso snapshot when one exists. `web/lib/syncFallback.ts` sets `X-Sync-Warning`. Portfolio also sets `X-Portfolio-Source: turso-stale`. A wait that elapsed sets `X-Sync-Pending: 1` and `IB sync still running - serving latest Turso snapshot`. A failed sync uses `IB sync failed - serving latest Turso snapshot`. The wait is `PRODUCER_SYNC_WAIT_MS` (20 seconds) in `web/lib/edgeBudget.ts`. These routes do not read `data/*.json`.
+
+No snapshot, or a Turso read error on that POST, is HTTP 502. A corrupt stored portfolio payload is HTTP 500 `SNAPSHOT_CORRUPT`; re-run the portfolio sync. A portfolio GET with no snapshot is HTTP 503. An orders GET that cannot read Turso is HTTP 503. A 200 is the live sync result only when those warning headers are absent. Do not POST `/api/portfolio` as a connectivity probe.
 
 ---
 
@@ -224,11 +201,11 @@ These mechanisms handle transient failures without intervention:
 | Direct protocol sensor | `ib_watchdog.py` | Independent bounded IB handshake detects port-down and JVM wedges |
 | Persisted recovery ladder | `ib_watchdog.py` | Debounce, backoff, hard cap, auth-aware 2FA stand-down, then lease-gated restart |
 | Atomic push lease | `ib_2fa_lock.py` | OS-locked compare/write; all active leases reject reentry, including same holder |
-| Process cleanup | `restart-secure-ibc-service.sh` | Snapshots pre-existing PIDs, force-kills only survivors after SIGTERM |
+| Process cleanup | Gateway recovery owner | The broker helper owns cleanup. Do not run a local IBC wrapper or kill processes by name. |
 | Stale tick recovery | Relay | [Mode-specific escalation and operator gates](ib-gateway-recovery.md#relay-recovery) |
 | Reconnect loop | `ib_realtime_server.js` | 5s interval, client ID rotation on collision, subscription restoration |
 | `_IBSyncCoordinator` | FastAPI | Coalesces portfolio/orders subprocesses and caches only successful outcomes briefly |
-| Cached fallback | API routes | Serves `data/*.json` when sync fails, returns 200 not 502 |
+| Cached fallback | portfolio and orders POST | Latest Turso snapshot plus `X-Sync-Warning` when a row exists; 502 when it does not. Not `data/*.json`. |
 | IBC daily cycle | Gateway | [Daily-cycle semantics and local installer limitation](ib-gateway-recovery.md#daily-cycle) |
 | 2FA timeout | IBC config | Exit with no relogin; watchdog owns the next bounded attempt after lease expiry |
 
@@ -239,18 +216,14 @@ These mechanisms handle transient failures without intervention:
 Add to daily startup routine:
 
 ```bash
-# Gateway health
+# Gateway status on the broker. Read-only.
 ssh root@radon-broker radon ib status
 
-# API connectivity
-curl -s -o /dev/null -w "%{http_code} %{time_total}s" -X POST http://localhost:3000/api/portfolio
-# Expected: "200 0.XXXs" (sub-second when Gateway connected)
-# Degraded: "200 3.XXXs" (sync failed, serving cache)
-# Broken:   "502 3.XXXs" (no cache available)
-
-# WebSocket server
-curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
-# Expected: {"connected": true}
+# App-host FastAPI health. Do not POST /api/portfolio as a probe, and do not
+# time a 3 second curl. Sync fallback is the header contract above, after
+# PRODUCER_SYNC_WAIT_MS, not a disk file.
+curl -s http://radon-app:8321/health | python3.13 -m json.tool
+# ib_gateway.auth_state=authenticated and upstream_dead=false before any restart.
 ```
 
 ---
@@ -266,7 +239,7 @@ curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
                      ┌────────▼────────┐
                      │   IB Servers    │
                      └────────┬────────┘
-                              │ FIX protocol
+                              │ IB API
               ┌───────────────▼───────────────┐
               │     IB Gateway (Java)          │
               │     Port 4001 (Live API)       │
@@ -276,14 +249,14 @@ curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
                  │             │          │
         ┌────────▼───┐  ┌─────▼────┐  ┌──▼──────────────┐
         │ ib_sync.py │  │ib_orders │  │ib_realtime_server│
-        │ clientId=0 │  │clientId=11│  │ clientId=100-102 │
+        │ see ranges │  │see ranges │  │ see ranges       │
         └────────┬───┘  └─────┬────┘  └──┬──────────────┘
                  │             │          │ ws://localhost:8765
         ┌────────▼─────────────▼──────────▼───┐
         │          Next.js API Routes          │
         │  POST /api/portfolio (sync+fallback) │
         │  POST /api/orders   (sync+fallback)  │
-        │  GET  /api/ib-status (WS relay)      │
+        │  prices via the relay, not ib-status │
         └─────────────────┬───────────────────┘
                           │ HTTP
                  ┌────────▼────────┐
@@ -293,3 +266,5 @@ curl -s http://localhost:3000/api/ib-status | python3.13 -m json.tool
                  │ usePrices()     │
                  └─────────────────┘
 ```
+
+Client IDs are the ranges in [scripts/CLAUDE.md](../scripts/CLAUDE.md#client-id-ranges). Do not select a process from a static ID in this diagram. The relay listens on `127.0.0.1:8765` on the app host. Gateway authentication is FastAPI `/health`, not a Next route.

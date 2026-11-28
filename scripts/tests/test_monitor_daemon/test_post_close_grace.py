@@ -58,13 +58,58 @@ class HardCloseHandler(BaseHandler):
 # ── window-relative dates (never hardcoded — they rot in CI) ─────────────
 
 
+def _session_open_at(day, hour, minute):
+    from utils.market_calendar import market_state
+
+    instant = datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET)
+    return market_state(instant)["is_open"] is True
+
+
 def recent_trading_day():
+    """Latest weekday still in regular hours at 15:55 ET.
+
+    A half day is not a 16:00 session. 2026-11-27 closes at 13:00
+    (scripts/config/market_early_closes.json). Walking only weekends and
+    full holidays lands on that Friday the next morning and then demands
+    a grace cycle at 16:10, three hours after the real close.
+    """
     from utils.market_calendar import load_holidays
 
     day = datetime.now(ET).date() - timedelta(days=1)
-    while day.weekday() >= 5 or day.strftime("%Y-%m-%d") in load_holidays(day.year):
+    while True:
+        iso = day.strftime("%Y-%m-%d")
+        if (
+            day.weekday() < 5
+            and iso not in load_holidays(day.year)
+            and _session_open_at(day, 15, 55)
+        ):
+            return day
         day -= timedelta(days=1)
-    return day
+
+
+def recent_early_close_day():
+    """Latest weekday open at noon and closed at 15:55 ET."""
+    from utils.market_calendar import load_holidays
+
+    day = datetime.now(ET).date()
+    for _ in range(400):
+        day -= timedelta(days=1)
+        iso = day.strftime("%Y-%m-%d")
+        if day.weekday() >= 5 or iso in load_holidays(day.year):
+            continue
+        if _session_open_at(day, 12, 0) and not _session_open_at(day, 15, 55):
+            return day
+    raise AssertionError("no early-close session in the last 400 days")
+
+
+def ten_minutes_after_early_close(day):
+    from utils.market_calendar import market_state
+
+    for minute in range(12 * 60, 16 * 60):
+        instant = datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=ET)
+        if not market_state(instant)["is_open"]:
+            return instant + timedelta(minutes=10)
+    raise AssertionError(f"{day} did not close before 16:00")
 
 
 def recent_saturday():
@@ -147,6 +192,19 @@ class TestPostCloseGraceGate:
         noon = datetime(day.year, day.month, day.day, 12, 0, tzinfo=ET)
         results = run_once_at(GraceHandler(), noon)
         assert "grace_handler" in results
+
+    def test_grace_does_not_treat_an_early_close_as_a_16_00_session(self):
+        """16:10 on a 13:00 close is outside a 15-minute grace window."""
+        day = recent_early_close_day()
+        results = run_once_at(GraceHandler(), at_close_plus(day, 10))
+        assert "grace_handler" not in results
+
+    def test_grace_handler_runs_ten_minutes_after_an_early_close(self):
+        """The window follows the real close, not a hardcoded 16:00."""
+        day = recent_early_close_day()
+        results = run_once_at(GraceHandler(), ten_minutes_after_early_close(day))
+        assert "grace_handler" in results
+        assert results["grace_handler"]["status"] == "ok"
 
 
 class TestHandlerOptIn:

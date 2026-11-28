@@ -141,8 +141,8 @@ recorded_at)` using chunked multi-row inserts per the Hrana bounding rules
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only (timer-driven
   daily series, no manual-scan POST).
-- `dbFirstRead`: Turso `scan_snapshots WHERE service = 'straddle'` latest, disk
-  fallback `data/straddle.json`, freshest content timestamp wins.
+- `dbFirstRead`: Turso `scan_snapshots WHERE service = 'straddle'` latest.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` — the timer fires daily (incl. weekends, heartbeat-only);
   older than 48h means the writer is down.
 - Missing contract, HTTP 200 exactly:

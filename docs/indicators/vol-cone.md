@@ -251,7 +251,7 @@ Writer: chunked `INSERT ... ON CONFLICT(ticker, date, expiry) DO UPDATE`.
 
 `web/app/api/vol-cone/route.ts` — GET only, `dynamic = "force-dynamic"`,
 `runtime = "nodejs"`. `dbFirstRead` on `scan_snapshots` where
-`service = 'vol-cone'`, disk `data/vol_cone.json`.
+`service = 'vol-cone'`. No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 `maxAgeMs = getFreshnessWindowMs("vol-cone", getMarketStateFromDate())`
 (26h market-open / 4d closed, shared with
 the watchdog catalog in `web/lib/serviceHealthWindows.ts` /

@@ -105,7 +105,7 @@ large-snapshot path has a 180-second work budget with 4-second request limits.
 
 GET /api/vix-model-spread, dynamic force-dynamic, runtime nodejs,
 radonCapability read. Operator guard executes before any storage read.
-dbFirstRead with the shared bounded dbExecute reader chooses freshest valid snapshot versus disk, isMissingPayload
+dbFirstRead with the shared bounded dbExecute reader. No disk read. A failed Turso read serves the last good in-memory snapshot for that label. isMissingPayload
 degradation guard. Absent/expired: HTTP200
 {missing:true,status:"missing",scan_time:null,as_of:null,data_date:null,
 count:0,current:null,series:[]} plus staleCollapse diagnostics as applicable.
@@ -116,7 +116,7 @@ all route access/demo/catalog/refresh pin inventories. No demo raw fixture.
 
 `VixModelSpreadData`, `VixModelSpreadEntry`, `SpreadWindow=20|252` in
 web/lib/vixModelSpread.ts. `useVixModelSpread` GET-only useSyncHook every 5 minutes,
-extractTimestamp scan_time. No client recomputation of rolling statistics. The HTTP response omits writer-only source_series; SQL removes it before transfer, and the disk reader omits it too.
+extractTimestamp scan_time. No client recomputation of rolling statistics. The HTTP response omits writer-only source_series; SQL `json_remove` removes it before transfer. The writer disk file still holds `source_series`.
 `VIX_MODEL_SPREAD_REFRESH` mirrors both OnCalendar lines (5-minute ET
 session line and `*-*-* 16:01:00 America/New_York`), no jitter; FreshnessRail directly under strip,
 testId vix-model-spread-freshness-rail, asOfTestId

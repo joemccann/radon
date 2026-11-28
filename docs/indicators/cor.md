@@ -134,8 +134,8 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (40, dateti
 ## API — `web/app/api/cor/route.ts` (copy `straddle/route.ts`)
 
 - GET-only, `dynamic = "force-dynamic"`, `runtime = "nodejs"`.
-- `dbFirstRead`: Turso `scan_snapshots WHERE service = 'cor'` latest, disk
-  fallback `data/cor.json`.
+- `dbFirstRead`: Turso `scan_snapshots WHERE service = 'cor'` latest.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `COR_MAX_AGE_MS = 48h` — radon-cor.timer fires daily 02:20 UTC including
   weekends (Cboe re-touch days heartbeat via conditional GET), so a snapshot
   older than two days means the writer is down.

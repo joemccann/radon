@@ -156,8 +156,7 @@ the 26-hour window, while demo principals use the shared mirrored-snapshot
 window. The demo route policy, rate-bucket segment and middleware authorization
 classification are pinned. The route remains subject to the existing default-deny
 authentication perimeter. `dbFirstRead` reads only
-service asia-export-lead snapshots, compares actual content timestamps against disk
-`data/asia_export_lead.json`, and uses shared closed freshness window 26h.
+service asia-export-lead snapshots. No disk read. A failed Turso read serves the last good in-memory snapshot for that label. Shared closed freshness window 26h.
 Missing is HTTP 200 with exact `{missing:true,scan_time:null,
 source_last_modified:null,data_date:null,count:0,series:[],current:null,sources:null,
 comparison:{available:false,label:"MSCI US forward 12-month EPS",reason:"Licensed EPS series not connected"}}`.
