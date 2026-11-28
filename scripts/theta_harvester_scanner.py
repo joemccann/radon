@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWAPIError, UWClient, UWRateLimitError
+from utils.close_to_close_hv import close_to_close_hv as calculate_hv
 from utils.scan_coverage import (
     coverage_block,
     is_coverage_failed,
@@ -286,22 +287,6 @@ def bs_greeks(spot: float, strike: float, iv_pct: float, dte: int, right: str) -
         "gamma": gamma,
         "vega": vega,
     }
-
-
-def calculate_hv(prices: Sequence[float], period: int) -> Optional[float]:
-    if len(prices) < period + 1:
-        return None
-    recent = list(prices)[-(period + 1):]
-    returns = [
-        math.log(recent[i] / recent[i - 1])
-        for i in range(1, len(recent))
-        if recent[i - 1] > 0 and recent[i] > 0
-    ]
-    if len(returns) < 2:
-        return None
-    mean = sum(returns) / len(returns)
-    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-    return math.sqrt(variance) * math.sqrt(TRADING_DAYS) * 100
 
 
 def _dte(expiry: str, now: Optional[datetime] = None) -> int:

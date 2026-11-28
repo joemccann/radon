@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWClient, UWRateLimitError
+from utils.close_to_close_hv import close_to_close_hv as calculate_hv
 from utils.scan_coverage import (
     coverage_block,
     is_coverage_failed,
@@ -57,7 +58,6 @@ try:
 except Exception:
     pass
 
-TRADING_DAYS = 252
 DEFAULT_MAX_WORKERS = 24
 RATE_LIMIT_ABORT = 8
 
@@ -219,22 +219,6 @@ def _pct_change(prices: Sequence[float], periods: int) -> Optional[float]:
     if len(prices) < periods + 1 or prices[-periods - 1] <= 0:
         return None
     return (prices[-1] / prices[-periods - 1] - 1) * 100
-
-
-def calculate_hv(prices: Sequence[float], period: int) -> Optional[float]:
-    if len(prices) < period + 1:
-        return None
-    recent = list(prices)[-(period + 1):]
-    returns = [
-        math.log(recent[i] / recent[i - 1])
-        for i in range(1, len(recent))
-        if recent[i - 1] > 0 and recent[i] > 0
-    ]
-    if len(returns) < 2:
-        return None
-    mean = sum(returns) / len(returns)
-    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-    return math.sqrt(variance) * math.sqrt(TRADING_DAYS) * 100
 
 
 def _latest_iv(payload: Any) -> Tuple[Optional[float], Optional[float]]:
