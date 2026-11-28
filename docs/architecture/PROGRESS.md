@@ -53,3 +53,19 @@ Anti-regression: `test_catalog_frontier_rules_have_one_definition` and
 Evidence: the definition check failed while both modules defined the four
 functions, then `66 passed` on the catalog suites and `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## Round 4
+
+Moved the knowledge query decision into `scripts/model_gateway/embed_rules.py`:
+embedding text, backend choice, dual-write, the v2 coverage cache, and
+`resolve_query_vector`. The app module and the native embedding client each
+bind their own `embed_query`. HTTP and fastembed stay in the native client.
+The app still calls the gateway.
+
+Anti-regression: `test_embed_query_policy_has_one_definition` and
+`test_embed_query_policy_markers_have_one_home`.
+
+Evidence: both checks failed while the two modules still defined the policy,
+then `95 passed` across the embed-rules, v2, pipeline, ingest-budget, and
+write-bounds suites, and `6 passed` on
+`cloud/tests/test_model_gateway_package.py`.
