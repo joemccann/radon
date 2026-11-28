@@ -23,12 +23,12 @@ from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Request
 
+from utils.market_calendar import is_market_open_et
 from utils.price_cache import (
     STOCKS_DIR,
     TTL_AFTER_CLOSE,
     TTL_MARKET_HOURS,
     cache_key_stock,
-    is_market_hours,
     read_cache_envelope,
     write_cache,
 )
@@ -69,7 +69,7 @@ def _read_cached_envelope(symbol: str) -> Optional[dict]:
 
 
 def _write_cached_closes(symbol: str, closes: dict[str, float], source: str) -> None:
-    ttl = TTL_MARKET_HOURS if is_market_hours() else TTL_AFTER_CLOSE
+    ttl = TTL_MARKET_HOURS if is_market_open_et() else TTL_AFTER_CLOSE
     write_cache(STOCKS_DIR, _cache_key(symbol), closes, source=source, ttl=ttl)
 
 

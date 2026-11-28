@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from utils.atomic_io import atomic_save, verified_load
-from utils.market_calendar import is_market_open_et
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "price_history_cache"
 STOCKS_DIR = CACHE_DIR / "stocks"
@@ -43,10 +42,6 @@ def cache_key_option(option_id: str, start: str, end: str) -> str:
 
 def _filename(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest() + ".json"
-
-
-def is_market_hours() -> bool:
-    return is_market_open_et()
 
 
 def _cache_path(subdir: Path, key: str) -> Path:

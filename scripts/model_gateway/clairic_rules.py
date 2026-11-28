@@ -1,0 +1,179 @@
+"""Clairic date grammar shared by the gateway client and the native client.
+
+Transports stay in their own modules. This file decides which pages are
+sent, which fields fit the token budget, and when a printed date is
+accepted or replaced by the folder date.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from .contracts import ClairicError, MissingCredentials
+
+PASS_TOKENS = 8192
+CHARS_PER_TOKEN = 4
+TIMEOUT_S = 10
+MAX_RESPONSE_BYTES = 65_536
+STALE_DAYS = 45
+CONFIDENCE_MIN = 0.9
+_ISO_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+REPORT_DATE_FIELD = {
+    "type": "date",
+    "instructions": (
+        "Publication date of this report as printed on the document "
+        "(cover, header or byline). Ignore data as-of dates, index base dates, "
+        "copyright years, event dates, coverage periods and download or print dates."
+    ),
+}
+PUBLISHER_FIELD = {
+    "type": "text",
+    "instructions": (
+        "Name of the firm that published this research report: the legal owner "
+        "in the copyright line or the brand on the first page. Not a company, "
+        "data vendor or bank that the report merely cites."
+    ),
+}
+
+
+def _enabled(name, env):
+    return (env.get(name) or "").strip() == "1"
+
+
+def today_et():
+    return datetime.now(ZoneInfo("America/New_York")).date()
+
+
+def _schema_tokens(fields):
+    return len(json.dumps(fields, separators=(",", ":"))) // CHARS_PER_TOKEN + 32
+
+
+def _token_est(text):
+    return len(text) // CHARS_PER_TOKEN
+
+
+def build_state(pages, token_budget):
+    """Pages 1-3 plus the last page, trimmed to the token budget. The last page is kept."""
+    if not pages or token_budget <= 0:
+        return ""
+    keys = sorted(k for k in pages if isinstance(k, int))
+    if not keys:
+        return ""
+    pick = list(dict.fromkeys(keys[:3] + ([keys[-1]] if len(keys) > 3 else [])))
+    parts = [f"[page {k}]\n{str(pages[k]).strip()}" for k in pick]
+    char_budget = token_budget * CHARS_PER_TOKEN
+    if len(parts) < 2:
+        return parts[0][:char_budget] if parts else ""
+    last = parts[-1]
+    head = "\n\n".join(parts[:-1])
+    if len(last) >= char_budget:
+        return last[:char_budget]
+    room = char_budget - len(last) - 2
+    if len(head) + 2 + len(last) <= char_budget:
+        return head + "\n\n" + last
+    return head[:room].rstrip() + "\n\n" + last
+
+
+def build_request(pages, folder_date):
+    """One pass when the state fits. Publisher rides along only if it stays in that pass."""
+    date_only = {"report_date": REPORT_DATE_FIELD}
+    both = {"report_date": REPORT_DATE_FIELD, "publisher": PUBLISHER_FIELD}
+    date_budget = PASS_TOKENS - _schema_tokens(date_only)
+    state = build_state(pages, date_budget)
+    fields = both if state and _token_est(state) + _schema_tokens(both) <= PASS_TOKENS else date_only
+    if fields is both and not state:
+        fields = date_only
+    body = {"model": "clairic", "state": state, "fields": fields}
+    if isinstance(folder_date, str) and _ISO_RE.fullmatch(folder_date):
+        body["reference_date"] = folder_date
+    return body
+
+
+def sanity_failure(iso, folder_date, today):
+    """None when the date is not in the future and not more than 45 days before the folder date."""
+    try:
+        report = date.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return "no_printed_date"
+    if report > today:
+        return "future_date"
+    try:
+        folder = date.fromisoformat(folder_date) if isinstance(folder_date, str) else None
+    except ValueError:
+        folder = None
+    if folder is None or (folder - report).days > STALE_DAYS:
+        return "stale_vs_folder"
+    return None
+
+
+def _confidence_ok(confidence):
+    try:
+        return float(confidence) >= CONFIDENCE_MIN
+    except (TypeError, ValueError):
+        return False
+
+
+def reject_clairic(value, confidence, folder_date, today):
+    if not isinstance(value, str) or _ISO_RE.fullmatch(value) is None:
+        return "no_printed_date"
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return "no_printed_date"
+    if not _confidence_ok(confidence):
+        return "clairic_low_confidence"
+    return sanity_failure(value, folder_date, today)
+
+
+def _log(reason, date_flag=None, date_source=None):
+    row = {"event": "clairic_date", "reason": reason}
+    if date_flag:
+        row["date_flag"] = date_flag
+    if date_source:
+        row["date_source"] = date_source
+    print(json.dumps(row, separators=(",", ":")), file=sys.stderr)
+
+
+def apply_date(found, page_text, folder_date, env=None, *, fetch, today):
+    """Return (date tuple, date_flag or None). Flags off returns `found` unchanged and logs nothing.
+
+    ``fetch(pages, folder_date, env=env)`` is the only transport.
+    ``today()`` is the ET date the accept/reject rules compare against.
+    """
+    import os
+    env = os.environ if env is None else env
+    if not _enabled("CLAIRIC_DATES_ENABLED", env) and not _enabled("CLAIRIC_DATE_SANITY_ENABLED", env):
+        return found, None
+    chosen = found
+    flag = None
+    transport = None
+    clairic_answered = False
+    if _enabled("CLAIRIC_DATES_ENABLED", env):
+        try:
+            value, confidence = fetch(page_text, folder_date, env=env)
+        except MissingCredentials:
+            transport = "missing_credentials"
+        except ClairicError as exc:
+            transport = exc.reason
+        else:
+            clairic_answered = True
+            reject = reject_clairic(value, confidence, folder_date, today())
+            if reject is None:
+                _log("accepted", date_source="clairic")
+                return (value, "clairic", None, None), None
+            flag = reject
+    # A successful Clairic call that was not accepted still sanity-checks the ladder.
+    # A transport failure does not, unless the sanity flag is on by itself.
+    check_ladder = _enabled("CLAIRIC_DATE_SANITY_ENABLED", env) or clairic_answered
+    if check_ladder and chosen[0]:
+        failure = sanity_failure(chosen[0], folder_date, today())
+        if failure in {"future_date", "stale_vs_folder"} and folder_date:
+            chosen = (folder_date, "folder", None, None)
+            flag = failure
+    if transport or flag:
+        _log(transport or flag, date_flag=flag, date_source=chosen[1])
+    return chosen, flag
