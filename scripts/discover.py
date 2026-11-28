@@ -35,7 +35,6 @@ from db.readers import read_portfolio_positions, read_watchlist_tickers
 logger = logging.getLogger(__name__)
 from utils.market_calendar import (
     get_last_n_trading_days,
-    load_holidays,
     _is_trading_day,
 )
 from utils.darkpool_cache import get_cached_darkpool, set_cached_darkpool
@@ -51,18 +50,6 @@ try:
 except Exception:  # pragma: no cover — alerts layer optional
     def run_alerts_for_results(*args, **kwargs):  # type: ignore
         return 0
-
-# Keep for backward compatibility with existing tests
-MARKET_HOLIDAYS_2026 = load_holidays(2026)
-
-
-def is_market_open(date: datetime) -> bool:
-    """Check if market is open on a given date (date-only, no time check).
-
-    Backward-compatible wrapper used by existing tests and internal logic.
-    """
-    return _is_trading_day(date)
-
 
 # Scoring only needs direction, not the full 20k-print tape.
 # evaluate.py still walks DARKPOOL_MAX_PAGES (40).

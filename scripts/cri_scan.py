@@ -1560,10 +1560,6 @@ def _now_et(now: Optional[datetime] = None) -> datetime:
     return datetime.now(et)
 
 
-def is_market_open(now: Optional[datetime] = None) -> bool:
-    return is_market_open_et(now)
-
-
 def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
     """True once the official Cboe daily close should be available after 4:20pm ET."""
     now_et = _now_et(now)
@@ -1696,7 +1692,7 @@ def emit_html_report(html: str, out_path: Path, open_browser: bool = False) -> N
 def main():
     args = build_parser().parse_args()
 
-    market_open = is_market_open()
+    market_open = is_market_open_et()
 
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"CRI SCANNER — Crash Risk Index", file=sys.stderr)
