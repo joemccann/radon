@@ -143,8 +143,8 @@ chunked multi-row `INSERT ... ON CONFLICT(date) DO UPDATE`.
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only,
   `radonCapability = "read"`, static loader entry in
   `web/lib/assistant/nextLoaders.ts`.
-- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'rsi-oversold'`,
-  `fromDisk` = `data/rsi_oversold.json`.
+- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'rsi-oversold'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` — daily 16:40 ET timer with slack. Missing contract:
   HTTP 200 + frozen
   `{ missing: true, scan_time: null, data_date: null, current: null, series: [], threshold: null }`.

@@ -171,9 +171,9 @@ Also add `"credit-spread"` to
 Mirror yield-curve:
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`.
-- `dbFirstRead` — fromDb: latest `scan_snapshots WHERE service = 'credit-spread'`;
-  fromDisk: `../data/credit_spread.json`; `MAX_AGE_MS = 48h` (daily timer; older
-  means the writer is down); label `"credit-spread"`.
+- `dbFirstRead` — fromDb: latest `scan_snapshots WHERE service = 'credit-spread'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
+  `MAX_AGE_MS = 48h` (daily timer; older means the writer is down); label `"credit-spread"`.
 - `MISSING_CREDIT_SPREAD = { missing: true, scan_time: null, count: 0, series: [], current: null }`
   at HTTP 200, never 4xx.
 - `setCacheResponseHeaders(..., { maxAgeSeconds: 300, staleWhileRevalidateSeconds: 3600,
@@ -257,7 +257,7 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
 
 - `scripts/tests/test_credit_spread.py` — fixture parse pins, align, lookback,
   regime boundaries, payload, persist guards, migration 51 + idempotent upsert.
-- `web/tests/credit-spread-api.test.ts` — Turso beats older disk; disk fallback;
+- `web/tests/credit-spread-api.test.ts` —
   exact missing object at 200; no `yield-curve` leak; `dynamic === "force-dynamic"`.
 - `web/tests/credit-spread-panel.test.tsx` — helper pins, loader/empty/strip/title/
   brush/default-All, NaN guard (SPX close 0 on the log axis).
