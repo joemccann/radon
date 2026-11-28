@@ -1,3 +1,13 @@
+# Architecture entropy (2026-11-28)
+
+- [x] T1 depends_on: [] One catalog store. App job no longer copies frontier selection.
+- [ ] T2 depends_on: [T1] One knowledge query policy. Two transports, one decision.
+- [ ] T3 depends_on: [T2] Record what still needs a product yes. Do not move half-day clocks.
+
+## Review
+
+Catalog selectors and the Turso/JSON store now live in the gateway module. The app job writes that store after `refresh-catalog`.
+
 # Repair gateway model resolution on both hosts
 
 - [x] T1 depends_on: [] Compare deployed Mac and VPS behavior with main.
