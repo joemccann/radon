@@ -1489,3 +1489,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-607 | DONE | Serial `OSError: AF_UNIX path too long` at `idle.connect` (`/tmp/t607-serial.log`). Socket under `/tmp`. Green 1 passed; file 35 passed. Product source unchanged. Closing rounds: each full pytest had one xdist flake then a serial pass; 20,257/20,258/20,258 passed with 11 skipped and 40 subtests. Vitest 11,692 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed against `6dd0418de`. |
 | T-608 | DONE | Series type-check removed: 19 passed and payload kept `book XOFF` (`/tmp/t608-mutation.log`). New cases 1 failed / 18 passed (`/tmp/t608-red.log`). Restored product source. Green 19 passed ×3. Closing rounds: same as T-607. |
 | T-609 | DONE | Split-line `chown` of the expanded key: grep 1 passed, executing test failed (`/tmp/t609-red.log`). Restored product source. Green file 24 passed. Closing rounds: same as T-607. |
+
+## 2026-11-28
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-610 | DONE | Standing node: `assert 'grace_handler' in {}` (`/tmp/pytest-standing.log`). 16:00 clock window: 4 failed / 7 passed (`/tmp/t610-red.log`). Restored daemon. Walker requires a 15:55 session. Green 11 passed ×3. Product source unchanged. Closing rounds: r1 20,229 passed / 11 skipped; r2 credentials flake then serial 2 passed; r3 20,229 passed / 11 skipped. Vitest 11,701 passed / 21 skipped / 1,221 files each round. Cloud 58 failed / 4,319 passed / 23 skipped each round, 0 added / 0 removed vs `2a4616f12`. |
+| T-611 | DONE | Prior-tag clause removed: 83 passed (`/tmp/t611-mutation.log`). New case 1 failed / 1 passed, `assert [] == ['TSLA']` (`/tmp/t611-red.log`). Restored clause. Green 84 passed ×3. Product source unchanged. Closing rounds: same as T-610. |

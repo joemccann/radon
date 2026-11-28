@@ -12823,3 +12823,44 @@ Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | credentials clock flake and hundred-commit git 128, then serial 2 passed and 1 passed; 20,257 passed / 2 failed / 11 skipped / 40 subtests (175.83s) | 11,692 passed / 21 skipped / 1,218 files (101.18s) | 58 failed / 4,307 passed / 23 skipped (974.17s) | 0 added / 0 removed |
 | 2 | credentials clock flake then serial 11 passed; 20,258 passed / 1 failed / 11 skipped / 40 subtests (181.99s) | 11,692 passed / 21 skipped / 1,218 files (113.09s) | 58 failed / 4,307 passed / 23 skipped (1,141.10s) | 0 added / 0 removed |
 | 3 | CTA missing-key string flake then serial 33 passed; 20,258 passed / 1 failed / 11 skipped / 40 subtests (193.26s) | 11,692 passed / 21 skipped / 1,218 files (109.68s) | 58 failed / 4,307 passed / 23 skipped (973.64s) | 0 added / 0 removed |
+
+## Delta audit 2026-11-28
+
+Range `2a4616f1277f2eabfcd77e7e35103775fd7101c0..2bb298ee2a65bc24d9ea438b10757e994245e69a`: 135 commits, 50 non-merge, 109 paths. Checkpoint on issue #83 is `audited-through: 2a4616f1277f2eabfcd77e7e35103775fd7101c0`. It carried no open verified finding. No open `testing/` PR. Highest id before tonight T-609. Next ids T-610 and T-611.
+
+`vitest.config.ts` lines 75 / functions 71 / branches 65 (`vitest.config.ts:121-123`) and `.github/workflows/ci.yml` are unchanged in the range. The range adds no `pytest.mark.skip`, `xfail`, `it.skip`, or `test.skip`. Re-triaged `TEST_LOG.md`: historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence. No open finding to carry.
+
+Standing root pytest before the fix: 1 failed / 20,225 passed / 11 skipped / 40 subtests (`/tmp/pytest-standing.log`). The failure is `test_grace_handler_runs_at_close_plus_10_on_trading_day`. Serial re-run of that file failed the same way (`/tmp/pytest-grace-serial.log`). Delta Python files, three runs: 581 passed each. Delta Vitest, eight files, three runs: 122 passed each.
+
+### T-610 — P1 — the post-close grace walker treats a half day as a 16:00 close
+
+`scripts/config/market_early_closes.json:3` closes 2026-11-27 at 13:00. The morning of 2026-11-28, `recent_trading_day()` in `scripts/tests/test_monitor_daemon/test_post_close_grace.py` (pre-fix) walked only weekends and full holidays, so it stopped on that Friday. `at_close_plus` then demanded a cycle at 16:10. `MonitorDaemon._market_was_open_within_grace` (`scripts/monitor_daemon/daemon.py:236`) probes `market_state(now - grace_minutes)` and correctly stayed dark (`assert 'grace_handler' in {}`). A temporary 16:00 clock window in that method ran the handler at 16:10 on the half day, skipped the real close-plus-10, and also opened the weekend and the holiday (`/tmp/t610-red.log`, 4 failed / 7 passed). The product gate was restored unchanged.
+
+Acceptance: the walker returns a weekday still open at 15:55 ET. 16:10 on the latest early close does not run the grace handler. Ten minutes after that session's real close does. Putting the grace probe back on a 16:00 clock window fails both new cases.
+
+### T-611 — P1 — a carried name in a public tier drops its prior private tag, and the elimination test stays green
+
+`scripts/fetch_equibles_ats_venue_share.py:1131-1134` tags a carried name when `name in prior_private or name not in public_names`. `test_a_carried_name_outside_every_public_tier_is_tagged_even_when_the_prior_cache_did_not` (`scripts/tests/test_equibles_ats_venue_share.py:684`) covers only the elimination arm: a prior cache with no private tag, YOFF tagged, TSLA left public. Removing `name in prior_private or` left that file 83 passed (`/tmp/t611-mutation.log`) and published carried TSLA with an empty private tag. The demo strip depends on that tag.
+
+Acceptance: a carried name that a public tier holds stays in `private_tickers` when the prior cache tagged it private. Removing the prior-tag clause fails that case and leaves the elimination case green.
+
+Audited through: 2bb298ee2a65bc24d9ea438b10757e994245e69a on 2026-11-28 — 2 new findings
+
+## Remediation 2026-11-28
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-610 | DONE | Standing node failed with an empty result map. A 16:00 clock window: 4 failed / 7 passed (`/tmp/t610-red.log`). Restored `daemon.py`. Walker now requires `market_state` open at 15:55 (`test_post_close_grace.py:68`). Green: 11 passed ×3 (`/tmp/t610-green-1.log`). Product source unchanged. |
+| T-611 | DONE | Prior-tag clause removed: existing file 83 passed (`/tmp/t611-mutation.log`). New case: 1 failed / 1 passed, `assert [] == ['TSLA']` (`/tmp/t611-red.log`). Restored the clause. Green: 84 passed ×3 (`/tmp/t611-green-1.log`). Product source unchanged. |
+
+Delta files, three serial runs: Python 581 passed each (`/tmp/delta-pytest-1.log` through `-3`); Vitest 122 passed each, 8 files. Product source unchanged.
+
+### Closing gates 2026-11-28
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. Round 2 root pytest hit the known credentials deadline flake under load; the same node passed alone (2 passed in 0.65s, `/tmp/pytest-2-serial.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round on the same 58 nodes as a worktree of `2a4616f12` (0 added / 0 removed; sorted FAILED lists match). Those nodes are `test_app_runtime.py`, `test_control_service_wiring.py`, `test_ib_gateway_control.py`, `test_media_publication.py`, `test_monorepo_cutover.py`, `test_operator_topology_lifecycle.py`, and `test_sync_control_plane.py` (`pin[@]: unbound variable` under bash 3.2). Linux CI is the authority for that suite.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs `2a4616f12` |
+|---|---|---|---|---|
+| 1 | 20,229 passed / 11 skipped / 40 subtests (102.08s) | 11,701 passed / 21 skipped / 1,221 files (49.20s) | 58 failed / 4,319 passed / 23 skipped (949.49s) | 0 added / 0 removed |
+| 2 | credentials clock flake then serial 2 passed; 20,228 passed / 1 failed / 11 skipped / 40 subtests (163.46s) | 11,701 passed / 21 skipped / 1,221 files (101.31s) | 58 failed / 4,319 passed / 23 skipped (1,081.20s) | 0 added / 0 removed |
+| 3 | 20,229 passed / 11 skipped / 40 subtests (200.03s) | 11,701 passed / 21 skipped / 1,221 files (186.96s) | 58 failed / 4,319 passed / 23 skipped (1,169.45s) | 0 added / 0 removed |
