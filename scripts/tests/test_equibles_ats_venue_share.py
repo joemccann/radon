@@ -716,6 +716,39 @@ class TestRun:
         assert payload["carried_forward"] == ["TSLA", "YOFF"]
         assert payload["universe"]["private_tickers"] == ["YOFF"]
 
+    def test_a_carried_name_keeps_its_prior_private_tag_when_a_public_tier_holds_it(
+        self, monkeypatch,
+    ):
+        # TSLA is in this run's public index list, so elimination will not
+        # tag it. The prior cache already called it private. Dropping that
+        # tag publishes an account name the demo strip is supposed to drop.
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["AAPL", "TSLA"],
+                "core": ["AAPL"],
+                "walk": ["AAPL"],
+                "private": [],
+                "counts": {
+                    "portfolio": 1, "watchlist": 0, "ndx100": 1,
+                    "r2k": 0, "sp500": 0, "unique": 2, "core": 1,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA"],
+            },
+        )
+        self.mod.ATS_VENUE_SHARE_JSON.write_text(json.dumps({
+            "series": {
+                "TSLA": [{"week_start_date": "2026-01-05"}],
+            },
+            "universe": {"private_tickers": ["TSLA"], "index_offset": 0},
+        }))
+        client = self._client(["AAPL"])
+        payload = self.mod.run(client=client)
+        assert payload["carried_forward"] == ["TSLA"]
+        assert payload["universe"]["private_tickers"] == ["TSLA"]
+
     def test_override_run_tags_no_private_names(self):
         client = self._client(["AAPL"])
         payload = self.mod.run(client=client, tickers=["AAPL"])
