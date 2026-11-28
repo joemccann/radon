@@ -38,17 +38,18 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 try:
-    from utils.market_hours import is_market_open, get_market_status, get_last_market_close
+    from utils.market_calendar import is_market_open_et
+    from utils.market_hours import get_market_status, get_last_market_close
     MARKET_HOURS_AVAILABLE = True
 except ImportError:
     MARKET_HOURS_AVAILABLE = False
-    
-    def is_market_open():
-        return True  # Assume open if can't check
-    
+
+    def is_market_open_et():
+        return True  # Assume open if the calendar cannot be imported
+
     def get_market_status():
         return True, "UNKNOWN"
-    
+
     def get_last_market_close():
         return None
 
@@ -573,7 +574,7 @@ def format_table(analyses: list[PositionAnalysis], show_market_status: bool = Tr
     lines = []
     
     # Check market status and add indicator if closed
-    market_open = is_market_open()
+    market_open = is_market_open_et()
     if show_market_status and not market_open:
         _, status_msg = get_market_status()
         last_close = get_last_market_close()

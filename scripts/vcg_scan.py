@@ -42,6 +42,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from utils.market_calendar import is_market_open_et
+
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
 except Exception:  # pragma: no cover — DB layer optional
@@ -1046,11 +1048,6 @@ def generate_html_report(
     return html
 
 
-def is_market_open() -> bool:
-    from utils.market_calendar import is_market_open_et
-    return is_market_open_et()
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Cross-Asset Volatility-Credit Gap (VCG) Scanner",
@@ -1087,7 +1084,7 @@ Examples:
     proxy = args.proxy
     tickers = ["VIX", "VVIX", proxy]
 
-    market_open = is_market_open()
+    market_open = is_market_open_et()
 
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"VCG SCANNER — {proxy} vs VIX/VVIX", file=sys.stderr)
