@@ -111,8 +111,8 @@ recorded_at)`, idempotent `ON CONFLICT(date) DO UPDATE`, chunked.
 ## API — `web/app/api/hhlev/route.ts`
 
 - GET only, `dynamic = "force-dynamic"`, `runtime = "nodejs"`.
-- `dbFirstRead`: `fromDb` latest `scan_snapshots WHERE service = 'hhlev'`,
-  `fromDisk` `data/hhlev.json`.
+- `dbFirstRead`: `fromDb` latest `scan_snapshots WHERE service = 'hhlev'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` with comment: quarterly SOURCE, but a DAILY writer heartbeat —
   older than 48h means the writer is down, not the data stale.
 - Missing contract: HTTP 200 + frozen
@@ -173,7 +173,7 @@ recorded_at)`, idempotent `ON CONFLICT(date) DO UPDATE`, chunked.
   re-upsert behavior, write order (guard → rows → snapshot `hhlev` → health ok →
   atomic JSON), migration 0057 pin (schema, version 57, idempotent upsert), writer
   arity, payload contract keys, window-relative freshness.
-- `web/tests/hhlev-api.test.ts` — Turso-beats-disk, disk fallback, exact frozen
+- `web/tests/hhlev-api.test.ts` — exact frozen
   missing object at 200, no cross-service leak (a `margin-debt` snapshot must not
   serve), `route.dynamic === "force-dynamic"`.
 - `web/tests/hhlev-panel.test.tsx` — loader label, empty state, strip testids +

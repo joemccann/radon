@@ -1598,11 +1598,126 @@ install_grok_responder_code_from_tip() {
   return 0
 }
 
+# CIP-038: one `cat-file --batch` for the timer-owned set. Main deploys
+# spent 21-35s here with installed=0 (runs 45183187555, 45181898751,
+# 45179451125) because each of ~158 units spawned its own git and
+# sha256sum. Bytes still come from the root provision store. A batch
+# failure falls back to the per-unit read so an incompatible git cannot
+# skip an install.
+read_tip_unit_blobs() {
+  local tip="$1" stage="$2" names="$3"
+  local req="$stage/requests" raw="$stage/batch.raw" unit
+  : > "$req"
+  while IFS= read -r unit || [[ -n "$unit" ]]; do
+    [[ -n "$unit" ]] || continue
+    printf '%s\n' "${tip}:cloud/services/${unit}" >> "$req"
+  done < "$names"
+  if ! provision_git cat-file --batch < "$req" > "$raw"; then
+    return 1
+  fi
+  if ! "$SESSION_PYTHON" -I - "$raw" "$names" "$stage" "$SYSTEMD_UNIT_DIR" << 'PY'
+import hashlib
+import os
+import stat
+import sys
+
+raw_path, names_path, stage, unit_dir = sys.argv[1:5]
+
+
+def reject(name):
+    if (
+        not name
+        or "/" in name
+        or name in (".", "..")
+        or name.startswith(".")
+    ):
+        raise SystemExit("refusing unit name")
+
+
+def live_digest(unit):
+    path = os.path.join(unit_dir, unit)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return "-"
+    except OSError:
+        return "UNREADABLE"
+    if not stat.S_ISREG(info.st_mode):
+        return "UNREADABLE"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return "UNREADABLE"
+    try:
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+names = []
+with open(names_path, "r", encoding="utf-8") as handle:
+    for line in handle:
+        name = line.rstrip("\n")
+        if not name:
+            continue
+        reject(name)
+        names.append(name)
+
+with open(raw_path, "rb") as handle:
+    for unit in names:
+        header = handle.readline()
+        if not header:
+            raise SystemExit("short cat-file batch")
+        header = header.rstrip(b"\n")
+        meta_path = os.path.join(stage, unit + ".meta")
+        body_path = os.path.join(stage, unit + ".body")
+        if header.endswith(b" missing"):
+            with open(meta_path, "w", encoding="utf-8") as meta:
+                meta.write("MISSING\n")
+            continue
+        parts = header.split(b" ")
+        if len(parts) != 3 or not parts[2].isdigit():
+            raise SystemExit("bad cat-file header")
+        size = int(parts[2])
+        blob = handle.read(size)
+        trailer = handle.read(1)
+        if len(blob) != size or trailer != b"\n":
+            raise SystemExit("short cat-file object")
+        if parts[1] != b"blob":
+            with open(meta_path, "w", encoding="utf-8") as meta:
+                meta.write("NOTBLOB\n")
+            continue
+        body_fd = os.open(body_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(body_fd, blob)
+        finally:
+            os.close(body_fd)
+        with open(meta_path, "w", encoding="utf-8") as meta:
+            meta.write(
+                hashlib.sha256(blob).hexdigest() + " " + live_digest(unit) + "\n"
+            )
+    if handle.read(1):
+        raise SystemExit("trailing cat-file batch bytes")
+PY
+  then
+    return 1
+  fi
+}
+
 install_manifest_units() {
   local tip manifest line digest unit target candidate actual was_present backup
-  local -a new_timers=() skipped=()
+  local -a new_timers=() skipped=() pending_units=() pending_digests=()
   local installed=0 updated=0 unchanged=0 changed=0 entry
   local manifest_line_re='^([0-9a-f]{64})[[:space:]][[:space:]](radon-[a-zA-Z0-9_.@-]+\.(service|timer))$'
+  local blob_dir="" names="" use_batch=0 pending_count=0 fast=0
+  local blob_sha="" live_sha="" i=0
 
   [[ -n "$SYSTEMD_UNIT_DIR" ]] || {
     echo "unit install paths are not configured" >&2
@@ -1646,10 +1761,67 @@ install_manifest_units() {
       skipped+=("${unit} (symlinked-target)")
       continue
     fi
+    pending_units[$pending_count]="$unit"
+    pending_digests[$pending_count]="$digest"
+    pending_count=$((pending_count + 1))
+  done <<< "$manifest"
+
+  if (( pending_count > 0 )); then
+    blob_dir="$(mktemp -d "${STATE_DIR}/unit-blobs.XXXXXX")" || blob_dir=""
+    if [[ -n "$blob_dir" ]]; then
+      names="$blob_dir/names"
+      : > "$names"
+      i=0
+      while (( i < pending_count )); do
+        printf '%s\n' "${pending_units[$i]}" >> "$names"
+        i=$((i + 1))
+      done
+      if read_tip_unit_blobs "$tip" "$blob_dir" "$names"; then
+        use_batch=1
+      else
+        echo "install-units: batch blob read failed; reading each unit from the tip" >&2
+        use_batch=0
+      fi
+    fi
+  fi
+
+  i=0
+  while (( i < pending_count )); do
+    unit="${pending_units[$i]}"
+    digest="${pending_digests[$i]}"
+    i=$((i + 1))
+    target="${SYSTEMD_UNIT_DIR}/${unit}"
+    fast=0
+    if (( use_batch == 1 )) && [[ -f "$blob_dir/$unit.meta" ]]; then
+      blob_sha=""
+      live_sha=""
+      IFS=' ' read -r blob_sha live_sha < "$blob_dir/$unit.meta" || true
+      if [[ "$blob_sha" == "MISSING" ]]; then
+        skipped+=("${unit} (not-at-main-tip)")
+        continue
+      fi
+      if [[ "$blob_sha" == "$digest" && "$live_sha" == "$digest" ]]; then
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+      if [[ -n "$blob_sha" && "$blob_sha" != "NOTBLOB" && "$blob_sha" != "$digest" ]]; then
+        skipped+=("${unit} (manifest-mismatch)")
+        continue
+      fi
+      if [[ "$blob_sha" == "$digest" && "$live_sha" != "UNREADABLE" && -f "$blob_dir/$unit.body" ]]; then
+        fast=1
+      fi
+    fi
 
     candidate="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.candidate.XXXXXX")"
     chmod 0600 "$candidate"
-    if ! provision_git cat-file blob \
+    if (( fast == 1 )); then
+      if ! cat -- "$blob_dir/$unit.body" > "$candidate"; then
+        "$RM" -f "$candidate"
+        skipped+=("${unit} (not-at-main-tip)")
+        continue
+      fi
+    elif ! provision_git cat-file blob \
          "${tip}:cloud/services/${unit}" > "$candidate"; then
       "$RM" -f "$candidate"
       skipped+=("${unit} (not-at-main-tip)")
@@ -1708,7 +1880,12 @@ install_manifest_units() {
       installed=$((installed + 1))
       [[ "$unit" == *.timer ]] && new_timers+=("$unit")
     fi
-  done <<< "$manifest"
+  done
+
+  if [[ -n "$blob_dir" ]]; then
+    "$RM" -rf -- "$blob_dir"
+    blob_dir=""
+  fi
 
   if (( changed )); then
     systemctl_bounded daemon-reload || return $?

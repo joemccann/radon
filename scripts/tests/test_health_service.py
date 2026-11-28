@@ -1152,19 +1152,19 @@ def _app_host_units(gateway):
 
 
 def _most_recent_session_at_10_et():
-    """10:00 ET on the latest day the equity calendar calls an EXT session.
+    """Mid-session ET on the latest open day, derived from one live anchor.
 
-    A weekday walk treats an exchange holiday as mid-session. The dwell test
-    then feeds a closed day into a market-hours escalation.
+    probes judges "market closed" with the holiday-aware equity calendar, so a
+    weekday alone is not an open day: on an exchange holiday the clean-exit
+    gateway is correctly suppressed and this anchor would assert the wrong
+    state (2026-11-26, Thanksgiving).
     """
     anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         hour=10, minute=0, second=0, microsecond=0
     )
-    for _ in range(14):
-        if probes.is_equity_ext_session_et(anchor):
-            return anchor
+    while not probes.is_equity_ext_session_et(anchor):
         anchor -= datetime.timedelta(days=1)
-    raise AssertionError("no equity EXT session in the last 14 days")
+    return anchor
 
 
 class TestHostRoleApplicability:
@@ -1221,7 +1221,6 @@ class TestHostRoleApplicability:
         else:
             monkeypatch.setenv("RADON_HOST_ROLE", role)
         market_open = _most_recent_session_at_10_et()
-        assert probes.is_equity_ext_session_et(market_open), market_open
         body = probes.build_status(
             _healthy_app_host_probes("down"),
             _app_host_units(self._ABSENT_GATEWAY_UNIT),
@@ -1234,7 +1233,10 @@ class TestHostRoleApplicability:
         assert body["not_applicable"] == []
 
     @pytest.mark.parametrize("day, state", [
+        # Wednesday before Thanksgiving: open, the clean exit escalates.
         ("2026-11-25", "down"),
+        # Thanksgiving is a weekday but closed: the clean exit is suppressed
+        # and the broker unit stays out of the degraded reasons.
         ("2026-11-26", "degraded"),
     ])
     def test_gateway_clean_exit_suppression_follows_the_holiday_calendar(self, monkeypatch, day, state):
@@ -1250,5 +1252,7 @@ class TestHostRoleApplicability:
             now_et=at_10_et,
         )
         assert body["overall_state"] == state
+        # Both names stay visible as reasons either way; only the escalation
+        # of the clean-exit unit to a page follows the calendar.
         assert body["degraded_reasons"] == ["ib-gateway", "radon-ib-gateway.service"]
         assert body["not_applicable"] == []
