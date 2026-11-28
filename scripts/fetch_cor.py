@@ -21,8 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import statistics
 import sys
@@ -49,21 +47,10 @@ _TENOR_KEYS = tuple(symbol.lower() for symbol in _TENORS)
 
 
 def parse_index_csv(text: str) -> list[dict[str, Any]]:
-    """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
+    """Cboe CLOSE column. Pre-2022 OHLC on this feed is synthetic."""
+    from utils.cboe_csv import parse_daily_prices
 
-    Dates arrive MM/DD/YYYY; header and malformed rows (bad date, missing
-    or empty CLOSE) are skipped. CLOSE only — pre-2022 OHLC is synthetic.
-    """
-    rows: list[dict[str, Any]] = []
-    for raw in csv.DictReader(io.StringIO(text)):
-        try:
-            date = datetime.strptime((raw.get("DATE") or "").strip(), "%m/%d/%Y")
-            value = float(raw["CLOSE"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        rows.append({"date": date.date().isoformat(), "value": value})
-    rows.sort(key=lambda r: r["date"])
-    return rows
+    return parse_daily_prices(text, "CLOSE")
 
 
 def merge_series(by_tenor: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
