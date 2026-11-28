@@ -30,6 +30,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -407,8 +408,9 @@ class MenthorQDashboardClient:
             token = self._resolve_access_token()
             for attempt in range(2):
                 try:
-                    exposure = self._request_json(exposure_url, token)
-                    levels = self._request_json(levels_url, token)
+                    exposure, levels = self._fetch_exposure_pair(
+                        exposure_url, levels_url, token
+                    )
                     return self._normalize(symbol, frequency, exposure, levels)
                 except MenthorQDashboardAuthError:
                     if self._token_is_explicit:
@@ -735,18 +737,105 @@ class MenthorQDashboardClient:
                 "dashboard session jar could not be written"
             ) from exc
 
-    def _request_json(self, url: str, token: str) -> dict[str, Any]:
+    def _pair_timeout(self) -> float:
+        """Seconds left for both data GETs, read once before they overlap.
+
+        The cube and the level overlay share the wall-clock deadline. Each
+        leg is clamped to the remainder at pair start, never to a fresh
+        per-call cap.
+        """
         timeout = self._timeout_seconds
-        if self._request_deadline is not None:
-            remaining = self._request_deadline - time.monotonic()
-            if remaining <= 0:
-                raise MenthorQDashboardTimeoutError("dashboard provider timed out")
-            timeout = min(timeout, remaining)
+        if self._request_deadline is None:
+            return timeout
+        remaining = self._request_deadline - time.monotonic()
+        if remaining <= 0:
+            raise MenthorQDashboardTimeoutError("dashboard provider timed out")
+        return min(timeout, remaining)
+
+    def _exposure_leg_clients(self) -> tuple[Any, Any, list[requests.Session]]:
+        """One HTTP client per parallel GET.
+
+        ``requests.Session`` is not safe to share across threads. The caller
+        session serves one leg; a clone serves the other. Injected test
+        doubles are shared so a budget harness can count in-flight calls.
+        """
+        shared = self._http
+        if type(shared) is not requests.Session:
+            return shared, shared, []
+        clone = requests.Session()
+        clone.verify = shared.verify
+        clone.trust_env = shared.trust_env
+        clone.proxies = dict(shared.proxies)
+        clone.headers.update(shared.headers)
+        return shared, clone, [clone]
+
+    def _fetch_exposure_pair(
+        self, exposure_url: str, levels_url: str, token: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Overlap the independent cube and EOD level GETs.
+
+        A 401/403 on either leg still raises ``MenthorQDashboardAuthError``
+        so the caller retries both. Any other failure discards a sibling
+        success: this never returns a partial cube.
+        """
+        timeout = self._pair_timeout()
+        primary, secondary, owned = self._exposure_leg_clients()
+        payloads: dict[str, dict[str, Any]] = {}
+        errors: list[Exception] = []
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {
+                    pool.submit(
+                        self._request_json,
+                        url,
+                        token,
+                        http=client,
+                        timeout=timeout,
+                    ): name
+                    for name, url, client in (
+                        ("exposure", exposure_url, primary),
+                        ("levels", levels_url, secondary),
+                    )
+                }
+                for future, name in futures.items():
+                    try:
+                        payloads[name] = future.result()
+                    except Exception as exc:
+                        errors.append(exc)
+            auth_error = next(
+                (exc for exc in errors if isinstance(exc, MenthorQDashboardAuthError)),
+                None,
+            )
+            if auth_error is not None:
+                raise auth_error
+            if errors:
+                raise errors[0]
+            return payloads["exposure"], payloads["levels"]
+        finally:
+            for leg in owned:
+                leg.close()
+
+    def _request_json(
+        self,
+        url: str,
+        token: str,
+        *,
+        http: Any | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        client = self._http if http is None else http
+        if timeout is None:
+            timeout = self._timeout_seconds
+            if self._request_deadline is not None:
+                remaining = self._request_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise MenthorQDashboardTimeoutError("dashboard provider timed out")
+                timeout = min(timeout, remaining)
         try:
             # 2026-10-14: cf.menthorq.io's WAF answers 403 "Automated clients
             # are not allowed on this API." to non-browser UAs; the 401/403 ->
             # AuthError mapping below then forces a re-login + embargo.
-            response = self._http.get(
+            response = client.get(
                 url,
                 headers={
                     "Accept": "application/json",
