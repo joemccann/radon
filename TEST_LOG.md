@@ -1475,3 +1475,10 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | ID | Status | Evidence |
 |---|---|---|
 | T-603 | DONE | Live gateway call 1 failed in 43.41s (`/tmp/cta-serial-1.log`). Equality stayed green after one recorded `chat` (`/tmp/t603-harm.log`). Token-absent skip: 1 failed (`assert [] == ['chat']`, `/tmp/t603-red.log`), reverted. Green 33 passed ×3. Product source unchanged. Closing rounds: publisher AF_UNIX remains (T-602 on #1654). R1/r3 credentials xdist flake, serial 2 passed. Vitest 11,690 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `4d6687cf5`. |
+## 2026-11-26
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-604 | DONE | `cmd_serve` billion-slot semaphore: `assert 65 == 64` (`/tmp/t604-red.log`). Constant 100000: `assert 100000 == 64` (`/tmp/t604-red-constant.log`). Restored product source. Green 3 passed (`/tmp/t604-t605-green.log`). Product source unchanged. Closing rounds: root pytest red only on T-602 (and r2 T-603, r2/r3 credentials flake then serial 2 passed). Vitest 11,691 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `6dd0418de`. |
+| T-605 | DONE | `refuse_link` and the key-path check returning 0: `assert 0 == 77` (`/tmp/t605-red.log`, `/tmp/t605-red-inline.log`). Source greps had stayed green. Restored product source. Green in `/tmp/t604-t605-green.log`. Product source unchanged. Closing rounds: same as T-604. |
+| T-606 | DONE | Thanksgiving 10:00 ET is not an EXT session. Weekend-only helper: 3 failed / 3 passed, `assert 'degraded' == 'down'` (`/tmp/pytest-1-health-serial.log`). Helper walks closed days. Green 6 passed ×3 (`/tmp/t606-green.log`). Product source unchanged. Closing rounds: same as T-604. |
