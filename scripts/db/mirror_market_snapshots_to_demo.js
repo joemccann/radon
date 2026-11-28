@@ -179,18 +179,28 @@ export function stripAccountDerivedFields(table, row) {
   return { ...row, payload: JSON.stringify(payload) };
 }
 
-function upsertStatements(table, columns, rows) {
+// A row the strip rejects is not written, and the prune keeps the newest
+// DESTINATION row per key, so a row mirrored before it would keep serving.
+// rejectSql(row) deletes that key in the same batch: the demo panel goes
+// empty rather than stale.
+function upsertStatements(table, columns, rows, rejectSql) {
   const cols = columns.filter((c) => c !== "rn");
   const placeholders = cols.map(() => "?").join(", ");
   const sql = `INSERT OR REPLACE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`;
-  return rows
-    .map((r) => stripAccountDerivedFields(table, r))
-    .filter((r) => r !== null)
-    .map((r) => ({ sql, args: cols.map((c) => r[c] ?? null) }));
+  const statements = [];
+  for (const row of rows) {
+    const stripped = stripAccountDerivedFields(table, row);
+    if (stripped === null) {
+      if (rejectSql) statements.push(rejectSql(row));
+      continue;
+    }
+    statements.push({ sql, args: cols.map((c) => stripped[c] ?? null) });
+  }
+  return statements;
 }
 
 async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
-  const { maxAttempts, sleep, log, now, runId } = opts;
+  const { maxAttempts, sleep, log, now, runId, rejectSql } = opts;
   let result;
   try {
     result = await retryOperation({
@@ -211,7 +221,7 @@ async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
     return 0;
   }
   try {
-    const statements = upsertStatements(table, result.columns, result.rows);
+    const statements = upsertStatements(table, result.columns, result.rows, rejectSql);
     if (pruneSql) statements.push(pruneSql);
     await retryOperation({
       phase: `${table}:destination_write`,
@@ -301,7 +311,7 @@ export async function runMarketMirror({
          ) WHERE rn = 1`,
         `DELETE FROM ${table} WHERE (${key}, ${orderCol}) NOT IN (` +
           `SELECT ${key}, MAX(${orderCol}) FROM ${table} GROUP BY ${key})`,
-        opts,
+        { ...opts, rejectSql: (row) => ({ sql: `DELETE FROM ${table} WHERE ${key} = ?`, args: [row[key]] }) },
       );
     } catch { failures.push(table); }
   }

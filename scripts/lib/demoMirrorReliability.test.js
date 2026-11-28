@@ -521,13 +521,46 @@ describe("account-derived fields never reach the demo database", () => {
       runId: "strip-portfolio",
     });
 
-    const statements = dst.batch.mock.calls[0][0].filter((s) => s.args);
+    const statements = dst.batch.mock.calls[0][0].filter((s) => s.args && /^INSERT/.test(s.sql));
     const byService = Object.fromEntries(statements.map((s) => [s.args[0], JSON.parse(s.args[2])]));
     // A row the fetch did not tag cannot be classified, so it is dropped
     // whole rather than copied with only the counts removed.
     expect(byService["equibles-ats-venue-share"]).toBeUndefined();
     expect(JSON.stringify(statements)).not.toMatch(/\b(?:47|147|7)\b/);
     expect(byService.gex).toEqual({ counts: { portfolio: 3 } });
+  });
+
+  it("deletes the previously mirrored row for a service whose newest row the strip rejects", async () => {
+    // The per-key prune keeps the newest DESTINATION row per service. When
+    // the newest source row cannot be classified and is dropped, the row
+    // mirrored before it would keep serving. The rejected key is deleted in
+    // the same batch so the demo panel goes empty rather than stale.
+    const src = {
+      execute: vi.fn().mockResolvedValue({
+        columns: ["service", "scan_time", "payload", "rn"],
+        rows: [
+          { service: "equibles-ats-venue-share", scan_time: "2026-08-21T21:00:00Z", payload: JSON.stringify({ tickers: ["XOFF"] }), rn: 1 },
+          { service: "gex", scan_time: "2026-08-21T21:00:00Z", payload: "{}", rn: 1 },
+        ],
+      }),
+    };
+    const dst = { execute: vi.fn().mockResolvedValue({ rows: [] }), batch: vi.fn().mockResolvedValue(undefined) };
+
+    await runMarketMirror({
+      src,
+      dst,
+      tables: { latestOne: [], perKey: [PER_KEY.find((e) => e.table === "scan_snapshots")], history: [], purgedAccountTables: [] },
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      runId: "reject-deletes-stale",
+    });
+
+    const statements = dst.batch.mock.calls[0][0];
+    const upserts = statements.filter((s) => s.args && /^INSERT/.test(s.sql));
+    expect(upserts.map((s) => s.args[0])).toEqual(["gex"]);
+    const deletes = statements.filter((s) => s.args && /^DELETE FROM scan_snapshots WHERE service = \?$/.test(s.sql));
+    expect(deletes.map((s) => s.args)).toEqual([["equibles-ats-venue-share"]]);
+    expect(JSON.stringify(statements)).not.toContain("XOFF");
   });
 
   it("drops an ATS venue-share row whose private-name tag is missing or malformed", () => {
