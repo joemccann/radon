@@ -138,7 +138,7 @@ samples older than 120 sessions may be pruned by a later retention entry; not in
 
 ## API — `web/app/api/trin/route.ts`
 
-- GET only, `force-dynamic`, `nodejs`; `dbFirstRead` service `trin`, disk `data/trin.json`.
+- GET only, `force-dynamic`, `nodejs`; `dbFirstRead` service `trin`. No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 30 min` (5-minute RTH sampler; off-hours the last snapshot is the
   close and the panel shows its timestamp).
 - Missing contract: 200 + frozen `{ missing: true, scan_time: null, source: null, current: null, hourly: [], daily: [] }`.

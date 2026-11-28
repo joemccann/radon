@@ -142,7 +142,7 @@ Bootstrap: WordPress login, then click OIDC `input[name=authorize]` (page stays 
 
 ## Service Health Dual-Write
 
-Each scan subprocess records its own Turso snapshot + `service_health[<service>]=ok` row via `scripts/db/scan_mirror.py:mirror_scan_snapshot` (vcg-scan, scanner, discover, flow-analysis, performance, oi-changes, leap-scan, garch-scan; cri/gex inline the same pattern in `cri_scan.py`/`gex_scan.py`). The FastAPI process never writes the mirror — its synchronous libsql writes starved the event loop (see Event-Loop Discipline above). The row drives the banner staleness gate in `web/lib/serviceHealthWindows.ts`. A failed snapshot upsert records `state=error` with the detail; the `data/*.json` cache written by the route stays the fallback.
+Each scan subprocess records its own Turso snapshot + `service_health[<service>]=ok` row via `scripts/db/scan_mirror.py:mirror_scan_snapshot` (vcg-scan, scanner, discover, flow-analysis, performance, oi-changes, leap-scan, garch-scan; cri/gex inline the same pattern in `cri_scan.py`/`gex_scan.py`). The FastAPI process never writes the mirror. Its synchronous libsql writes starved the event loop (see Event-Loop Discipline above). The row drives the banner staleness gate in `web/lib/serviceHealthWindows.ts`. A failed snapshot upsert records `state=error` with the detail. The subprocess may still write `data/*.json` for Python readers. Next snapshot routes do not read that file; their fallback is the last good in-memory snapshot (`web/CLAUDE.md`).
 
 A scheduled service writing on every cycle is the only way the banner notices when a writer goes silent — handlers that short-circuit on "nochange" must still heartbeat. See `feedback_service_health_heartbeat.md`.
 

@@ -4,7 +4,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 
 Scheduled indicator units load `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is retired.
 
-A Next indicator route reads Turso through `dbFirstRead`, then the last good in-memory snapshot for that label. The writer's JSON file is not that read.
+A Next indicator route reads Turso through `dbFirstRead`, then the last good in-memory snapshot for that label. The writer's JSON file is not that read. When a spec's API section names that file as the route read, this sentence wins.
 
 | Slug | Route | Service | Spec |
 |---|---|---|---|

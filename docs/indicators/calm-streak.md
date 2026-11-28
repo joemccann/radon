@@ -171,8 +171,8 @@ while bounding the snapshot size). `current` is the latest daily row.
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only,
   `radonCapability = "read"`, static loader in `web/lib/assistant/nextLoaders.ts`.
-- `dbFirstRead`: latest `scan_snapshots WHERE service = 'calm-streak'`, disk
-  `data/calm_streak.json`.
+- `dbFirstRead`: latest `scan_snapshots WHERE service = 'calm-streak'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `CALM_STREAK_MAX_AGE_MS = 48h`: the timer fires twice every calendar day; older
   than 48h means the writer is down. Past it: `staleCollapse(MISSING_CALM_STREAK, result)`.
 - Missing contract (HTTP 200, exact):

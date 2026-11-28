@@ -147,7 +147,8 @@ Writer: `SKEW_UPSERT_SQL` (single-row, sqlite3-executable, args
 
 Copy the straddle route: GET only, `dynamic="force-dynamic"`,
 `runtime="nodejs"`, `dbFirstRead` (Turso `scan_snapshots service='skew'`
-latest, disk `data/skew.json`), `MAX_AGE_MS = 48h`, exact missing contract
+latest). No disk read. A failed Turso read serves the last good in-memory
+snapshot for that label. `MAX_AGE_MS = 48h`, exact missing contract
 above, and `setNoStoreResponseHeaders` so a minute snapshot cannot be hidden
 behind an intermediary cache. Hook `web/lib/useSkew.ts` uses GET-only
 `useSyncHook`: 60-second polling during RTH and paused polling while closed.

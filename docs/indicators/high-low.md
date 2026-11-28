@@ -126,7 +126,7 @@ unchanged; only changed history writes rows. Atomic JSON fallback
 ## API, schedule and UI
 
 GET `/api/high-low-line`: dynamic Node, capability read, explicit operatorOnly
-authorization before database/disk access. Bounded `dbExecute` and `dbFirstRead`
+authorization before the database read. Bounded `dbExecute` and `dbFirstRead`
 compare actual content scan_time. Authenticated absent data returns HTTP200:
 `{missing:true,degraded:false,scan_time:null,source_last_modified:null,data_date:null,
 expected_session_date:null,count:0,weekly_count:0,current:null,weekly_current:null,
