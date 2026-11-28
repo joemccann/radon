@@ -249,6 +249,8 @@ describe("LeapScanner", () => {
     );
   });
 
+  // Shard 6 timed this out at the 5s default under load (run 46094516127).
+  // The body is three header clicks, not a wait.
   it("defaults to Best Gap descending and sorts Ticker and Status on header click", () => {
     const three: LeapData = {
       ...leapData,
@@ -295,7 +297,7 @@ describe("LeapScanner", () => {
     expect(within(section).getByRole("columnheader", { name: /^status$/i }).getAttribute("aria-sort")).toBe(
       "ascending",
     );
-  });
+  }, 15_000);
 });
 
 describe("garchOrderHref", () => {

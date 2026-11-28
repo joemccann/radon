@@ -25,10 +25,6 @@ except ImportError:
 RUNBOOK = "docs/incident-runbook.md"
 
 
-def _is_market_open(now: datetime) -> bool:
-    return is_market_open_et(now)
-
-
 def _embargo_in_future(last_error: str | None, now: datetime) -> bool:
     if not last_error:
         return False
@@ -52,7 +48,7 @@ def _is_expected_quiet(row: dict, now: datetime) -> bool:
     """True for degraded rows that are documented-normal right now."""
     state = row.get("state")
     if state == "stale":
-        return not _is_market_open(now)
+        return not is_market_open_et(now)
     if state == "error":
         return _embargo_in_future(row.get("last_error"), now)
     return False

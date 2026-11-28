@@ -32,7 +32,6 @@ from clients.uw_client import (
 )
 from utils.market_calendar import (
     get_last_n_trading_days,
-    load_holidays,
     _is_trading_day,
 )
 from utils.darkpool_cache import (
@@ -95,10 +94,6 @@ MARKET_OPEN = time(9, 30)  # 9:30 AM ET
 MARKET_CLOSE = time(16, 0)  # 4:00 PM ET
 TRADING_DAY_MINUTES = 390  # 6.5 hours = 390 minutes
 ET = pytz.timezone('America/New_York')
-
-# Keep for backward compatibility with existing tests
-MARKET_HOLIDAYS_2026 = load_holidays(2026)
-
 
 def get_trading_day_progress() -> Tuple[float, bool, str]:
     """Calculate how far through the current trading day we are.
@@ -267,14 +262,6 @@ def interpolate_intraday_flow(
         },
         "notes": f"Interpolated from {trading_day_progress*100:.0f}% of trading day. Confidence: {confidence}."
     }
-
-
-def is_market_open(date: datetime) -> bool:
-    """Check if the market is open on a given date (date-only, no time check).
-
-    Backward-compatible wrapper used by existing tests.
-    """
-    return _is_trading_day(date)
 
 
 def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):

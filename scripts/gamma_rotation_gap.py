@@ -23,6 +23,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from utils.market_calendar import is_market_open_et
+
 HISTORY_DAYS = 90
 Z_WINDOW = 63
 MIN_OBSERVATIONS = 70
@@ -83,11 +85,6 @@ def _slope(values: List[float], length: int = 3) -> Optional[float]:
     if len(valid) < length + 1:
         return None
     return valid[-1] - valid[-1 - length]
-
-
-def is_market_open() -> bool:
-    from utils.market_calendar import is_market_open_et
-    return is_market_open_et()
 
 
 def _asset_state(net_gamma: float) -> str:
@@ -481,7 +478,7 @@ def fetch_and_build() -> Dict[str, Any]:
         spy_spot=spy_spot,
         tlt_spot=tlt_spot,
         scan_time=started,
-        market_open=is_market_open(),
+        market_open=is_market_open_et(),
     )
 
 
