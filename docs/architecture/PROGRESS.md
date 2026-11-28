@@ -37,3 +37,18 @@ Evidence: the check failed while both modules defined the grammar, then
 `22 passed` on the grammar and research date tests, `69 passed` on the
 model-gateway consumer and specialized suites, `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## ET calendar day
+
+Branch: `cursor/et-calendar-date-a8d8`. Independent of the other entropy PRs.
+It edits the same three jobs as the payload-rows PR, only the date helper.
+
+`market_calendar.et_calendar_date` is the ET calendar day of an instant.
+Earnings, catalysts, and informed flow bind it as `_et_today`.
+
+Anti-regression: `test_et_today_helper_is_not_copied`.
+
+Evidence: `89 passed` on the date helper, earnings, catalysts, informed
+flow, and the market-open cases that do not import the broker client.
+The broker-client cases need `python-dotenv`, which this environment
+does not have. CI has it.
