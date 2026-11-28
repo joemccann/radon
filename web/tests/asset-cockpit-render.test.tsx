@@ -24,7 +24,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import AssetCockpit, { type AssetCockpitProps } from "../components/ticker-detail/AssetCockpit";
 import { OrderActionsProvider } from "../lib/OrderActionsContext";
@@ -320,17 +320,20 @@ describe("AssetCockpit — held combo fixture", () => {
     expect(onDeckChange).toHaveBeenCalledWith("p");
   });
 
-  it("(f) the full position detail (legs / entry-mark-P&L cards) lives in the p-deck, not the act dock", () => {
+  it("(f) the full position detail (legs / entry-mark-P&L cards) lives in the p-deck, not the act dock", async () => {
     const { container } = renderCockpit({
       position: COMBO_POSITION,
       isSpreadNet: true,
       activeDeck: "p",
     });
 
-    // The full PositionTab card grid renders inside the open p-deck...
+    // The full PositionTab card grid renders inside the open p-deck. The deck
+    // chunk loads when the deck opens, so the grid arrives after the skeleton.
     const d = deck(container)!;
     expect(d).toBeTruthy();
-    expect(d.querySelector(".position-summary-grid")).toBeTruthy();
+    await waitFor(() => {
+      expect(d.querySelector(".position-summary-grid")).toBeTruthy();
+    });
 
     // ...and is NOT docked in the act column.
     const positionArea = container.querySelector(".act-position") as HTMLElement;
