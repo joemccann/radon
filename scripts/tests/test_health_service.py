@@ -1151,19 +1151,18 @@ def _app_host_units(gateway):
     }
 
 
-def _most_recent_weekday_at_10_et():
-    """10:00 ET on the latest day the equity session is actually open.
+def _most_recent_session_at_10_et():
+    """Mid-session ET on the latest open day, derived from one live anchor.
 
-    A holiday weekday is not a session. Thanksgiving 2026-11-26 is a Thursday,
-    so walking only to the latest weekday left the dwell fixture on a closed
-    day and the escalation correctly stayed degraded.
+    probes judges "market closed" with the holiday-aware equity calendar, so a
+    weekday alone is not an open day: on an exchange holiday the clean-exit
+    gateway is correctly suppressed and this anchor would assert the wrong
+    state (2026-11-26, Thanksgiving).
     """
-    from utils.market_calendar import is_equity_ext_session_et
-
     anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
         hour=10, minute=0, second=0, microsecond=0
     )
-    while not is_equity_ext_session_et(anchor):
+    while not probes.is_equity_ext_session_et(anchor):
         anchor -= datetime.timedelta(days=1)
     return anchor
 
@@ -1221,7 +1220,7 @@ class TestHostRoleApplicability:
             monkeypatch.delenv("RADON_HOST_ROLE", raising=False)
         else:
             monkeypatch.setenv("RADON_HOST_ROLE", role)
-        market_open = _most_recent_weekday_at_10_et()
+        market_open = _most_recent_session_at_10_et()
         body = probes.build_status(
             _healthy_app_host_probes("down"),
             _app_host_units(self._ABSENT_GATEWAY_UNIT),
@@ -1230,5 +1229,30 @@ class TestHostRoleApplicability:
             now_et=market_open,
         )
         assert body["overall_state"] == "down"
+        assert body["degraded_reasons"] == ["ib-gateway", "radon-ib-gateway.service"]
+        assert body["not_applicable"] == []
+
+    @pytest.mark.parametrize("day, state", [
+        # Wednesday before Thanksgiving: open, the clean exit escalates.
+        ("2026-11-25", "down"),
+        # Thanksgiving is a weekday but closed: the clean exit is suppressed
+        # and the broker unit stays out of the degraded reasons.
+        ("2026-11-26", "degraded"),
+    ])
+    def test_gateway_clean_exit_suppression_follows_the_holiday_calendar(self, monkeypatch, day, state):
+        monkeypatch.delenv("RADON_HOST_ROLE", raising=False)
+        at_10_et = datetime.datetime.fromisoformat(f"{day}T10:00:00").replace(
+            tzinfo=ZoneInfo("America/New_York")
+        )
+        body = probes.build_status(
+            _healthy_app_host_probes("down"),
+            _app_host_units(self._ABSENT_GATEWAY_UNIT),
+            "t",
+            units_age_secs=0,
+            now_et=at_10_et,
+        )
+        assert body["overall_state"] == state
+        # Both names stay visible as reasons either way; only the escalation
+        # of the clean-exit unit to a page follows the calendar.
         assert body["degraded_reasons"] == ["ib-gateway", "radon-ib-gateway.service"]
         assert body["not_applicable"] == []

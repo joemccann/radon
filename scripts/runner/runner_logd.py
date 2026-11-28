@@ -339,15 +339,20 @@ class LineScrubber:
     until its END.
     """
 
-    # Enough for a block body padded with blank lines; a header further back
-    # than this is out of context, which is the limit of streaming redaction.
+    # Enough for a block body padded with blank lines. While the context is
+    # still absorbing a value, its header is pinned as the oldest line so a
+    # body longer than the window cannot outlive the header that hides it;
+    # the pinned context is bounded in bytes by dropping its oldest body
+    # lines, never the header.
     CONTEXT_LINES = 64
+    CONTEXT_BYTES = 256 * 1024
 
     def __init__(self, env: dict) -> None:
         self.env = env
         self.in_block = False
         self.pending = ""
         self.recent: list[str] = []
+        self.absorbing = False
 
     def feed(self, fragment: str) -> str | None:
         self.pending += fragment
@@ -383,17 +388,30 @@ class LineScrubber:
         scrub = _load_scrubber()
         before = "".join(self.recent)
         self.recent.append(line + "\n")
-        del self.recent[: -self.CONTEXT_LINES]
+        self._trim()
         if scrub is None or not before:
             return scrub_line(line, self.env)
         prev = scrub(before)
         cur = scrub(before + line + "\n")
-        if not cur.startswith(prev):
-            return None
-        delta = cur[len(prev):].strip("\n")
-        if not delta or "\n" in delta:
+        delta = cur[len(prev):].strip("\n") if cur.startswith(prev) else ""
+        absorbed = not delta or "\n" in delta
+        if absorbed and not self.absorbing:
+            # The line before this one opened the value: keep it as the
+            # pinned header and let the context before it go.
+            del self.recent[:-2]
+        self.absorbing = absorbed
+        if absorbed:
             return None
         return scrub_line(delta, self.env)
+
+    def _trim(self) -> None:
+        if not self.absorbing:
+            del self.recent[: -self.CONTEXT_LINES]
+            return
+        if len(self.recent) > self.CONTEXT_LINES:
+            del self.recent[1 : -(self.CONTEXT_LINES - 1)]
+        while len(self.recent) > 2 and sum(map(len, self.recent)) > self.CONTEXT_BYTES:
+            del self.recent[1]
 
 
 def follow(file_path: Path, socket_path: str, loop: str) -> int:

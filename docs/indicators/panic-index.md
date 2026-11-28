@@ -538,9 +538,8 @@ date, `None` z / level / delta written as SQL `NULL`.
 Copy `web/app/api/vixts/route.ts` verbatim in shape.
 
 - `export const dynamic = "force-dynamic"; export const runtime = "nodejs"; export const radonCapability = "read";` GET only.
-- `dbFirstRead({ fromDb, fromDisk, maxAgeMs, label: "panic-index" })`.
+- `dbFirstRead({ fromDb, maxAgeMs, label: "panic-index" })`. No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `fromDb`: `SELECT scan_time, payload FROM scan_snapshots WHERE service = 'panic-index' ORDER BY scan_time DESC LIMIT 1`.
-- `fromDisk`: `data/panic_index.json`.
 - `maxAgeMs = getFreshnessWindowMs("panic-index", "closed")` from the shared
   catalog, **not** a private constant (SKILL.md §3; vol-cone `e7323e4e`).
 - Missing contract from §D at HTTP **200**, never a 4xx.
@@ -770,7 +769,7 @@ expected values derived by inspecting fixtures, never mental arithmetic:
 
 **`web/tests/panic-index-api.test.ts`** (`@vitest-environment node`) — mock
 `@/lib/db` with a real in-memory `@libsql/client` seeded from the migration:
-Turso beats older disk, disk fallback, the exact `missing:true` object at
+the exact `missing:true` object at
 **200**, no cross-service snapshot leak, `route.dynamic === "force-dynamic"`,
 `maxAgeMs` comes from `getFreshnessWindowMs`.
 

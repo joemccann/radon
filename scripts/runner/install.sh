@@ -927,15 +927,14 @@ install_log_daemon() {
   fi
   sudo -u "$LOGD_USER" /bin/chmod 600 "$LOGD_ROOT/daemon.log"
   # keys/ belongs to the daemon account. Root never chowns or chmods a
-  # name there it did not just create: a planted link would carry the
-  # change to whatever it points at.
+  # name there: the key is generated as that account, which already owns
+  # the 600 private and 644 public files the key generator writes, and a link
+  # swapped in between a root check-by-path and a root chown would carry
+  # the change to whatever it points at.
   [[ ! -L "$LOGD_ROOT/keys/id_ed25519" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
   [[ ! -L "$LOGD_ROOT/keys/id_ed25519.pub" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
   if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" ]]; then
     sudo -u "$LOGD_USER" /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-runner-logd -f "$LOGD_ROOT/keys/id_ed25519"
-    chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
-    chmod 600 "$LOGD_ROOT/keys/id_ed25519"
-    chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
   fi
   write_logd_config
   atomic_text "$LOGD_PLIST" 644 print_logd_plist

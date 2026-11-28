@@ -285,11 +285,14 @@ def test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key():
     block = body[body.index("if [[ ! -e \"$LOGD_ROOT/keys/id_ed25519\" ]]"):]
     block = block[: block.index("\n  fi\n")]
     assert "ssh-keygen" in block
-    assert block.count("chown") == 1 and block.count("chmod") == 2
-    after = body[keygen:].split("\n  fi\n", 1)[1]
-    for line in after.splitlines():
-        if "id_ed25519" in line:
-            assert "chown" not in line and "chmod" not in line
+    assert 'sudo -u "$LOGD_USER"' in block
+    # The keygen runs as the daemon account and already leaves 600/644 files
+    # it owns. Root never chowns or chmods a keys/ name afterwards: the
+    # check-by-path above and a later root chown are two steps a link swap
+    # fits between.
+    for line in body.splitlines():
+        if "keys/" in line and not line.lstrip().startswith("#"):
+            assert "chown" not in line and "chmod" not in line, line
 
 
 def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
@@ -379,6 +382,37 @@ def test_follow_context_outlives_a_long_block_body(logd):
     assert "opaquevalue" not in joined
     assert "next: ok" in joined
     assert logd.LineScrubber.CONTEXT_LINES >= 64
+
+
+def test_follow_keeps_the_header_while_a_value_is_still_being_absorbed(logd):
+    # The header of a block scalar must not age out of the context while
+    # its body is still open: the body lines after the window would scrub
+    # as plain text. The header is pinned until a line leaves the value.
+    scrubber = logd.LineScrubber({})
+    padding = logd.LineScrubber.CONTEXT_LINES + 8
+    lines = ["password: |\n"] + ["\n"] * padding + ["  opaquevalue123\n", "next: ok\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+    assert len(scrubber.recent) <= logd.LineScrubber.CONTEXT_LINES
+
+
+def test_follow_pinned_context_is_bounded_in_bytes(logd):
+    # Pinning must not turn an endless body into unbounded memory: the
+    # oldest body lines are dropped, the header stays, the value never
+    # leaks.
+    scrubber = logd.LineScrubber({})
+    filler = "  " + "x" * 4000 + "\n"
+    lines = ["password: |\n"] + [filler] * 200 + ["  opaquevalue123\n", "next: ok\n"]
+    out = []
+    for line in lines:
+        out.append(scrubber.feed(line))
+        assert sum(len(entry) for entry in scrubber.recent) <= logd.LineScrubber.CONTEXT_BYTES + len(filler)
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "xxxx" not in joined
+    assert "next: ok" in joined
 
 
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
