@@ -295,6 +295,60 @@ def test_logd_key_paths_refuse_a_symlink_and_root_only_touches_a_fresh_key():
             assert "chown" not in line and "chmod" not in line, line
 
 
+def test_fresh_key_is_generated_as_the_daemon_and_root_never_chowns_it(tmp_path):
+    # A chown of the key through a variable shares no source line with
+    # "keys/", so the grep above stays green. Run the key block. Root chown
+    # and chmod fail here even after the path is expanded.
+    body = INSTALL.read_text().split("install_log_daemon() {", 1)[1].split("\n}\n", 1)[0]
+    start = body.index('[[ ! -L "$LOGD_ROOT/keys/id_ed25519" ]]')
+    end = body.index("\n  write_logd_config\n", start)
+    block = body[start:end]
+    root = tmp_path / "runner-logs"
+    (root / "keys").mkdir(parents=True)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    trace = tmp_path / "trace"
+    sudo = bindir / "sudo"
+    sudo.write_text(
+        "#!/bin/bash\n"
+        'echo "sudo $*" >> "$TRACE"\n'
+        'if [[ "$1" == "-u" && "$3" == "/usr/bin/ssh-keygen" ]]; then\n'
+        '  prev=""\n'
+        '  key=""\n'
+        '  for arg in "$@"; do\n'
+        '    if [[ "$prev" == "-f" ]]; then key="$arg"; fi\n'
+        '    prev="$arg"\n'
+        '  done\n'
+        '  [[ -n "$key" ]] || exit 98\n'
+        '  : > "$key"\n'
+        '  : > "$key.pub"\n'
+        '  exit 0\n'
+        "fi\n"
+        'echo "unexpected sudo $*" >> "$TRACE"\n'
+        "exit 97\n"
+    )
+    sudo.chmod(0o755)
+    script = "set -u\nset -x\nrun_key_block() {\n" + block + "\n}\nrun_key_block\n"
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
+    env["TRACE"] = str(trace)
+    env["LOGD_ROOT"] = str(root)
+    env["LOGD_USER"] = "daemonacct"
+    env["LOGD_GROUP"] = "daemonacct"
+    out = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env, timeout=10)
+    key = root / "keys" / "id_ed25519"
+    assert key.is_file(), out.stderr
+    assert "sudo -u daemonacct /usr/bin/ssh-keygen" in trace.read_text()
+    for line in out.stderr.splitlines():
+        if not line.startswith("+"):
+            continue
+        stripped = line.lstrip("+").strip()
+        if stripped.startswith("sudo "):
+            continue
+        assert not re.search(r"(^|/)(chown|chmod)\b", stripped), line
+    assert out.returncode == 0, out.stderr
+
+
 def test_follow_drops_the_body_of_a_key_block_split_across_lines(logd):
     # follow() scrubs one readline fragment at a time. A key printed as
     # separate lines never shows BEGIN and END to the same scrub call, so
