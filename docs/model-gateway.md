@@ -39,7 +39,7 @@ Every rung resolves a model in this order (operator, 2026-11-22). An env overrid
 | Cursor | Unwired. No model id. |
 | NVIDIA, Cerebras | Paused, and still resolved the same way from the catalog. A stored key is used only to list models. `NVIDIA_*_MODEL` and `CEREBRAS_*_MODEL` override the id. There is no second pinned vision fallback. |
 
-Nemotron ids (`nvidia/nemotron…`) still send `reasoning_effort: none` and `stream: false`. Cerebras requests still send `reasoning_effort: none`. CLI binaries stay checksum and signature pinned. `.github/workflows/vendor-cli-latest.yml` opens a `factory/` pull request when a verified newer release exists.
+Nemotron ids (`nvidia/nemotron…`) still send `reasoning_effort: none` and `stream: false`. Cerebras requests still send `reasoning_effort: none`. CLI binaries stay checksum and signature pinned, and an Antigravity artifact is accepted only from Google's official release path on every platform (the pin bump verifier, the Linux image installer and the Mac installer all refuse any other host or a redirected download). `.github/workflows/vendor-cli-latest.yml` opens a `factory/` pull request when a verified newer release exists.
 
 ## Upgrades and rollback
 
