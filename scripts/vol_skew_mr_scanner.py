@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWClient, UWRateLimitError
 from strength_confirmation_scanner import resolve_tickers
+from utils.json_dict import read_json_dict
 from utils.scan_coverage import (
     coverage_block,
     is_coverage_failed,
@@ -582,7 +583,7 @@ def scan_universe(
             f"UW daily budget block; universe scan skipped ({source})",
             next_attempt_at=next_quota_reset_iso(),
         )
-        prior = _read_cache_file(_CACHE_PATH)
+        prior = read_json_dict(_CACHE_PATH)
         if payload_has_candidates(prior):
             return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}
         blocked = build_output(
@@ -662,17 +663,9 @@ def scan_universe(
     return payload
 
 
-def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> bool:
     payload = {key: value for key, value in payload.items() if key != "scan_status"}
-    prior = _read_cache_file(path)
+    prior = read_json_dict(path)
     if not should_persist_scan(payload, prior):
         print("Empty vol/skew MR scan — preserving last good cache", file=sys.stderr)
         return False

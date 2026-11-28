@@ -50,6 +50,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from clients.uw_client import UWClient, UWAPIError
 from utils.atomic_io import atomic_save
+from utils.json_dict import read_json_dict
 from utils.scan_health import (
     SCAN_STATUS_BUDGET_BLOCKED,
     next_quota_reset_iso,
@@ -755,14 +756,6 @@ def to_json(
     }
 
 
-def _read_cache_file(path: Path) -> Optional[Dict]:
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def budget_blocked_payload(universe: str, requested_tickers: List[str]) -> Dict:
     """Refuse a universe scan under the UW daily budget brake (theta precedent).
 
@@ -777,7 +770,7 @@ def budget_blocked_payload(universe: str, requested_tickers: List[str]) -> Dict:
         f"UW daily budget block; universe scan skipped ({universe})",
         next_attempt_at=next_quota_reset_iso(),
     )
-    prior = _read_cache_file(_CACHE_PATH)
+    prior = read_json_dict(_CACHE_PATH)
     if prior is None:
         prior = to_json({}, [], universe=universe, requested_tickers=requested_tickers)
     return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}

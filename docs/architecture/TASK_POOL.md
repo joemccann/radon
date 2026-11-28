@@ -10,11 +10,7 @@ Ranked by how much duplicated behavior a safe deletion removes.
    scan cache gate read it.
 3. TRIN hour buckets. `fetch_trin.py` bins samples on a fixed 09:30-16:00
    window. Changing it rewrites stored buckets. Pending.
-4. Identical scanner cache reads. `_read_cache_file` is the same body in
-   `bounce_setup_scanner`, `garch_convergence`, `strength_confirmation_scanner`,
-   `theta_harvester_scanner`, and `vol_skew_mr_scanner`. Worth one helper
-   only if the callers keep the same miss/corrupt contract.
-5. `server._is_market_open_now_et` and the handler `_is_trading_day_et`
+4. `server._is_market_open_now_et` and the handler `_is_trading_day_et`
    one-liners. They are patch seams with one body line. Low value until a
    caller can patch `is_market_open_et` / `is_trading_day_et` without
    widening the blast radius.

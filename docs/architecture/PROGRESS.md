@@ -69,3 +69,16 @@ Evidence: both checks failed while the two modules still defined the policy,
 then `95 passed` across the embed-rules, v2, pipeline, ingest-budget, and
 write-bounds suites, and `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## Round 5
+
+`read_json_dict` in `scripts/utils/json_dict.py` is now the miss / corrupt /
+non-object rule for the five scanner caches and the off-hours scan gate.
+Checksum writes stay on `atomic_save`.
+
+Anti-regression: `test_scanner_cache_reader_is_not_redefined` and
+`test_read_json_dict_contract`.
+
+Evidence: the redefinition check failed on the five scanners, then
+`164 passed` across the reader, the scan-cache gate, and the five scanner
+suites.
