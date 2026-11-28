@@ -425,9 +425,10 @@ const MISSING_VIX_PC = {
 const VIX_PC_MAX_AGE_MS = 48 * 60 * 60_000;
 ```
 
-`dbFirstRead({ fromDb, fromDisk, maxAgeMs: VIX_PC_MAX_AGE_MS, label: "vix-pc" })`.
+`dbFirstRead({ fromDb, maxAgeMs: VIX_PC_MAX_AGE_MS, label: "vix-pc" })`.
 `fromDb` selects `scan_snapshots` `WHERE service = 'vix-pc' ORDER BY
-scan_time DESC LIMIT 1`. `fromDisk` reads `data/vix-pc.json`.
+scan_time DESC LIMIT 1`. No disk read. A failed Turso read serves the last
+good in-memory snapshot for that label.
 `setCacheResponseHeaders(..., { maxAgeSeconds: 300,
 staleWhileRevalidateSeconds: 3600, tags: ["vix-pc"] })`. Never
 transform. Never 4xx.
@@ -519,8 +520,7 @@ prefix it could collide with. There is no `vix` tab today; keep
    Jan 2025 coverage; migration 97 schema + upsert idempotency + 400-row
    chunks; unchanged path heartbeats without row upserts; UW raise +
    cache → `stale_source`; no cache → raise; writer arity.
-2. `web/tests/vix-pc-api.test.ts`  -  Turso beats older disk; disk
-   fallback; exact `MISSING_VIX_PC` at 200; no cross-service leak;
+2. `web/tests/vix-pc-api.test.ts`  -  exact `MISSING_VIX_PC` at 200; no cross-service leak;
    `dynamic === "force-dynamic"`; cache tag `vix-pc`.
 3. `web/tests/vix-pc-panel.test.tsx`  -  loader label; empty state; strip
    values; freshness rail (`vix-pc-freshness-rail` / `vix-pc-strip-asof`

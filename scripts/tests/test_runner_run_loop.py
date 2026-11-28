@@ -451,6 +451,16 @@ def test_a_clone_failure_is_reported(rig, tmp_path):
     assert note["title"] == "radon doc: FAILED" and "could not clone" in note["message"]
 
 
+def test_the_log_follower_starts_only_after_the_secrets_are_loaded():
+    # scrub_line redacts the values of the loaded secrets from the follower's
+    # environment. A follower forked before load_secrets never sees them.
+    src = RUNNER.read_text()
+    config = src.split("load_config() {", 1)[1].split("\n}\n", 1)[0]
+    assert "start_log_follow" not in config
+    main = src.split("\nmain() {", 1)[1].split("\n}\n", 1)[0]
+    assert main.index("load_secrets") < main.index("start_log_follow") < main.index("acquire_lock")
+
+
 def test_installed_daemon_runs_the_root_owned_runner_as_the_bot_user():
     import plistlib
 

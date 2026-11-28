@@ -81,8 +81,11 @@ line here whenever you ship a security fix.**
   (`universe.counts.portfolio`) rode into the demo database inside a flow snapshot.
   `stripAccountDerivedFields` (`scripts/db/mirror_market_snapshots_to_demo.js`) is the
   mirror-side chokepoint; a new producer that folds account state into a shared
-  snapshot table must be added there, not trusted to the table allowlist.
-  (`scripts/lib/demoMirrorReliability.test.js`)
+  snapshot table must be added there, not trusted to the table allowlist. The strip
+  fails closed: a payload whose private-name tag (`universe.private_tickers`) is not an
+  array of names, or whose per-ticker entries are not objects naming their ticker, is
+  dropped whole, so a legacy or reshaped row cannot carry a name the strip could not
+  classify. (`scripts/lib/demoMirrorReliability.test.js`)
 - **The deliver check-name floor is the union of the verified head and the forge's `main`** —
   the head's workflow files are the agent's own branch, and everything in the clone
   (config, refs, object store; `git show` does not hash-verify what it reads) plus the

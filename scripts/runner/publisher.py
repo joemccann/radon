@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import socket
+import time
 import stat
 import subprocess
 import sys
@@ -327,7 +328,14 @@ def validate(data: object) -> dict:
 def _github_url(url: str) -> None:
     if not url.startswith("https://github.com/") or "@" in url or "\\" in url:
         raise Rejected("url")
+    if "?" in url or "#" in url or any(ch.isspace() for ch in url) or not url.isprintable():
+        raise Rejected("url")
     rest = url.removeprefix("https://github.com/")
+    segments = rest.split("/")
+    if segments[-1] == "":
+        segments = segments[:-1]
+    if any(segment in ("", ".", "..") for segment in segments):
+        raise Rejected("url")
     if rest.startswith("joemccann/radon/") or rest.startswith("joemccann/radon-security-reports/"):
         return
     raise Rejected("url")
@@ -388,7 +396,9 @@ def read_confined(roots: list[Path], path: Path, client_uid: int, limit: int) ->
             nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
             os.close(dir_fd)
             dir_fd = nxt
-        file_fd = os.open(rel[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        # O_NONBLOCK: a FIFO planted at the name opens at once instead of
+        # holding the daemon until a writer shows up; fstat then rejects it.
+        file_fd = os.open(rel[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
         info = os.fstat(file_fd)
         if not stat.S_ISREG(info.st_mode):
             raise Rejected("path")
@@ -433,11 +443,24 @@ def peer_uid(conn: socket.socket) -> int:
     return int(uid.value)
 
 
-def _recv_all(conn: socket.socket) -> bytes:
+def _recv_all(conn: socket.socket, deadline: float = CONNECTION_TIMEOUT) -> bytes:
+    """Read until EOF, bounded by size and by an absolute deadline.
+
+    The socket timeout alone is per recv: a client trickling one byte at a
+    time would hold the loop open indefinitely.
+    """
     chunks: list[bytes] = []
     total = 0
+    end = time.monotonic() + deadline
     while total <= MAX_REQUEST:
-        blob = conn.recv(65536)
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            raise Rejected("timeout")
+        conn.settimeout(remaining)
+        try:
+            blob = conn.recv(65536)
+        except socket.timeout as exc:
+            raise Rejected("timeout") from exc
         if not blob:
             break
         total += len(blob)
@@ -589,12 +612,23 @@ class RealOps:
 
     def edit_draft(self, caller: str, branch: str, pr: str, title: str, body: str) -> dict:
         del caller
-        viewed = self._gh(["pr", "view", pr, "--repo", RADON_REPO, "--json", "isDraft,headRefName"], stdin=None)
+        viewed = self._gh(
+            ["pr", "view", pr, "--repo", RADON_REPO, "--json", "isDraft,headRefName,isCrossRepository,headRepositoryOwner"],
+            stdin=None,
+        )
         try:
             payload = json.loads(viewed.stdout)
         except json.JSONDecodeError as exc:
             raise Rejected("pr_state") from exc
-        if payload.get("isDraft") is not True or payload.get("headRefName") != branch:
+        # A fork can reuse a runner branch name: the edit is confined to a
+        # draft whose head lives in this repository.
+        owner = payload.get("headRepositoryOwner") or {}
+        if (
+            payload.get("isDraft") is not True
+            or payload.get("headRefName") != branch
+            or payload.get("isCrossRepository") is not False
+            or owner.get("login") != RADON_REPO.split("/", 1)[0]
+        ):
             raise Rejected("not_draft")
         return self._gh_draft(["pr", "edit", pr, "--repo", RADON_REPO], title, body)
 
@@ -817,6 +851,10 @@ def handle_payload(raw: bytes, *, peer: int, cfg: Config, ops: object) -> dict:
         result = "rejected"
         reason = exc.code
         return {"ok": False, "error": exc.code}
+    except Exception:  # noqa: BLE001 - a malformed shape must never end the serving loop
+        result = "rejected"
+        reason = "internal"
+        return {"ok": False, "error": "internal"}
     finally:
         try:
             log_request(cfg.log_path, peer=peer, op=op, caller=caller, branch=branch, result=result, reason=reason)
@@ -846,7 +884,11 @@ def serve_once(cfg: Config, ops: object, *, timeout: float = 5.0) -> None:
 
 
 def _answer(conn: socket.socket, cfg: Config, ops: object) -> None:
-    raw = _recv_all(conn)
+    try:
+        raw = _recv_all(conn, deadline=conn.gettimeout() or CONNECTION_TIMEOUT)
+    except Rejected as exc:
+        conn.sendall(json.dumps({"ok": False, "error": exc.code}).encode() + b"\n")
+        return
     try:
         uid = peer_uid(conn)
     except (OSError, Rejected):
