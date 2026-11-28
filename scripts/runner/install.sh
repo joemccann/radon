@@ -69,6 +69,15 @@ PUB_ROOT="${RADON_PUBLISHER_ROOT:-/Library/Radon/publisher}"
 # and the clone, scripts/ and everything copied held to the same bar with no
 # sticky exemption and no symlinks. RADON_RUNNER_INSTALL_TRUSTED_UID narrows
 # the trusted uid for tests and is ignored as root.
+# Root installs children inside a directory a service account owns. A link
+# planted there would carry install -d's owner and mode to its target.
+refuse_link() {
+  local path
+  for path in "$@"; do
+    [[ ! -L "$path" ]] || { echo "refusing to install: $path is a symlink" >&2; return 77; }
+  done
+}
+
 check_source() {
   local uid bad dir tree
   refuse() {
@@ -893,6 +902,9 @@ EOF
 # previously installed job so the six-hour updater cannot keep it active.
 install_log_daemon() {
   local status label=com.radon.runner-logd
+  # The flag probe runs a helper from the source tree with the caller's
+  # privileges, so the tree is validated before anything in it executes.
+  check_source
   status="$("$GUARD_PYTHON" -I "$SRC/runner_logd.py" flag-status --flag "$LOGD_FLAG")" || status=disabled
   if [[ "$status" != enabled ]]; then
     if [[ -f "$LOGD_PLIST" && ! -L "$LOGD_PLIST" ]]; then
@@ -903,22 +915,27 @@ install_log_daemon() {
     return 0
   fi
   [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; return 1; }
-  check_source
   ensure_logd_user
+  refuse_link "$LOGD_ROOT" "$LOGD_ROOT/keys" "$LOGD_ROOT/repo" || return 77
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 710 "$LOGD_ROOT"
   install -d -o "$LOGD_USER" -g "$LOGD_GROUP" -m 700 "$LOGD_ROOT/keys" "$LOGD_ROOT/repo"
+  # Created and tightened as the daemon account: a link swapped in after a
+  # root check-by-path would otherwise receive root's chown and chmod.
   [[ ! -L "$LOGD_ROOT/daemon.log" ]] || { echo "log daemon output is a symlink" >&2; return 77; }
   if [[ ! -e "$LOGD_ROOT/daemon.log" ]]; then
     sudo -u "$LOGD_USER" /usr/bin/touch "$LOGD_ROOT/daemon.log"
   fi
-  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/daemon.log"
-  chmod 600 "$LOGD_ROOT/daemon.log"
-  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" && ! -L "$LOGD_ROOT/keys/id_ed25519" ]]; then
+  sudo -u "$LOGD_USER" /bin/chmod 600 "$LOGD_ROOT/daemon.log"
+  # keys/ belongs to the daemon account. Root never chowns or chmods a
+  # name there: the key is generated as that account, which already owns
+  # the 600 private and 644 public files the key generator writes, and a link
+  # swapped in between a root check-by-path and a root chown would carry
+  # the change to whatever it points at.
+  [[ ! -L "$LOGD_ROOT/keys/id_ed25519" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
+  [[ ! -L "$LOGD_ROOT/keys/id_ed25519.pub" ]] || { echo "log daemon key path is a symlink" >&2; return 77; }
+  if [[ ! -e "$LOGD_ROOT/keys/id_ed25519" ]]; then
     sudo -u "$LOGD_USER" /usr/bin/ssh-keygen -t ed25519 -N "" -C radon-runner-logd -f "$LOGD_ROOT/keys/id_ed25519"
   fi
-  chown "$LOGD_USER:$LOGD_GROUP" "$LOGD_ROOT/keys/id_ed25519" "$LOGD_ROOT/keys/id_ed25519.pub"
-  chmod 600 "$LOGD_ROOT/keys/id_ed25519"
-  chmod 644 "$LOGD_ROOT/keys/id_ed25519.pub"
   write_logd_config
   atomic_text "$LOGD_PLIST" 644 print_logd_plist
   plutil -lint "$LOGD_PLIST" >/dev/null
@@ -954,6 +971,7 @@ install_publisher() {
   if [[ ! -d /Library/Radon ]]; then
     install -d -o root -g wheel -m 755 /Library/Radon
   fi
+  refuse_link "$PUB_ROOT" "$PUB_ROOT/secrets" "$PUB_ROOT/log" "$PUB_ROOT/tmp" "$PUB_ROOT/run" || return 77
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT"
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 700 "$PUB_ROOT/secrets" "$PUB_ROOT/log" "$PUB_ROOT/tmp"
   install -d -o "$PUB_USER" -g "$PUB_CONNECT_GROUP" -m 750 "$PUB_ROOT/run"

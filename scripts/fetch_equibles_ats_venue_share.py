@@ -721,9 +721,14 @@ def merge_ats_universe(
     }
     tickers = unique_symbols(*(tiers[name] for name in UNIVERSE_TIERS))
     core = unique_symbols(tiers["portfolio"], tiers["watchlist"])
+    # A portfolio name no public tier carries is account-derived: its
+    # presence alone reveals an open position. The demo mirror strips them.
+    public = set(unique_symbols(*(tiers[name] for name in UNIVERSE_TIERS[1:])))
+    private = [ticker for ticker in tiers["portfolio"] if ticker not in public]
     return {
         "tickers": tickers,
         "core": core,
+        "private": private,
         "tiers": tiers,
         "counts": {
             **{name: len(tiers[name]) for name in UNIVERSE_TIERS},
@@ -1054,12 +1059,14 @@ def run(
         start=int(schedule.get("index_offset") or 0),
         attempted=index_attempted,
     )
+    private_tickers = set(schedule.get("private") or [])
     universe_meta = {
         "order": list(UNIVERSE_TIERS),
         "counts": schedule.get("counts") or {},
         "core": len(must),
         "this_cycle": covered,
         "index_offset": next_offset,
+        "private_tickers": sorted(private_tickers),
     }
 
     payload = build_payload(series_by_ticker, scan_time, errors)
@@ -1116,6 +1123,17 @@ def run(
     else:
         merged, carried = _merge_prior_series(series_by_ticker, prior_series)
     if carried:
+        # A carried name is outside this run's walk, so the tag cannot come
+        # from the fetch. The prior tag is honoured, and a name no public
+        # tier of the current universe holds is account-derived by
+        # elimination (a prior cache written before the tag existed, or a
+        # tag lost along the way, must not publish it).
+        prior_private = set(((prior or {}).get("universe") or {}).get("private_tickers") or [])
+        public_names = set(schedule.get("tickers") or []) - set(schedule.get("private") or [])
+        private_tickers.update(
+            name for name in carried if name in prior_private or name not in public_names
+        )
+        universe_meta["private_tickers"] = sorted(private_tickers)
         payload = {
             **build_payload(merged, scan_time, errors),
             "carried_forward": carried,
