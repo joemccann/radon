@@ -1462,3 +1462,11 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 |---|---|---|
 | T-598 | DONE | Serial `OSError: AF_UNIX path too long` / `unavailable` / missing sock (`/tmp/pytest-runner-serial-1.log`). Sockets under `/tmp`. Green 4 passed; files 177 passed. Product source unchanged. Closing rounds: r1/r2 20,141 passed; r3 credentials xdist flake then serial 11 passed. Vitest 11,681 passed / 21 skipped / 1,215 files each round. Cloud 58 failed / 4,293 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
 | T-599 | DONE | Hartnett byline `PublicationAdmissionError: EQUITY_RESEARCH_SUBJECT_UNRESOLVED` (`/tmp/t599-red.log`). `page_text` is body then title. Green 2 passed ×3; blast 273 passed. Closing rounds: same as T-598. |
+
+## 2026-11-24
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-600 | DONE | Hourly mutation: panel 27 passed, hook poll 1 failed (`expected 1 to be 2`, `/tmp/t600-red.log`). Restored `300_000`. Green 2 passed ×3. Product source unchanged. Closing rounds: root pytest load flake then serial green each round; 20,201 passed / 11 skipped / 40 subtests. Vitest 11,692 passed / 21 skipped / 1,220 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
+| T-601 | DONE | Dropped `with shared_browser():` left the substring check 3 passed (`/tmp/t601-harm-green.log`). AST walk 1 failed at `generate_gex_share.py:663` (`/tmp/t601-red.log`). Restored wrapper. Green 4 passed ×3. Product source unchanged. Closing rounds: same as T-600. |
+| T-602 | DONE | Serial `OSError: AF_UNIX path too long` (`/tmp/pytest-1-serial.log`). Socket under `/tmp`. Green 1 passed; file 23 passed ×3. Product source unchanged. Closing rounds: same as T-600. |
