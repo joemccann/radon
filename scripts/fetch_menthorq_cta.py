@@ -38,7 +38,7 @@ from utils.env_loader import load_env_file
 from utils.atomic_io import atomic_save
 from utils.cta_percentiles import reconcile_tables
 from utils.cta_sync_health import fill_missing_cta_tables
-from utils.market_calendar import is_market_open_et, most_recent_session_date
+from utils.market_calendar import most_recent_session_date
 
 # Load .env from project root (before any os.environ reads)
 load_env_file(_PROJECT_DIR / ".env")
@@ -50,10 +50,6 @@ CTA_TABLES = {
     "commodity": "cta_commodity",
     "currency": "cta_currency",
 }
-
-def is_market_open() -> bool:
-    return is_market_open_et()
-
 
 def resolve_trading_date() -> str:
     """Return the latest trading session date (YYYY-MM-DD): today once the
