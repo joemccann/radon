@@ -293,12 +293,32 @@ class TestGracefulDegradation:
             == TEMPLATE
         )
 
-    def test_missing_api_key_never_reaches_the_network(self):
+    def test_missing_api_key_never_reaches_the_network(self, monkeypatch):
+        """A missing grant returns the template through the stubbed gateway only.
+
+        The previous body called the real gateway whenever this process had
+        RADON_MODEL_GATEWAY_SOCKET set, then compared the string to the
+        template. A down socket still passed after the attempt. A live socket
+        spent the model budget and failed on whatever prose came back.
+        """
+        from model_gateway.client import GatewayError
+
+        calls = []
+
+        def gateway(operation, payload, **kwargs):
+            calls.append((operation, payload))
+            raise GatewayError("unavailable")
+
+        monkeypatch.delenv("RADON_MODEL_GATEWAY_SOCKET", raising=False)
+        monkeypatch.setattr(cta_llm, "gateway_request", gateway)
+
         out = cta_llm.generate_share_copy(
             FACTS, TEMPLATE, env={"RADON_CTA_LLM_COPY": "1"}
         )
 
         assert out == TEMPLATE
+        assert [item[0] for item in calls] == ["chat"]
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in repr(calls)
 
     def test_injected_env_never_falls_back_to_the_project_env_files(self, monkeypatch):
         """An explicit mapping is authoritative; only os.environ reads .env."""
