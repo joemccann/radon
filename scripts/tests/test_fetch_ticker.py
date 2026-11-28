@@ -7,7 +7,6 @@ from unittest.mock import patch, MagicMock
 from clients.uw_client import UWNotFoundError, UWAPIError
 
 from fetch_ticker import (
-    is_market_open,
     get_last_n_trading_days,
     load_cache,
     save_cache,
@@ -15,6 +14,7 @@ from fetch_ticker import (
     cache_ticker,
     fetch_ticker_info,
 )
+from utils.market_calendar import is_trading_day_et
 
 
 # ── Cache operations ────────────────────────────────────────────────
@@ -59,13 +59,13 @@ class TestCacheOperations:
 
 class TestMarketCalendar:
     def test_weekday(self):
-        assert is_market_open(datetime(2026, 3, 3)) is True
+        assert is_trading_day_et(datetime(2026, 3, 3)) is True
 
     def test_weekend(self):
-        assert is_market_open(datetime(2026, 3, 7)) is False
+        assert is_trading_day_et(datetime(2026, 3, 7)) is False
 
     def test_holiday(self):
-        assert is_market_open(datetime(2026, 1, 19)) is False
+        assert is_trading_day_et(datetime(2026, 1, 19)) is False
 
     def test_trading_days_count(self):
         dt = datetime(2026, 3, 4, 17, 0)
