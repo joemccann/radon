@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-27T10:00:08Z",
-  "node_count": 4396,
-  "edge_count": 8950,
+  "generated_at": "2026-11-28T10:00:08Z",
+  "node_count": 4410,
+  "edge_count": 8964,
   "areas": {
-    "web": 2427,
+    "web": 2430,
     "site": 134,
-    "scripts": 1616,
-    "cloud": 176,
+    "scripts": 1625,
+    "cloud": 178,
     "lib": 25,
     "tests": 15,
     "tools": 3
@@ -60,7 +60,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 1179
+      "count": 1182
     },
     {
       "id": "site/app",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/model_gateway",
       "area": "scripts",
-      "count": 23
+      "count": 24
     },
     {
       "id": "scripts/monitor_daemon",
@@ -240,7 +240,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 881
+      "count": 889
     },
     {
       "id": "scripts/trade_blotter",
@@ -285,7 +285,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 151
+      "count": 153
     },
     {
       "id": "lib/tools",
@@ -581,17 +581,17 @@
       "test": false
     },
     {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 40,
+      "id": "scripts/utils/market_calendar.py",
+      "area": "scripts",
+      "in": 41,
       "out": 0,
       "test": false
     },
     {
-      "id": "web/lib/TickerDetailContext.tsx",
+      "id": "web/components/RegimeStrip.tsx",
       "area": "web",
-      "in": 38,
-      "out": 2,
+      "in": 40,
+      "out": 0,
       "test": false
     }
   ],
