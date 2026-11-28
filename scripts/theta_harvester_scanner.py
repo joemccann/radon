@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import threading
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -502,6 +503,49 @@ def _prices_from_ohlc(payload: Any) -> List[float]:
     return prices
 
 
+class _WorkerUwClients:
+    """One UWClient per worker thread. Universe scans reuse the thread."""
+
+    def __init__(self, client_kwargs: dict) -> None:
+        self._kwargs = dict(client_kwargs)
+        self._local = threading.local()
+        self._lock = threading.Lock()
+        self._open: list = []
+
+    def borrow(self):
+        client = getattr(self._local, "client", None)
+        if client is None:
+            client = UWClient(**self._kwargs)
+            self._local.client = client
+            with self._lock:
+                self._open.append(client)
+        return client
+
+    def close(self) -> None:
+        with self._lock:
+            clients = self._open
+            self._open = []
+        for client in clients:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+_bound_scan_pool = threading.local()
+
+
+def _bind_scan_pool(pool: _WorkerUwClients) -> None:
+    _bound_scan_pool.pool = pool
+
+
+def _bound_scan_client():
+    pool = getattr(_bound_scan_pool, "pool", None)
+    if pool is None:
+        return None
+    return pool.borrow()
+
+
 def scan_ticker(
     ticker: str,
     client: Optional[Any] = None,
@@ -514,6 +558,8 @@ def scan_ticker(
     ib: Any = None,
 ) -> Optional[ThetaCandidate]:
     own_client = None
+    if client is None:
+        client = _bound_scan_client()
     if client is None:
         client_kwargs = _uw_client_kwargs(retry_transient)
         own_client = UWClient(**client_kwargs)
@@ -760,47 +806,56 @@ def scan_universe(
     rate_limited = 0
     errors = 0
     consecutive_rate_limits = 0
-    with scan_ib_session() as ib:
-        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-            futures = {
-                pool.submit(
-                    scan_ticker, ticker, retry_transient=retry_transient,
-                    min_dte=min_dte, max_dte=max_dte, min_credit=min_credit,
-                    ib=ib,
-                ): ticker
-                for ticker in resolved
-            }
-            for idx, future in enumerate(as_completed(futures), start=1):
-                ticker = futures[future]
-                try:
-                    row = future.result()
-                except CancelledError:
-                    continue
-                except UWRateLimitError:
-                    rate_limited += 1
-                    consecutive_rate_limits += 1
-                    print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
-                    if consecutive_rate_limits >= RATE_LIMIT_ABORT:
-                        print(
-                            f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
-                            file=sys.stderr,
-                        )
-                        for pending in futures:
-                            pending.cancel()
-                    continue
-                except Exception as exc:
-                    errors += 1
+    workers = max(1, max_workers)
+    scan_clients = _WorkerUwClients(_uw_client_kwargs(retry_transient))
+    try:
+        with scan_ib_session() as ib:
+            with ThreadPoolExecutor(
+                max_workers=workers,
+                initializer=_bind_scan_pool,
+                initargs=(scan_clients,),
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        scan_ticker, ticker, retry_transient=retry_transient,
+                        min_dte=min_dte, max_dte=max_dte, min_credit=min_credit,
+                        ib=ib,
+                    ): ticker
+                    for ticker in resolved
+                }
+                for idx, future in enumerate(as_completed(futures), start=1):
+                    ticker = futures[future]
+                    try:
+                        row = future.result()
+                    except CancelledError:
+                        continue
+                    except UWRateLimitError:
+                        rate_limited += 1
+                        consecutive_rate_limits += 1
+                        print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+                        if consecutive_rate_limits >= RATE_LIMIT_ABORT:
+                            print(
+                                f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
+                                file=sys.stderr,
+                            )
+                            for pending in futures:
+                                pending.cancel()
+                        continue
+                    except Exception as exc:
+                        errors += 1
+                        consecutive_rate_limits = 0
+                        print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
+                        continue
                     consecutive_rate_limits = 0
-                    print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
-                    continue
-                consecutive_rate_limits = 0
-                if row is None:
-                    no_setup += 1
-                    print(f"  [{idx}/{len(resolved)}] {ticker} - NO SETUP", file=sys.stderr)
-                    continue
-                ok += 1
-                print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
-                results.append(row)
+                    if row is None:
+                        no_setup += 1
+                        print(f"  [{idx}/{len(resolved)}] {ticker} - NO SETUP", file=sys.stderr)
+                        continue
+                    ok += 1
+                    print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
+                    results.append(row)
+    finally:
+        scan_clients.close()
 
     # Earnings annotation is a post-process batch (one UW call per ticker) so
     # failures never drop a theta candidate and we avoid N serial calls inline.
