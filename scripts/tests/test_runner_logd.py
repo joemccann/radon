@@ -384,6 +384,37 @@ def test_follow_context_outlives_a_long_block_body(logd):
     assert logd.LineScrubber.CONTEXT_LINES >= 64
 
 
+def test_follow_keeps_the_header_while_a_value_is_still_being_absorbed(logd):
+    # The header of a block scalar must not age out of the context while
+    # its body is still open: the body lines after the window would scrub
+    # as plain text. The header is pinned until a line leaves the value.
+    scrubber = logd.LineScrubber({})
+    padding = logd.LineScrubber.CONTEXT_LINES + 8
+    lines = ["password: |\n"] + ["\n"] * padding + ["  opaquevalue123\n", "next: ok\n"]
+    out = [scrubber.feed(line) for line in lines]
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "next: ok" in joined
+    assert len(scrubber.recent) <= logd.LineScrubber.CONTEXT_LINES
+
+
+def test_follow_pinned_context_is_bounded_in_bytes(logd):
+    # Pinning must not turn an endless body into unbounded memory: the
+    # oldest body lines are dropped, the header stays, the value never
+    # leaks.
+    scrubber = logd.LineScrubber({})
+    filler = "  " + "x" * 4000 + "\n"
+    lines = ["password: |\n"] + [filler] * 200 + ["  opaquevalue123\n", "next: ok\n"]
+    out = []
+    for line in lines:
+        out.append(scrubber.feed(line))
+        assert sum(len(entry) for entry in scrubber.recent) <= logd.LineScrubber.CONTEXT_BYTES + len(filler)
+    joined = "\n".join(line for line in out if line is not None)
+    assert "opaquevalue" not in joined
+    assert "xxxx" not in joined
+    assert "next: ok" in joined
+
+
 def test_service_owned_children_refuse_a_symlink_before_root_installs_them():
     # install -d by root follows a link planted by the service account that
     # owns the parent (keys/ repo/ under the log daemon, secrets/ log/ tmp/
