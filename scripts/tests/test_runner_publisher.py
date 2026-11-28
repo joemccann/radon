@@ -728,7 +728,7 @@ def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> N
     import socket
 
     cfg = _cfg(tmp_path)
-    cfg.socket_path.parent.mkdir()
+    root = _short_socket(cfg)
     bundle = _owned(cfg.work_root("security") / "branch.bundle", "bundle\n")
     ops = FakeOps()
     before = os.umask(0)
@@ -746,5 +746,6 @@ def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> N
     finally:
         idle.close()
         os.umask(before)
+        shutil.rmtree(root, ignore_errors=True)
     assert response["ok"] is True
     assert response["pushed"] == BRANCH
