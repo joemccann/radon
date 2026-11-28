@@ -107,7 +107,10 @@ the service's main PID with its short-lived Podman conmon.
 helpers atomically under `/opt/radon-model-clients/<SHA>`, with version/hash
 receipts. When the deploying image id matches a donor SHA tag, or both images
 carry the same `radon.model-clients.payload-sha256` label, promotion
-hardlinks those verified bytes instead of exporting. A miss, a missing label
+hardlinks those verified bytes instead of exporting. The label is read
+from default `image inspect` JSON (`Config.Labels`, else top-level
+`Labels`). Podman's Go template `index .Config.Labels` prints `<no value>`
+for a label the JSON carries, so that template is not a donor. A miss, a missing label
 or a corrupt donor exports. It does not execute host installers, provider
 login, or image tools as root. The `current` selector retains its prior value
 on failed validation.
@@ -1082,7 +1085,8 @@ a `localhost/ghcr.io/...` name after prune removed the donor SHA tag) or a
 verified Linux receipt that recorded that image id, or both images carry the
 same `radon.model-clients.payload-sha256` label, promotion copies those
 immutable bytes, rewrites only the release SHA, re-checks every receipt hash,
-and does not start the export container. A missing tag, a different image id
+and does not start the export container. That label comes from default
+`image inspect` JSON, not a Go template. A missing tag, a different image id
 without a matching payload label, a missing label, or a receipt mismatch
 exports exactly as before. Export writes the image id onto the new receipt so
 the next identical image can reuse without the donor tag. The payload label
