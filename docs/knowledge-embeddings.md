@@ -33,6 +33,7 @@ After fusion, `hybrid_search` attaches adjacent chunks (`±NEIGHBOR_SPAN`) for t
 ## Ingest behavior
 
 - **Dual-write (default):** Every ingested `KnowledgeDoc` writes both vectors when `RADON_KB_EMBED_DUAL_WRITE` is not `0`/`false`/`off`/`no` (default: on). The 384-d column stays current for the fallback.
+- **Hourly skip load:** `radon-knowledge.timer` re-runs ingest every hour. The skip decision in `scripts/knowledge/ingest.py` reads `embedding IS NOT NULL` and `embedding_v2 IS NOT NULL`, not the vector bytes. Stored vectors are loaded only for documents that fail the skip, in id-cursor pages of 50 rows and doc-key batches of 40. An unchanged refresh ships no embedding blobs.
 - **Single-write:** `RADON_KB_EMBED_DUAL_WRITE=0` disables the 2048-d write; ingest writes only `embedding`.
 - **NVIDIA rate limit:** every embedding request takes a slot from the host-wide NVIDIA pacer shared with the model ladder (`scripts/nvidia_rate_limit.py`, `RADON_NVIDIA_RPM`, default 20 a minute; see [dropbox-research.md](dropbox-research.md)). With no slot inside 15 s the call raises `rate_limited_local` and the query falls back to the 384-d local vector. A 429 feeds the shared cooldown; a 401/403 is logged as `NVIDIA AUTHORIZATION FAILED` and not retried.
 - **Backend override:** `RADON_KB_EMBED_BACKEND=local` forces BAAI/bge-small-en-v1.5 (384d) for both query and ingest; the NVIDIA path is never used.
