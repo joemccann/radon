@@ -37,3 +37,18 @@ Evidence: the check failed while both modules defined the grammar, then
 `22 passed` on the grammar and research date tests, `69 passed` on the
 model-gateway consumer and specialized suites, `6 passed` on
 `cloud/tests/test_model_gateway_package.py`.
+
+## Cboe daily CSV
+
+Branch: `cursor/cboe-csv-a8d8`. Independent of #1675 and the payload-rows PR.
+
+`utils.cboe_csv.parse_daily_prices` is the MM/DD/YYYY walker. Straddle and
+VIX term structure pass the value column. COR and VIX correlation pass CLOSE.
+The VIX model spread parser stays separate. MSR uses the shared date
+and float parse, then drops non-positive closes.
+
+Anti-regression: `test_cboe_daily_csv_loop_has_one_home`.
+
+Evidence: the check failed while `fetch_msr.py` still parsed the date,
+then `290 passed` across the CSV reader, straddle, VIX term structure,
+COR, VIX correlation, MSR, and credit VIX suites.

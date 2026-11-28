@@ -20,8 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import os
 import sys
@@ -76,21 +74,10 @@ LIVE_SERVICE = index_live.live_service(SERVICE)
 
 
 def parse_index_csv(text: str, value_column: str) -> list[dict[str, Any]]:
-    """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
+    """Cboe daily-prices CSV. See utils.cboe_csv.parse_daily_prices."""
+    from utils.cboe_csv import parse_daily_prices
 
-    Dates arrive MM/DD/YYYY; header and malformed rows (bad date, missing
-    or empty value) are skipped.
-    """
-    rows: list[dict[str, Any]] = []
-    for raw in csv.DictReader(io.StringIO(text)):
-        try:
-            date = datetime.strptime((raw.get("DATE") or "").strip(), "%m/%d/%Y")
-            value = float(raw[value_column])
-        except (KeyError, TypeError, ValueError):
-            continue
-        rows.append({"date": date.date().isoformat(), "value": value})
-    rows.sort(key=lambda r: r["date"])
-    return rows
+    return parse_daily_prices(text, value_column)
 
 
 def _read_json_cache() -> Optional[dict[str, Any]]:

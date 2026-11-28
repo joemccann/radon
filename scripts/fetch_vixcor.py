@@ -17,8 +17,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import os
 import sys
@@ -102,21 +100,10 @@ STATUS_STALE_PARENT = "stale_parent"
 
 
 def parse_index_csv(text: str) -> list[dict[str, Any]]:
-    """Cboe daily-prices CSV → ascending [{date: "YYYY-MM-DD", value: float}].
+    """Cboe CLOSE column. See utils.cboe_csv.parse_daily_prices."""
+    from utils.cboe_csv import parse_daily_prices
 
-    Dates arrive MM/DD/YYYY; header and malformed rows (bad date, missing
-    or empty CLOSE) are skipped. CLOSE only.
-    """
-    rows: list[dict[str, Any]] = []
-    for raw in csv.DictReader(io.StringIO(text)):
-        try:
-            date = datetime.strptime((raw.get("DATE") or "").strip(), "%m/%d/%Y")
-            value = float(raw["CLOSE"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        rows.append({"date": date.date().isoformat(), "value": value})
-    rows.sort(key=lambda r: r["date"])
-    return rows
+    return parse_daily_prices(text, "CLOSE")
 
 
 # ── parent (cor_history.cor3m) ────────────────────────────────────

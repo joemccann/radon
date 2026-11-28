@@ -83,14 +83,15 @@ def parse_close_csv(text: str, column: str) -> dict[str, float]:
 
 
 def _parse_csv_row(raw: dict[str, Any], column: str) -> Optional[tuple[str, float]]:
-    try:
-        session = datetime.strptime((raw.get("DATE") or "").strip(), "%m/%d/%Y").date()
-        value = float(raw[column])
-    except (KeyError, TypeError, ValueError):
+    from utils.cboe_csv import parse_price_row
+
+    parsed = parse_price_row(raw, column)
+    if parsed is None:
         return None
+    session, value = parsed
     if not math.isfinite(value) or value <= 0:
         return None
-    return session.isoformat(), value
+    return session, value
 
 
 def compute_msr_rows(
