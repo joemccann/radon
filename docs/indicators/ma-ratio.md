@@ -154,8 +154,8 @@ migration executed into in-memory sqlite.
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only,
   `radonCapability = "read"`, static loader entry in
   `web/lib/assistant/nextLoaders.ts`.
-- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'ma-ratio'`,
-  `fromDisk` = `data/ma_ratio.json`, fresher content timestamp wins.
+- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'ma-ratio'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` — daily 16:20 ET timer with slack; older than 48h means the
   writer is down, not merely between runs. Missing contract: HTTP 200 + frozen
   `{ missing: true, scan_time: null, data_date: null, current: null, series: [], zone: null }`;
@@ -231,7 +231,7 @@ migration executed into in-memory sqlite.
   heartbeat, sweep-budget-fits-unit nesting, payload contract keys, window-relative
   dates.
 - `web/tests/ma-ratio-api.test.ts` (`@vitest-environment node`) — in-memory
-  `@libsql/client`: Turso-beats-older-disk, disk fallback, exact `missing: true`
+  `@libsql/client`: exact `missing: true`
   object at 200, no cross-service leak, `route.dynamic === "force-dynamic"`.
 - `web/tests/ma-ratio-panel.test.tsx` (`@vitest-environment jsdom`) — loader label,
   empty state, strip values, zone/state boundary pins, chart title, NaN guard,

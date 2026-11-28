@@ -160,8 +160,8 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (53, dateti
 ## API — `web/app/api/iei-hyg/route.ts`
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only.
-- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'iei-hyg'`;
-  `fromDisk` = `data/iei_hyg.json`; fresher `scan_time` wins.
+- `dbFirstRead`: `fromDb` = latest `scan_snapshots WHERE service = 'iei-hyg'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `MAX_AGE_MS = 48h` — daily 21:55 UTC timer plus weekend slack; older means the
   writer is down.
 - Missing contract: HTTP 200 + frozen
