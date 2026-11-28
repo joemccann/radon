@@ -246,8 +246,9 @@ def _write_db_cache(
 
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
+    """Write data/skew.json with compact separators (PERF-064)."""
     SKEW_JSON.parent.mkdir(parents=True, exist_ok=True)
-    SKEW_JSON.write_text(json.dumps(payload, indent=2))
+    SKEW_JSON.write_text(json.dumps(payload, separators=(",", ":")))
 
 
 def _read_history_rows() -> list[dict[str, Any]]:
