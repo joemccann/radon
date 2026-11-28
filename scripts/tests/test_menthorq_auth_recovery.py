@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -44,6 +45,20 @@ def test_expired_ephemeral_cookie_does_not_discard_live_dashboard_session(tmp_pa
     bootstrap.assert_not_called()
 
 
+class _LegSession:
+    """URL-dispatched double safe for the overlapped exposure pair."""
+
+    def __init__(self, get) -> None:
+        self._get = get
+        self.calls: list[dict] = []
+        self._lock = threading.Lock()
+
+    def get(self, url: str, **kwargs):
+        with self._lock:
+            self.calls.append({"url": url, **kwargs})
+        return self._get(url, **kwargs)
+
+
 @pytest.mark.parametrize("status", [401, 403])
 @pytest.mark.parametrize("rejected_leg", ["cube", "levels"])
 def test_rejected_ambient_token_recovers_once_and_refetches_both_legs(
@@ -52,46 +67,75 @@ def test_rejected_ambient_token_recovers_once_and_refetches_both_legs(
     monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "revoked-override")
     path = tmp_path / "jar.json"
     write_jar(path)
-    responses = [] if rejected_leg == "cube" else [_Response(_exposure_payload())]
-    session = _Session(responses + [
-        _Response({}, status_code=status),
-        _Response(_exposure_payload()), _Response(_levels_payload()),
-    ])
+    rejected_fragment = "net-gex" if rejected_leg == "cube" else "gamma-levels"
+
+    def get(url, **kwargs):
+        token = kwargs["headers"]["Authorization"]
+        if token == "Bearer revoked-override" and rejected_fragment in url:
+            return _Response({}, status_code=status)
+        if "gamma-levels" in url:
+            return _Response(_levels_payload())
+        return _Response(_exposure_payload())
+
+    session = _LegSession(get)
     client = mq.MenthorQDashboardClient(storage_state_path=path, http_session=session)
     monkeypatch.setattr(client, "_token_from_storage_state", Mock(return_value="renewed-token"))
     assert client.fetch_exposure("MU")["symbol"] == "MU"
-    assert [c["headers"]["Authorization"] for c in session.calls[-2:]] == [
-        "Bearer renewed-token", "Bearer renewed-token",
+    revoked = [
+        call for call in session.calls
+        if call["headers"]["Authorization"] == "Bearer revoked-override"
     ]
-    assert len(session.calls) == (3 if rejected_leg == "cube" else 4)
+    renewed = [
+        call for call in session.calls
+        if call["headers"]["Authorization"] == "Bearer renewed-token"
+    ]
+    assert len(revoked) == 2
+    assert len(renewed) == 2
+    assert any(rejected_fragment in call["url"] for call in revoked)
+    assert {call["url"].rsplit("/v1", 1)[-1] for call in renewed} == {
+        "/options/net-gex-by-expiration/MU?frequency=eod",
+        "/gamma-levels/MU/eod",
+    }
 
 
 def test_rejected_session_token_requires_bootstrap_not_same_token_replay(tmp_path, monkeypatch):
     path = tmp_path / "jar.json"
     write_jar(path, cognito=3600)
+    def get(url, **kwargs):
+        if kwargs["headers"]["Authorization"] == "Bearer revoked-session":
+            return _Response({}, status_code=401, text="revoked private session")
+        if "gamma-levels" in url:
+            return _Response(_levels_payload())
+        return _Response(_exposure_payload())
+
+    session = _LegSession(get)
     client = mq.MenthorQDashboardClient(
         storage_state_path=path, username="u", password="p",
-        http_session=_Session([_Response({}, status_code=401),
-                               _Response(_exposure_payload()), _Response(_levels_payload())]),
+        http_session=session,
     )
     monkeypatch.setattr(client, "_token_from_storage_state", Mock(return_value="revoked-session"))
     bootstrap = Mock(return_value="fresh-session")
     monkeypatch.setattr(client, "_bootstrap_dashboard_session", bootstrap)
     assert client.fetch_exposure("MU")["symbol"] == "MU"
     bootstrap.assert_called_once()
+    assert [call["headers"]["Authorization"] for call in session.calls[-2:]] == [
+        "Bearer fresh-session",
+        "Bearer fresh-session",
+    ]
 
 
 def test_repeated_rejection_is_bounded_and_never_echoes_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "revoked-private-token")
     path = tmp_path / "jar.json"
     write_jar(path, cognito=3600)
-    session = _Session([_Response({}, status_code=401), _Response({}, status_code=403)])
+    session = _LegSession(lambda url, **kwargs: _Response({}, status_code=401))
     client = mq.MenthorQDashboardClient(storage_state_path=path, http_session=session)
     exchange = Mock(return_value="new-private-token")
     monkeypatch.setattr(client, "_token_from_storage_state", exchange)
     with pytest.raises(mq.MenthorQDashboardAuthError) as exc:
         client.fetch_exposure("MU")
-    assert len(session.calls) == 2
+    # Two attempts, both legs. A third attempt would be 6 calls.
+    assert len(session.calls) == 4
     exchange.assert_called_once()
     assert "private-token" not in str(exc.value)
     assert mq._auth_embargo_active()
@@ -193,18 +237,23 @@ def test_data_requests_share_remaining_budget_after_slow_auth(monkeypatch):
         return "token"
 
     calls = []
+    lock = threading.Lock()
 
     class Session:
         def get(self, url, **kwargs):
-            calls.append(kwargs["timeout"])
-            clock[0] += 6
+            with lock:
+                calls.append(kwargs["timeout"])
+                clock[0] += 6
+            if "gamma-levels" in url:
+                return _Response(_levels_payload())
             return _Response(_exposure_payload())
 
     monkeypatch.setattr(client, "_resolve_access_token", resolve)
     client._http = Session()
-    with pytest.raises(mq.MenthorQDashboardTimeoutError):
-        client.fetch_exposure("MU")
-    assert calls == [6.0]
+    result = client.fetch_exposure("MU")
+    # Both legs are clamped to the 6s left after auth, not a fresh 20s cap.
+    assert sorted(calls) == [6.0, 6.0]
+    assert result["symbol"] == "MU"
     assert client._request_deadline is None
 
 
@@ -262,7 +311,8 @@ def test_partial_spot_never_relaxes_cube_integrity(change):
 @pytest.mark.parametrize("payload", [[], None, "invalid"])
 def test_gateway_nonobject_response_stays_sanitized(payload):
     client = mq.MenthorQDashboardClient(
-        access_token="explicit", http_session=_Session([_Response(payload)]),
+        access_token="explicit",
+        http_session=_Session([_Response(payload), _Response(payload)]),
     )
     with pytest.raises(mq.MenthorQDashboardPayloadError):
         client.fetch_exposure("MU")

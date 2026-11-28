@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import stat
+import threading
 import time
 from pathlib import Path
 
@@ -87,14 +88,42 @@ class _Response:
         return self._payload
 
 
+def _queued_response_index(url: str, responses: list[_Response]) -> int:
+    """Pick the payload that belongs to this URL when the queue has both.
+
+    Parallel cube and level GETs must not swap bodies. Error bodies (no
+    cube or level fields) stay in queue order.
+    """
+
+    def payload_of(response: _Response) -> dict | None:
+        payload = response._payload
+        return payload if isinstance(payload, dict) else None
+
+    if "gamma-levels" in url:
+        for index, response in enumerate(responses):
+            payload = payload_of(response)
+            if payload is not None and ("hvl" in payload or "call_resistance" in payload):
+                return index
+    elif "net-gex-by-expiration" in url:
+        for index, response in enumerate(responses):
+            payload = payload_of(response)
+            if payload is not None and "cells" in payload:
+                return index
+    return 0
+
+
 class _Session:
     def __init__(self, responses: list[_Response]) -> None:
         self.responses = list(responses)
         self.calls: list[dict] = []
+        self._lock = threading.Lock()
 
     def get(self, url: str, **kwargs):
-        self.calls.append({"url": url, **kwargs})
-        return self.responses.pop(0)
+        with self._lock:
+            self.calls.append({"url": url, **kwargs})
+            if not self.responses:
+                raise IndexError("unexpected extra dashboard request")
+            return self.responses.pop(_queued_response_index(url, self.responses))
 
 
 class _TimeoutSession:
@@ -121,10 +150,12 @@ def test_fetch_uses_frequency_specific_url_and_bearer_header_without_caching():
     assert first["source_time"] == second["source_time"]
     assert first["fetched_at"] != "" and second["fetched_at"] != ""
     assert len(session.calls) == 4
-    assert session.calls[0]["url"].endswith(
-        "/options/net-gex-by-expiration/MU?frequency=intraday"
-    )
-    assert session.calls[1]["url"].endswith("/gamma-levels/MU/eod")
+    pair = {
+        "/options/net-gex-by-expiration/MU?frequency=intraday",
+        "/gamma-levels/MU/eod",
+    }
+    assert {call["url"].rsplit("/v1", 1)[-1] for call in session.calls[:2]} == pair
+    assert {call["url"].rsplit("/v1", 1)[-1] for call in session.calls[2:]} == pair
     assert all(call["headers"]["Authorization"] == f"Bearer {token}" for call in session.calls)
 
 
@@ -152,13 +183,11 @@ def test_fetch_targets_the_cf_api_host_the_dashboard_uses():
 
     client.fetch_exposure("MU", "eod")
 
-    assert session.calls[0]["url"] == (
+    assert {call["url"] for call in session.calls} == {
         "https://cf.menthorq.io/clickhouse-api/api/web/v1"
-        "/options/net-gex-by-expiration/MU?frequency=eod"
-    )
-    assert session.calls[1]["url"] == (
-        "https://cf.menthorq.io/clickhouse-api/api/web/v1/gamma-levels/MU/eod"
-    )
+        "/options/net-gex-by-expiration/MU?frequency=eod",
+        "https://cf.menthorq.io/clickhouse-api/api/web/v1/gamma-levels/MU/eod",
+    }
 
 
 def test_passes_provider_usd_gex_through_unscaled_and_maps_all_seven_levels():
@@ -273,8 +302,26 @@ def test_expired_explicit_token_fails_before_network_call():
 
 
 def test_provider_unauthorized_is_a_sanitized_auth_failure():
-    session = _Session([_Response({}, status_code=401, text="expired private session")])
+    denied = _Response({}, status_code=401, text="expired private session")
+    session = _Session([denied, _Response({}, status_code=401, text="expired private session")])
     client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)
+
+    with pytest.raises(MenthorQDashboardAuthError) as exc_info:
+        client.fetch_exposure("MU", "eod")
+
+    assert str(exc_info.value) == "dashboard authentication is unavailable"
+    assert "private" not in str(exc_info.value)
+    assert len(session.calls) == 2
+
+
+def test_auth_failure_on_one_leg_does_not_return_a_partial_cube():
+    class _Split:
+        def get(self, url: str, **kwargs):
+            if "gamma-levels" in url:
+                return _Response({}, status_code=401, text="expired private session")
+            return _Response(_exposure_payload())
+
+    client = MenthorQDashboardClient(access_token=_jwt(), http_session=_Split())
 
     with pytest.raises(MenthorQDashboardAuthError) as exc_info:
         client.fetch_exposure("MU", "eod")
@@ -369,8 +416,12 @@ def test_missing_dedicated_state_without_wordpress_credentials_stays_sanitized(
 
 def test_upstream_error_never_echoes_response_body_or_token():
     token = _jwt()
+    secret = f"debug Authorization: Bearer {token}"
     session = _Session(
-        [_Response({}, status_code=500, text=f"debug Authorization: Bearer {token}")]
+        [
+            _Response({}, status_code=500, text=secret),
+            _Response({}, status_code=500, text=secret),
+        ]
     )
     client = MenthorQDashboardClient(access_token=token, http_session=session)
 
