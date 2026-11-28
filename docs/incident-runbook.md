@@ -2656,9 +2656,10 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   platform; stand down.
 - **Remediation (code):** bounded retries on transient Turso source/dest
   errors (`MIRROR_MAX_ATTEMPTS`, default 3), same class as the newsfeed
-  demo mirror. Persistent 502 still fails the unit. Do not restart-flap;
-  next timer (Mon–Fri 21:45 UTC) or one `radon unit restart
-  radon-demo-mirror` after the fix deploys.
+  demo mirror. Persistent 502 still fails the unit. Do not restart-flap.
+  The timer fires every day at 21:45 UTC and retries at 23:30 UTC, weekends
+  included. After the fix deploys, one `radon unit restart
+  radon-demo-mirror.service`. A bare name exits 2.
 - **Regression:** `scripts/lib/demoMirrorReliability.test.js` market suite
   (`retries a transient scan_snapshots source 502 then mirrors`,
   `still fails the unit when scan_snapshots 502 persists past the budget`,
@@ -2837,10 +2838,14 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 - **Remediation (code):** `migrate.py --demo` applies
   `scripts/db/migrations` to `TURSO_DEMO_*` (refuses the prod marker;
   requires `radon-demo`). `radon-demo-mirror.service` runs it as
-  `ExecStartPre` before the Node mirror. The unit is on
-  `RERUNNABLE_ONESHOT_UNITS` so the page responder can
-  `reset-failed` + `start` after a green deploy (next timer is ~24h).
-  Manual: `python3.13 scripts/db/migrate.py --demo` then start the unit.
+  `ExecStartPre` before the Node mirror. The unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`. The page responder does not
+  `reset-failed` or `start` it, because that `ExecStartPre` applies
+  migrations ([`grok-page-responder.md`](grok-page-responder.md)). The timer
+  fires every day at 21:45 UTC and retries at 23:30 UTC, weekends included.
+  After the fix deploys, one `radon unit restart radon-demo-mirror.service`.
+  A bare name exits 2. That restart runs the unit's `ExecStartPre`, including
+  `migrate.py --demo`.
 - **Regression:** `test_migrate.py::TestMigrateDemoTarget`;
   `test_systemd_services.py::TestDemoMirrorSchemaGate`.
 - **Code:** `scripts/db/migrate.py` (`resolve_target`,
