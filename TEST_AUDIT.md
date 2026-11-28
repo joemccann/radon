@@ -12694,3 +12694,32 @@ Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, no
 | 1 | CTA copy xdist flake then serial 1 passed; 20,201 passed / 11 skipped / 40 subtests (99.10s) | 11,692 passed / 21 skipped / 1,220 files (49.49s) | 58 failed / 4,307 passed / 23 skipped (1,002.13s) | 0 added / 0 removed |
 | 2 | vault deadline xdist flake, first serial miss, second serial 2 passed; 20,201 passed / 11 skipped / 40 subtests (225.14s) | 11,692 passed / 21 skipped / 1,220 files (155.64s) | 58 failed / 4,307 passed / 23 skipped (983.67s) | 0 added / 0 removed |
 | 3 | vault deadline xdist flake then serial 2 passed; 20,201 passed / 11 skipped / 40 subtests (176.23s) | 11,692 passed / 21 skipped / 1,220 files (103.70s) | 58 failed / 4,307 passed / 23 skipped (1,159.56s) | 0 added / 0 removed |
+## Delta audit 2026-11-25
+
+Range `4d6687cf5d369389b9dd8375145537f4e81b6aee..4d6687cf5d369389b9dd8375145537f4e81b6aee`: empty. Newest trusted checkpoint on issue #83 is `audited-through: 4d6687cf5d369389b9dd8375145537f4e81b6aee` (2026-11-24). It carried no open verified finding. Open `testing/` PR #1654 (T-600, T-601, T-602) is CI-green; tonight skipped those. Highest id anywhere is T-602. Next id T-603.
+
+Standing sweep, not a source delta. `scripts/utils/cta_llm.py:196-202` calls `gateway_request` and ignores the explicit env. `generate_share_copy` uses that caller when none is injected (`scripts/utils/cta_llm.py:213-226`). The missing-key test at `scripts/tests/test_cta_share_llm_copy.py:296` (pre-fix) passed only the flag and compared the string to the template. On this host `RADON_MODEL_GATEWAY_SOCKET` is set, so the call reached a live gateway: 43.41s, non-deterministic prose, 1 failed (`/tmp/cta-serial-1.log`). A stub that records one `chat` and raises `GatewayError` still satisfies `out == TEMPLATE` (`/tmp/t603-harm.log`). `setting` says an explicit mapping must not reach live credentials (`scripts/utils/cta_llm.py:84-89`).
+
+Not filed: `scripts/tests/test_runner_publisher.py:588` still binds the idle socket under `tmp_path` and fails `AF_UNIX path too long`. #1654 already fixes that. Historical OPEN/BLOCKED rows T-488 / T-490 / T-492 / T-493 / T-495 have later DONE evidence. The credentials deadline case failed under load and passed alone (`/tmp/pytest-3-serial-2.log`, 2 passed).
+
+### T-603 — P1 — the missing-key share test calls the live gateway and only checks the string
+
+Acceptance: with the flag on and no token, a stubbed unavailable grant returns the template after exactly one `chat` attempt, and the live socket is not used. Skipping the gateway when `CLAUDE_CODE_OAUTH_TOKEN` is absent fails the attempt count. Product source stays unchanged.
+
+Audited through: 4d6687cf5d369389b9dd8375145537f4e81b6aee on 2026-11-25 — 1 new finding
+
+## Remediation 2026-11-25
+
+| Finding | Status | Red / green evidence |
+|---|---|---|
+| T-603 | DONE | Live call 1 failed in 43.41s (`/tmp/cta-serial-1.log`). Equality stayed green after one recorded `chat` (`/tmp/t603-harm.log`). Skipping the gateway when the token is absent: 1 failed (`assert [] == ['chat']`, `/tmp/t603-red.log`), then reverted. Green: 33 passed ×3 (`/tmp/t603-green-1.log`). Product source unchanged. |
+
+### Closing gates 2026-11-25
+
+Serial from the repo root, Python 3.13.18, `/bin/bash` 3.2.57, caddy on PATH, node v26.12.1. The only standing pytest red is `test_an_idle_connection_does_not_wedge_the_serving_loop` (T-602, open #1654). R1 and r3 also hit the known credentials xdist clock flake; r1 serial 2 passed, r3 first serial failed by 16ms under load then 2 passed (`/tmp/pytest-3-serial-2.log`). Vitest EXIT 0 each round. Cloud EXIT 1 each round. Sorted FAILED lists match the origin/main worktree at `4d6687cf5` (58 nodes, 0 added / 0 removed). Linux CI is the authority.
+
+| Round | Root pytest | Vitest | cloud/tests | FAILED vs origin/main |
+|---|---|---|---|---|
+| 1 | publisher AF_UNIX plus credentials flake then serial 2 passed; 20,199 passed / 11 skipped / 40 subtests (103.44s) | 11,690 passed / 21 skipped / 1,218 files (49.60s) | 58 failed / 4,307 passed / 23 skipped (980.74s) | 0 added / 0 removed |
+| 2 | publisher AF_UNIX; 20,200 passed / 11 skipped / 40 subtests (193.15s) | 11,690 passed / 21 skipped / 1,218 files (105.08s) | 58 failed / 4,307 passed / 23 skipped (980.77s) | 0 added / 0 removed |
+| 3 | publisher AF_UNIX plus credentials flake then serial 2 passed; 20,199 passed / 11 skipped / 40 subtests (175.03s) | 11,690 passed / 21 skipped / 1,218 files (102.39s) | 58 failed / 4,307 passed / 23 skipped (982.29s) | 0 added / 0 removed |
