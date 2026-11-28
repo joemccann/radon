@@ -580,6 +580,148 @@ def test_draft_title_and_body_are_scrubbed_before_gh_sees_them(tmp_path: Path, m
     assert "Nightly" in argv and "## Summary" in str(seen["body"])
 
 
+def test_a_malformed_request_shape_is_rejected_not_raised(tmp_path: Path) -> None:
+    # The client is the party the publisher constrains. A field of the
+    # wrong type must come back as a rejection, never escape as an
+    # exception that ends the serving loop.
+    cfg = _cfg(tmp_path)
+    ops = FakeOps()
+    for payload in (
+        {"op": ["git"], "caller": "security"},
+        {"op": "push", "action": {"x": 1}, "caller": "security"},
+        {"op": "push", "caller": ["security"], "branch": BRANCH, "bundle": 1},
+    ):
+        response = publisher.handle_payload(json.dumps(payload).encode(), peer=cfg.client_uid, cfg=cfg, ops=ops)
+        assert response["ok"] is False
+    assert ops.calls == []
+
+
+def test_a_trickling_client_is_cut_at_an_absolute_deadline() -> None:
+    import socket
+
+    left, right = socket.socketpair()
+    stop = threading.Event()
+
+    def trickle() -> None:
+        while not stop.is_set():
+            try:
+                right.sendall(b"x")
+            except OSError:
+                return
+            time.sleep(0.02)
+
+    thread = threading.Thread(target=trickle, daemon=True)
+    thread.start()
+    left.settimeout(5)
+    started = time.monotonic()
+    try:
+        with pytest.raises(publisher.Rejected) as caught:
+            publisher._recv_all(left, deadline=0.3)
+    finally:
+        stop.set()
+        thread.join(2)
+        left.close()
+        right.close()
+    assert caught.value.code == "timeout"
+    assert time.monotonic() - started < 2
+
+
+def test_an_oversized_or_slow_request_answers_a_rejection_and_the_loop_lives() -> None:
+    import socket
+
+    # A short base: AF_UNIX paths are bounded and pytest's tmp_path is long on macOS.
+    base = Path(tempfile.mkdtemp(prefix="pub", dir="/tmp"))
+    cfg = _cfg(base)
+    cfg.socket_path.parent.mkdir()
+    bundle = _owned(cfg.work_root("security") / "branch.bundle", "bundle\n")
+    ops = FakeOps()
+    thread = threading.Thread(target=publisher.serve, args=(cfg, ops), kwargs={"timeout": 0.5}, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not cfg.socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    big = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    big.settimeout(5)
+    big.connect(str(cfg.socket_path))
+    try:
+        big.sendall(b"{" + b"x" * (publisher.MAX_REQUEST + 10))
+        big.shutdown(socket.SHUT_WR)
+        answer = b""
+        while not answer.endswith(b"\n"):
+            chunk = big.recv(65536)
+            if not chunk:
+                break
+            answer += chunk
+    finally:
+        big.close()
+    try:
+        assert json.loads(answer) == {"ok": False, "error": "too_large"}
+        api = publisher_client.PublisherClient(str(cfg.socket_path), timeout=5)
+        response = _call(api, {"op": "push", "caller": "security", "branch": BRANCH, "bundle": str(bundle)})
+        assert response["ok"] is True
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/joemccann/radon/../joemccann/other/pull/1",
+    "https://github.com/joemccann/radon/pull/1?x=1",
+    "https://github.com/joemccann/radon/pull/1#frag",
+    "https://github.com/joemccann/radon/pull/1 ",
+    "https://github.com/joemccann/radon/pull/1\n",
+    "https://github.com/joemccann/radon/./pull/1",
+    "https://github.com/joemccann/radon//pull/1",
+])
+def test_notify_url_rejects_dot_segments_query_fragment_and_whitespace(url: str) -> None:
+    assert _reject({"op": "notify", "caller": "security", "title": "t", "message": "m", "url": url, "url_title": "x"}) == "url"
+
+
+def test_confined_read_does_not_block_on_a_fifo(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    fifo = scratch / "report.md"
+    os.mkfifo(fifo)
+    result: list = []
+
+    def read() -> None:
+        try:
+            publisher.read_confined([scratch], fifo, os.getuid(), 1000)
+        except publisher.Rejected as exc:
+            result.append(exc.code)
+
+    thread = threading.Thread(target=read, daemon=True)
+    thread.start()
+    thread.join(3)
+    assert not thread.is_alive()
+    assert result == ["path"]
+
+
+def test_edit_draft_refuses_a_fork_pull_request_with_the_same_branch_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # isDraft plus headRefName also match a fork's PR that reuses a runner
+    # branch name. The edit must be confined to this repository's own head.
+    cfg = _cfg(tmp_path)
+    ops = publisher.RealOps(cfg)
+    asked: list[list[str]] = []
+    state = {"isDraft": True, "headRefName": BRANCH, "isCrossRepository": True, "headRepositoryOwner": {"login": "someone"}}
+
+    def fake_gh(args: list[str], stdin: str | None) -> subprocess.CompletedProcess[str]:
+        asked.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(state), stderr="")
+
+    edited: list[list[str]] = []
+    monkeypatch.setattr(ops, "_gh", fake_gh)
+    monkeypatch.setattr(ops, "_gh_draft", lambda args, title, body: edited.append(args) or {"url": "x"})
+    with pytest.raises(publisher.Rejected) as caught:
+        ops.edit_draft("security", BRANCH, "7", "t", "b")
+    assert caught.value.code == "not_draft"
+    assert edited == []
+    fields = asked[0][asked[0].index("--json") + 1].split(",")
+    assert "isCrossRepository" in fields and "headRepositoryOwner" in fields
+    state.update({"isCrossRepository": False, "headRepositoryOwner": {"login": "joemccann"}})
+    assert ops.edit_draft("security", BRANCH, "7", "t", "b") == {"url": "x"}
+    assert edited and edited[0][:3] == ["pr", "edit", "7"]
+
+
 def test_an_idle_connection_does_not_wedge_the_serving_loop(tmp_path: Path) -> None:
     # One client that connects and sends nothing must not block every other
     # loop's push, draft and notify behind it.
