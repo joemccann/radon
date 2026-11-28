@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWClient, UWRateLimitError
+from utils.payload_rows import rows_from_payload as _as_rows
 from strength_confirmation_scanner import resolve_tickers
 from utils.scan_coverage import (
     coverage_block,
@@ -125,14 +126,6 @@ def _to_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return num if math.isfinite(num) else None
-
-
-def _as_rows(payload: Any) -> List[Dict[str, Any]]:
-    if isinstance(payload, dict):
-        rows = payload.get("data", [])
-    else:
-        rows = payload
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
 def _vol_pct(value: Any) -> Optional[float]:

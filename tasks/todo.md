@@ -1,3 +1,12 @@
+# Architecture entropy, payload rows (2026-11-28)
+
+- [x] T1 depends_on: [] One UW row list. Scanners and catalyst jobs bind it.
+- [ ] T2 depends_on: [] Cboe daily CSV parser, then scanner HV, then ET calendar day. Separate PRs from main.
+
+## Review
+
+`rows_from_payload` replaced six copies. Half-day clocks stay pending.
+
 # Repair gateway model resolution on both hosts
 
 - [x] T1 depends_on: [] Compare deployed Mac and VPS behavior with main.

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWAPIError, UWClient, UWRateLimitError
+from utils.payload_rows import rows_from_payload as _as_rows
 from utils.scan_coverage import (
     coverage_block,
     is_coverage_failed,
@@ -173,14 +174,6 @@ def _to_float(value: Any) -> Optional[float]:
 def _to_int(value: Any) -> int:
     num = _to_float(value)
     return int(num) if num is not None else 0
-
-
-def _as_rows(payload: Any) -> List[Dict[str, Any]]:
-    if isinstance(payload, dict):
-        rows = payload.get("data", [])
-    else:
-        rows = payload
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
 def _vol_pct(value: Any) -> Optional[float]:
