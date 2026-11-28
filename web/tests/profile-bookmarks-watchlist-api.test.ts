@@ -365,6 +365,24 @@ describe("bookmarks", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST rejects an oversized post_id and an oversized snapshot", async () => {
+    const { POST, GET } = await import("../app/api/bookmarks/route");
+    const longId = await POST(req("http://localhost/api/bookmarks", {
+      method: "POST",
+      body: JSON.stringify({ post_id: "p".repeat(257) }),
+    }));
+    expect(longId.status).toBe(400);
+    expect((await jsonOf(longId)).code).toBe("VALIDATION_ERROR");
+    const bigSnapshot = await POST(req("http://localhost/api/bookmarks", {
+      method: "POST",
+      body: JSON.stringify({ post_id: "post-1", snapshot: { blob: "x".repeat(64 * 1024) } }),
+    }));
+    expect(bigSnapshot.status).toBe(400);
+    expect((await jsonOf(bigSnapshot)).code).toBe("VALIDATION_ERROR");
+    const list = await jsonOf(await GET());
+    expect(list.bookmarks).toEqual([]);
+  });
+
   it("bookmarks are user-scoped", async () => {
     const { POST, GET } = await import("../app/api/bookmarks/route");
     await POST(req("http://localhost/api/bookmarks", { method: "POST", body: JSON.stringify({ post_id: "mine" }) }));
@@ -414,6 +432,24 @@ describe("watchlist", () => {
     await POST(req("http://localhost/api/watchlist", { method: "POST", body: JSON.stringify({ symbol: "amd" }) }));
     const getRes = await GET();
     expect((await jsonOf(getRes)).watchlist).toHaveLength(1);
+  });
+
+  it("POST rejects an oversized symbol and an oversized sector", async () => {
+    const { POST, GET } = await import("../app/api/watchlist/route");
+    const longSymbol = await POST(req("http://localhost/api/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ symbol: "a".repeat(33) }),
+    }));
+    expect(longSymbol.status).toBe(400);
+    expect((await jsonOf(longSymbol)).code).toBe("VALIDATION_ERROR");
+    const longSector = await POST(req("http://localhost/api/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ symbol: "spy", sector: "s".repeat(129) }),
+    }));
+    expect(longSector.status).toBe(400);
+    expect((await jsonOf(longSector)).code).toBe("VALIDATION_ERROR");
+    const list = await jsonOf(await GET());
+    expect(list.watchlist).toEqual([]);
   });
 
   it("POST rejects missing symbol", async () => {
