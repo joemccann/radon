@@ -689,20 +689,51 @@ def _receipt_image_id(folder: Path) -> str | None:
         return None
 
 
+def _label_from_inspect_json(raw: str) -> str:
+    """Read PAYLOAD_LABEL from docker-compatible image inspect JSON.
+
+    Podman `image inspect --format '{{index .Config.Labels "..."}}'` prints
+    `<no value>` when the OCI config label is set (CIP-039). Default JSON
+    inspect carries it under Config.Labels, or under top-level Labels when
+    Config.Labels is absent. Missing or malformed is a miss.
+    """
+    try:
+        payload=json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("gateway payload label unavailable") from exc
+    if isinstance(payload, list):
+        if len(payload)!=1 or not isinstance(payload[0], dict):
+            raise ValueError("gateway payload label unavailable")
+        payload=payload[0]
+    if not isinstance(payload, dict):
+        raise ValueError("gateway payload label unavailable")
+    labels=None
+    config=payload.get("Config")
+    if isinstance(config, dict) and isinstance(config.get("Labels"), dict):
+        labels=config["Labels"]
+    elif isinstance(payload.get("Labels"), dict):
+        labels=payload["Labels"]
+    if not isinstance(labels, dict):
+        raise ValueError("gateway payload label is not a sha256 digest")
+    value=labels.get(PAYLOAD_LABEL)
+    if not isinstance(value, str):
+        raise ValueError("gateway payload label is not a sha256 digest")
+    value=value.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}",value):
+        raise ValueError("gateway payload label is not a sha256 digest")
+    return value
+
+
 def _payload_label(engine: str, image: str) -> str:
     """Read the CIP-024 client-payload label. Missing or malformed is a miss."""
     if engine not in ("/usr/bin/podman","/usr/bin/docker"):
         raise ValueError("unsupported container engine")
     if not re.fullmatch(r"ghcr\.io/joemccann/radon-model-gateway:[0-9a-f]{40}",image):
         raise ValueError("refusing an image that is not an exact gateway SHA")
-    fmt='{{index .Config.Labels "%s"}}' % PAYLOAD_LABEL
-    result=subprocess.run([engine,"image","inspect","--format",fmt,image],capture_output=True,text=True,timeout=20,check=False)
+    result=subprocess.run([engine,"image","inspect",image],capture_output=True,text=True,timeout=20,check=False)
     if result.returncode!=0:
         raise ValueError("gateway payload label unavailable")
-    value=result.stdout.strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{64}",value):
-        raise ValueError("gateway payload label is not a sha256 digest")
-    return value
+    return _label_from_inspect_json(result.stdout)
 
 
 def _copy_verified_tree(source: Path, stage: Path) -> None:

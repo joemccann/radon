@@ -39,7 +39,7 @@ Every rung resolves a model in this order (operator, 2026-11-22). An env overrid
 | Cursor | Unwired. No model id. |
 | NVIDIA, Cerebras | Paused, and still resolved the same way from the catalog. A stored key is used only to list models. `NVIDIA_*_MODEL` and `CEREBRAS_*_MODEL` override the id. There is no second pinned vision fallback. |
 
-Nemotron ids (`nvidia/nemotron…`) still send `reasoning_effort: none` and `stream: false`. Cerebras requests still send `reasoning_effort: none`. CLI pins stay checksum-checked. `.github/workflows/vendor-cli-latest.yml` opens a `factory/` pull request only after the publisher host, the checksum, and the architecture match. That bump does not verify a code signature.
+Nemotron ids (`nvidia/nemotron…`) still send `reasoning_effort: none` and `stream: false`. Cerebras requests still send `reasoning_effort: none`. CLI binaries stay checksum and signature pinned, and an Antigravity artifact is accepted only from Google's official release path on every platform (the pin bump verifier, the Linux image installer and the Mac installer all refuse any other host or a redirected download). `.github/workflows/vendor-cli-latest.yml` opens a `factory/` pull request when a verified newer release exists.
 
 ## Upgrades and rollback
 
@@ -98,7 +98,10 @@ listed under `localhost/ghcr.io/...` after a prune untagged the donor SHA,
 or a Linux receipt that already recorded that image id. Failing those, a
 donor tag whose image carries the same `radon.model-clients.payload-sha256`
 label is reused (the hash of `docker/app/Dockerfile.python`, the vendor-clis
-and chart-runtime locks, and the exported `model_gateway` helpers). It
+and chart-runtime locks, and the exported `model_gateway` helpers). The
+label is read from default `image inspect` JSON (`Config.Labels`, else
+top-level `Labels`); a Go-template `index .Config.Labels` read is not used,
+because podman prints `<no value>` for a label that JSON carries. It
 hardlinks those bytes, rewrites only the release SHA, re-checks every hash,
 and activates the Linux selector. It does not move the Darwin selector; that
 still happens at commit. A tree that already exists for the deploying SHA is
