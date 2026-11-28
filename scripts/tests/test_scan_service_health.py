@@ -331,7 +331,7 @@ class TestVcgWiring:
         import vcg_scan
         import utils.scan_cache_gate as gate
 
-        monkeypatch.setattr(vcg_scan, "is_market_open", lambda: False)
+        monkeypatch.setattr(vcg_scan, "is_market_open_et", lambda: False)
         monkeypatch.setattr(gate, "cached_scan_if_fresh", lambda *a, **kw: cached)
         monkeypatch.setattr(sys, "argv", ["vcg_scan.py", "--json"])
         with redirect_stdout(io.StringIO()):
