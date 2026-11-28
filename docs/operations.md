@@ -1483,7 +1483,7 @@ Missing or rejected credentials produce an error heartbeat while preserving prev
 
 ## NVIDIA model settings in the restricted newsfeed runtime
 
-The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` into `radon-model-gateway`; arbitrary other `NVIDIA_*` keys stay excluded, and those three names do not reach `radon-newsfeed.service`. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart `radon-model-gateway.service`. Existing processes do not reload host environment edits automatically. Keep the hosted [Nemotron Super VL pilot](nemotron-super-vl-pilot.md) vision-only until its quality gates pass; remove or restore the override and regenerate/restart the gateway to roll back.
+The runtime renderer passes `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, and `NVIDIA_MODEL` into `radon-model-gateway`; arbitrary other `NVIDIA_*` keys stay excluded, and those three names do not reach `radon-newsfeed.service`. After an approved model-setting change, regenerate the runtime environment through the normal deployment procedure and restart `radon-model-gateway.service`. Existing processes do not reload host environment edits automatically. An explicit `NVIDIA_TEXT_MODEL`, `NVIDIA_VISION_MODEL`, or `NVIDIA_MODEL` overrides the catalog policy in [model-gateway.md](model-gateway.md#latest-model). Removing the variable returns to that policy. NVIDIA stays paused until its name is removed from `engine.PAUSED_BY_DEFAULT`. The [Super VL pilot](nemotron-super-vl-pilot.md) gates whether an operator sets `NVIDIA_VISION_MODEL` to that id.
 
 
 ## Subscription keeper environment publication
