@@ -47,6 +47,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from utils.market_calendar import et_calendar_date as _et_today  # noqa: E402
+
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
     load_dotenv(_PROJECT_DIR / ".env")
@@ -84,15 +86,6 @@ CREATE TABLE IF NOT EXISTS catalysts (
   payload   TEXT NOT NULL
 )
 """
-
-
-def _et_today(now: datetime) -> date:
-    """The calendar day in ET for the given instant."""
-    try:
-        import zoneinfo
-        return now.astimezone(zoneinfo.ZoneInfo("America/New_York")).date()
-    except Exception:
-        return now.astimezone(timezone.utc).date()
 
 
 def _parse_day(value: Any) -> Optional[date]:

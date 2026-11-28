@@ -6,7 +6,7 @@ Holidays are loaded from scripts/config/market_holidays.json.
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "market_holidays.json"
@@ -252,6 +252,15 @@ def is_market_open_et(now: datetime = None) -> bool:
 # market_state() reasons that mean the whole ET day is a non-session, as
 # opposed to a trading day that is merely outside its regular hours.
 _NON_SESSION_REASONS = frozenset({"weekend", "static:holiday", "ibkr:closed"})
+
+
+def et_calendar_date(now: datetime) -> date:
+    """The calendar day in ET for the given instant."""
+    try:
+        import zoneinfo
+        return now.astimezone(zoneinfo.ZoneInfo("America/New_York")).date()
+    except Exception:
+        return now.astimezone(timezone.utc).date()
 
 
 def is_trading_day_et(now: datetime = None) -> bool:
