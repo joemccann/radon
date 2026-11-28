@@ -752,8 +752,8 @@ def main():
     # Detect market status
     try:
         sys.path.insert(0, str(SCRIPT_DIR))
-        from utils.market_hours import is_market_open
-        market_open = is_market_open()
+        from utils.market_calendar import is_market_open_et
+        market_open = is_market_open_et()
     except Exception:
         market_open = True  # assume open if can't check
 

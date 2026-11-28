@@ -4,33 +4,10 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from fetch_flow import (
-    is_market_open,
     get_last_n_trading_days,
     analyze_darkpool,
     analyze_options_flow,
-    MARKET_HOLIDAYS_2026,
 )
-
-
-# ── is_market_open ──────────────────────────────────────────────────
-
-class TestIsMarketOpen:
-    def test_weekday_open(self):
-        # Tuesday 2026-03-03
-        assert is_market_open(datetime(2026, 3, 3)) is True
-
-    def test_saturday_closed(self):
-        assert is_market_open(datetime(2026, 3, 7)) is False
-
-    def test_sunday_closed(self):
-        assert is_market_open(datetime(2026, 3, 8)) is False
-
-    def test_holiday_closed(self):
-        # MLK Day 2026
-        assert is_market_open(datetime(2026, 1, 19)) is False
-
-    def test_christmas_closed(self):
-        assert is_market_open(datetime(2026, 12, 25)) is False
 
 
 # ── get_last_n_trading_days ─────────────────────────────────────────

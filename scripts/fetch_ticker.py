@@ -30,12 +30,9 @@ except Exception:
     pass
 
 from clients.uw_client import UWClient, UWNotFoundError, UWAPIError
-from utils.market_calendar import get_last_n_trading_days, load_holidays, _is_trading_day
+from utils.market_calendar import get_last_n_trading_days
 
 CACHE_FILE = Path(__file__).parent.parent / "data" / "ticker_cache.json"
-
-# Keep for backward compatibility with existing tests
-MARKET_HOLIDAYS_2026 = load_holidays(2026)
 
 
 def load_cache() -> dict:
@@ -99,14 +96,6 @@ def _dual_write_ticker_to_db(ticker: str, company_name: str, sector: str = None)
         upsert_ticker_lookup_cache(ticker.upper(), result, expires_at)
     except Exception as exc:  # noqa: BLE001
         print(f"  Warning: ticker_lookup_cache db dual-write failed: {exc}", file=sys.stderr)
-
-
-def is_market_open(date: datetime) -> bool:
-    """Check if the market is open on a given date (date-only, no time check).
-
-    Backward-compatible wrapper used by existing tests.
-    """
-    return _is_trading_day(date)
 
 
 def fetch_ticker_info(ticker: str) -> dict:
