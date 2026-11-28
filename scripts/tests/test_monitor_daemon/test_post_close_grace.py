@@ -59,12 +59,16 @@ class HardCloseHandler(BaseHandler):
 
 
 def recent_trading_day():
-    from utils.market_calendar import load_holidays
+    """Most recent full session. Half days are not a 16:00 close."""
+    from utils.market_calendar import market_state
 
     day = datetime.now(ET).date() - timedelta(days=1)
-    while day.weekday() >= 5 or day.strftime("%Y-%m-%d") in load_holidays(day.year):
+    for _ in range(14):
+        probe = datetime(day.year, day.month, day.day, 15, 30, tzinfo=ET)
+        if market_state(probe).get("is_open"):
+            return day
         day -= timedelta(days=1)
-    return day
+    raise AssertionError("no full trading session in the last 14 days")
 
 
 def recent_saturday():
