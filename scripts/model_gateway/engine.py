@@ -1393,6 +1393,12 @@ _FALLBACK_RESERVE_S = 20.0
 _DEAD_RUNG_TTL_S = 600.0
 _DEAD_RUNG_CODES = frozenset({"http_401", "http_402", "http_403", "http_404",
                               "quota_or_billing", "credit_balance"})
+# One provider's unfinished or oversized body is that rung's failure. The next
+# live rung still runs. Cancellation and a spent request deadline are not in
+# this set: those abort the whole request. A ladder that never leaves this set
+# still raises the original ModelResponseError, so a sole incomplete provider
+# does not accept partial JSON.
+_RUNG_RESPONSE_CODES = frozenset({"incomplete", "response_too_large"})
 _dead_until: dict[str, float] = {}
 _dead_clock = time.monotonic
 
@@ -1542,6 +1548,19 @@ def _run_ladder(
 
     queue = [(name, _BUSY_PROBE_SECONDS) for name in order]
     position = 0
+    last_response_error: ModelResponseError | None = None
+
+    def note_response_failure(exc: ModelResponseError, model: str) -> bool:
+        nonlocal last_response_error
+        if exc.code not in _RUNG_RESPONSE_CODES:
+            return False
+        last_response_error = exc
+        attempted.append(f"{name}:{exc.code}")
+        logger.warning(
+            "%s provider=%s model=%s failed %s", log_prefix, name, model, exc.code
+        )
+        return True
+
     while position < len(queue):
         name, lock_wait = queue[position]
         position += 1
@@ -1619,7 +1638,9 @@ def _run_ladder(
                 status, raw, payload = _invoke_provider(
                     call_provider, name, auth, model, lock_wait=lock_wait
                 )
-            except ModelResponseError:
+            except ModelResponseError as exc:
+                if note_response_failure(exc, model):
+                    continue
                 raise
             except RuntimeError as exc:
                 code = str(exc) or "network"
@@ -1664,7 +1685,9 @@ def _run_ladder(
                 auth = fresh
                 try:
                     status, raw, payload = _invoke_provider(call_provider, name, auth, model)
-                except ModelResponseError:
+                except ModelResponseError as exc:
+                    if note_response_failure(exc, model):
+                        continue
                     raise
                 except RuntimeError as exc:
                     code = str(exc) or "network"
@@ -1718,7 +1741,9 @@ def _run_ladder(
 
             try:
                 parsed, text = parse_success(name, payload)
-            except ModelResponseError:
+            except ModelResponseError as exc:
+                if note_response_failure(exc, model):
+                    continue
                 raise
             except (ValueError, TypeError, KeyError):
                 attempted.append(f"{name}:unparseable")
@@ -1766,6 +1791,12 @@ def _run_ladder(
 
     tried = " ".join(attempted) or "none"
     skip = " ".join(skipped) or "none"
+    if (
+        last_response_error is not None
+        and attempted
+        and all(entry.split(":", 1)[-1] in _RUNG_RESPONSE_CODES for entry in attempted)
+    ):
+        raise last_response_error
     if not attempted:
         raise ModelLadderExhausted(
             f"Model ladder exhausted: no keyed provider. "
