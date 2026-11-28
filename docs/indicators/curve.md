@@ -102,9 +102,9 @@ shape); backfill passes ~9,000 rows, daily passes 0-2.
 
 Mirror margin-debt exactly:
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`.
-- `dbFirstRead` — fromDb: latest `scan_snapshots WHERE service = 'yield-curve'`;
-  fromDisk: `../data/yield_curve.json`; `MAX_AGE_MS = 48h` (daily timer; older means the
-  writer is down); label `"yield-curve"`.
+- `dbFirstRead` — fromDb: latest `scan_snapshots WHERE service = 'yield-curve'`.
+  No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
+  `MAX_AGE_MS = 48h` (daily timer; older means the writer is down); label `"yield-curve"`.
 - `MISSING_YIELD_CURVE = { missing: true, scan_time: null, count: 0, series: [], current: null }`
   at HTTP 200, never 4xx.
 - `setCacheResponseHeaders(..., { maxAgeSeconds: 300, staleWhileRevalidateSeconds: 3600,
@@ -216,8 +216,7 @@ catch-all (also the weekend/holiday heartbeat).
 - `scripts/tests/test_yield_curve.py` — fixture parse pins, header-name parsing across
   year shapes, empty-cell handling, merge/diff, payload contract, persist guards,
   migration 32 schema + idempotent upsert. DB access only via monkeypatched writer.
-- `web/tests/yield-curve-api.test.ts` — in-memory libsql `scan_snapshots`; Turso beats
-  older disk; disk fallback; exact missing object at 200; no `margin-debt` leak;
+- `web/tests/yield-curve-api.test.ts` — in-memory libsql `scan_snapshots`; exact missing object at 200; no `margin-debt` leak;
   `dynamic === "force-dynamic"`.
 - `web/tests/yield-curve-panel.test.tsx` — helper pins (formats, `spreadColor`
   boundaries), loader/empty/strip/title/brush/default-All, NaN guard.

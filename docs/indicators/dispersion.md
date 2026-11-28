@@ -448,9 +448,8 @@ Copy `web/app/api/vixts/route.ts` verbatim in shape (including the R-332/R-366
 `staleCollapse` handling and `radonCapability = "read"`).
 
 - `dynamic = "force-dynamic"`, `runtime = "nodejs"`, GET only.
-- `dbFirstRead({ fromDb, fromDisk, maxAgeMs: DISPERSION_MAX_AGE_MS, label: "dispersion", isDegraded: isMissingPayload })`.
+- `dbFirstRead({ fromDb, maxAgeMs: DISPERSION_MAX_AGE_MS, label: "dispersion", isDegraded: isMissingPayload })`. No disk read. A failed Turso read serves the last good in-memory snapshot for that label.
 - `fromDb`: `SELECT scan_time, payload FROM scan_snapshots WHERE service = 'dispersion' ORDER BY scan_time DESC LIMIT 1`.
-- `fromDisk`: `data/dispersion.json`.
 - **`DISPERSION_MAX_AGE_MS = 48 * 60 * 60_000`**, commented: the timer runs daily at
   22:20 UTC every calendar day (weekend runs are no-new-session heartbeats), so a
   snapshot older than 48h means the writer is down.
@@ -640,8 +639,7 @@ at import; expected values computed from the fixture inside the test:
 - monkeypatch the writer; `db.client.get_db()` refuses real connections under `PYTEST_CURRENT_TEST`
 
 **`web/tests/dispersion-api.test.ts`** (`@vitest-environment node`) — mock `@/lib/db`
-with a real in-memory `@libsql/client` seeded with `scan_snapshots`: Turso beats
-older disk, disk fallback works, the exact `missing:true` object at **200**, no
+with a real in-memory `@libsql/client` seeded with `scan_snapshots`: the exact `missing:true` object at **200**, no
 cross-service snapshot leak, `route.dynamic === "force-dynamic"`.
 
 **`web/tests/dispersion-panel.test.tsx`** (`@vitest-environment jsdom`) — stub
