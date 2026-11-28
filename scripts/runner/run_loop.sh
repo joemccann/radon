@@ -128,7 +128,6 @@ load_config() {
   mkdir -p "$RUN_DIR" "$LOOP_STATE"
   chmod 700 "$STATE_DIR/state" "$LOOP_STATE"
   : >> "$LOG"
-  start_log_follow
   [[ -n "$TIMEOUT_BIN" ]] || { log "no timeout or gtimeout in $RUNNER_PATH"; exit 69; }
   export RADON_RUNNER_LOOP_STATE="$LOOP_STATE" RADON_RUNNER_PIDFILE="$LOOP_STATE/pids"
   apply_agent_env
@@ -940,6 +939,9 @@ main() {
   LOOP="${1:?usage: run_loop.sh <loop>}"
   load_config
   load_secrets
+  # After load_secrets: the follower scrubs the loaded values from its
+  # own environment, so it must be forked once they are there.
+  start_log_follow
   acquire_lock
   trap 'on_signal TERM' TERM
   trap 'on_signal INT' INT

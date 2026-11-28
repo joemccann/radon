@@ -134,7 +134,12 @@ only a spent `SWEEP_BUDGET_S` defers the unreached tail. The scheduled
 universe is portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P
 500 (first seat wins). Coverage is scored against portfolio ∪ watchlist;
 the index tail rotates and prior series carry forward so a Tuesday that
-cannot finish ~2500 names still keeps last week's rows (R-558).
+cannot finish ~2500 names still keeps last week's rows (R-558). The payload's
+`universe.private_tickers` tags every portfolio name no public tier holds;
+the demo mirror strips those names and drops a row without the tag. A carried
+name is tagged when the prior payload tagged it or when no public tier of the
+current universe holds it, so a prior cache written before the tag existed
+cannot publish a portfolio-only name.
 
 Persistence, inside `PERSIST_BUDGET_S`: the `scan_snapshots` row holds
 `current` + metadata only (no `series`) and is written first. After it come
