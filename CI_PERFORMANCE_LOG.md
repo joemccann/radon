@@ -3283,3 +3283,66 @@ higher. Status `VALIDATING`.
 (1 failed: rest still load) then green (4 passed). Related shard
 contracts 136 passed. YAML parses. Full suites, Vitest, Docker builds,
 and workflow lint are left to PR CI.
+
+## CIP-038 - batch install-units tip reads (2026-11-25) - VALIDATING
+
+Warm mixed deploys still spend the last minutes in `Deploy via SSH`.
+After the 40-second stability window, the next largest slice is
+`install-units`, which installed nothing (`unchanged=158 skipped=30`)
+and still walked every timer-owned unit with its own `git cat-file blob`
+and `sha256sum`. Images and the python gate finish before this step, so
+the walk is on the critical path. Queue delay is excluded from the gain.
+
+Evidence, Deploy via SSH logs (`gh run view --log`), gap from
+`model clients promoted` to `install-units: installed=`:
+
+| Run | Deploy job | Job wall | install-units | Result |
+|---|---|---|---|---|
+| [45183187555](https://github.com/joemccann/radon/actions/runs/45183187555) | 137724020382 | 163s | 34.1s | unchanged=158 |
+| [45181898751](https://github.com/joemccann/radon/actions/runs/45181898751) | — | 160s | 34.7s | unchanged=158 |
+| [45179451125](https://github.com/joemccann/radon/actions/runs/45179451125) | — | 169s | 34.9s | unchanged=158 |
+| [45109521405](https://github.com/joemccann/radon/actions/runs/45109521405) | — | 125s | 21.1s | unchanged=158 |
+| [45180408426](https://github.com/joemccann/radon/actions/runs/45180408426) | — | 131s | 22.3s | unchanged=158 |
+| [44979169331](https://github.com/joemccann/radon/actions/runs/44979169331) | — | 155s | 33.2s | unchanged=158 |
+| [45072047330](https://github.com/joemccann/radon/actions/runs/45072047330) | — | 167s | 36.8s | updated=2 |
+
+Healthy mixed-warm push-to-deploy p50 is 406s (n=10; 10% is 41s). One
+`git cat-file --batch` plus an isolated SHA-256 of the same tip blobs
+is expected to cut the unchanged walk from ~34s toward 2-4s, about 30s
+of deploy SSH and of the primary clock. That may miss the 10% clock bar
+on its own; acceptance waits for five after-runs. Runner seconds fall
+by about the same 30s (no new job). The 40-second stability window,
+exact-SHA image checks, rollback journal, and non-cancelling deploy
+concurrency stay.
+
+**Change.** `install_manifest_units` still classifies control-plane,
+excluded, release-managed, and symlinked units first. The rest are read
+from the root provision store in one `cat-file --batch`. An unchanged
+unit (tip blob hash, live hash, and manifest digest all equal) is not
+promoted. A changed unit is copied from that blob, then re-hashed and
+`systemd-analyze` verified before promote. A missing tip blob or a
+digest mismatch is skipped. Batch failure falls back to the per-unit
+`cat-file blob` path. No `needs` edge, test inventory, coverage, or
+exact-SHA admission change.
+
+**Safety and revert trigger.** Revert if a main deploy skips a unit
+whose tip blob differs from the installed body, installs a body that is
+not the tip blob, follows a symlink, or loses the per-unit fallback when
+`cat-file --batch` fails.
+
+| Job | Before | After | % change |
+|---|---|---|---|
+| Deploy to VPS | 163s | pending | TBD until 5 samples |
+
+Before is the Deploy to VPS job wall on run 45183187555 (job
+137724020382), whose install-units phase was 34.1s. Acceptance remains
+five comparable mixed-warm deploys before and after: same-class p50 at
+least 10% and 15s faster; p95 no worse than 5% or 15s; cold p50 no
+worse than 10%; runner minutes no more than 20% higher. Status
+`VALIDATING`.
+
+**Verification.** `cloud/tests/test_cip038_install_units_batch.py` was
+red (batch path absent: per-unit `cat-file` still ran, fallback message
+missing) then green. Related `test_install_units.py` covers promote,
+mismatch, symlink, and control-plane skips on the batch path. Full
+suites, Vitest, Docker builds, and workflow lint are left to PR CI.
