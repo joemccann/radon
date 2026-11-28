@@ -88,18 +88,26 @@ _EXISTING_ASSUMED_V2_ROW_BYTES = 48 * 1024
 # Page ids through the source index first, then fetch those rows. Sorting
 # full rows made Turso read every row of the source with its embeddings
 # (newsfeed: 25s for 50 rows on a fork, 2026-09-28; 0.08s this way).
+# The skip decision needs presence, not the vectors. A 384-d blob is 1536
+# bytes and embedding_v2 is 8192; shipping both for every unchanged chunk
+# is the hourly memory spike. Vectors are loaded later, and only for
+# documents that failed the skip.
 _EXISTING_SQL = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
-    "summary, embedding, content_hash "
+    "summary, embedding IS NOT NULL, content_hash "
     "FROM knowledge WHERE id IN (SELECT id FROM knowledge "
     "WHERE source = ? AND id > ? ORDER BY id LIMIT ?) ORDER BY id"
 )
 _EXISTING_SQL_V2 = (
     "SELECT id, doc_key, chunk_ix, content, title, metadata, "
-    "summary, embedding, content_hash, embedding_v2 "
+    "summary, embedding IS NOT NULL, content_hash, embedding_v2 IS NOT NULL "
     "FROM knowledge WHERE id IN (SELECT id FROM knowledge "
     "WHERE source = ? AND id > ? ORDER BY id LIMIT ?) ORDER BY id"
 )
+# Reprocessed documents only. 50 rows of both vectors stay under the 8 MiB
+# response cap. Key batches stay well under the SQL variable limit.
+_HYDRATE_ROWS = 50
+_HYDRATE_KEY_BATCH = 40
 
 
 class _StoredChunk(NamedTuple):
@@ -110,6 +118,10 @@ class _StoredChunk(NamedTuple):
     embedding: bytes | None
     content_hash: str
     embedding_v2: bytes | None = None
+    # None means "infer from the blob". The skip load sets these and leaves
+    # the blobs empty so an unchanged corpus never retains the vectors.
+    embedding_present: bool | None = None
+    embedding_v2_present: bool | None = None
 
     @property
     def has_summary(self):
@@ -117,10 +129,14 @@ class _StoredChunk(NamedTuple):
 
     @property
     def has_embedding(self):
+        if self.embedding_present is not None:
+            return self.embedding_present
         return self.embedding is not None
 
     @property
     def has_embedding_v2(self):
+        if self.embedding_v2_present is not None:
+            return self.embedding_v2_present
         return self.embedding_v2 is not None
 
 _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
@@ -180,6 +196,8 @@ def ingest_source(
         docs, existing, require_embedding=embedder is not None,
         require_summary=distill_enabled
     )
+    if to_process:
+        _hydrate_embeddings(db, source, existing, {doc.doc_key for doc in to_process})
 
     distilled = distill_failed = distill_deferred = embedded = 0
     counts = dict(_EMPTY_UPSERT_COUNTS)
@@ -305,21 +323,72 @@ def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
         if not rows:
             return existing
         for row in rows:
-            embedding_v2 = None
+            embedding_v2_present = False
             if has_v2:
                 (row_id, doc_key, chunk_ix, content, title, metadata_json,
-                 summary, embedding, digest, embedding_v2) = row
+                 summary, embedding_present, digest, embedding_v2_present) = row
             else:
                 (row_id, doc_key, chunk_ix, content, title, metadata_json,
-                 summary, embedding, digest) = row
+                 summary, embedding_present, digest) = row
             existing.setdefault(doc_key, {})[chunk_ix] = _StoredChunk(
-                content, title, metadata_json, summary, embedding, digest, embedding_v2
+                content, title, metadata_json, summary, None, digest, None,
+                bool(embedding_present), bool(embedding_v2_present),
             )
             cursor = row_id
             seen_rows += 1
             seen_bytes += _row_wire_bytes(row)
         if len(rows) < limit:
             return existing
+
+
+def _hydrate_sql(n_keys: int, has_v2: bool) -> str:
+    marks = ", ".join("?" for _ in range(n_keys))
+    blobs = "embedding, embedding_v2" if has_v2 else "embedding"
+    return (
+        f"SELECT id, doc_key, chunk_ix, {blobs} FROM knowledge WHERE id IN ("
+        f"SELECT id FROM knowledge WHERE source = ? AND id > ? AND doc_key IN ({marks}) "
+        f"ORDER BY id LIMIT ?) ORDER BY id"
+    )
+
+
+def _hydrate_embeddings(db, source: str, existing: dict, doc_keys: set[str]) -> None:
+    """Fill vector bytes for documents the skip did not drop.
+
+    Unchanged documents keep the presence flags from ``_load_existing`` and
+    never pull the blobs. A reprocessed document needs the stored vectors so
+    an unchanged sibling chunk is not embedded again.
+    """
+    keys = [key for key in doc_keys if existing.get(key)]
+    if not keys:
+        return
+    has_v2 = _knowledge_has_embedding_v2(db)
+    for offset in range(0, len(keys), _HYDRATE_KEY_BATCH):
+        group = keys[offset:offset + _HYDRATE_KEY_BATCH]
+        cursor = 0
+        while True:
+            rows = db.execute(
+                _hydrate_sql(len(group), has_v2),
+                (source, cursor, *group, _HYDRATE_ROWS),
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                embedding_v2 = None
+                if has_v2:
+                    row_id, doc_key, chunk_ix, embedding, embedding_v2 = row
+                else:
+                    row_id, doc_key, chunk_ix, embedding = row
+                stored = existing.get(doc_key, {}).get(chunk_ix)
+                if stored is not None:
+                    existing[doc_key][chunk_ix] = stored._replace(
+                        embedding=embedding,
+                        embedding_v2=embedding_v2,
+                        embedding_present=embedding is not None,
+                        embedding_v2_present=embedding_v2 is not None,
+                    )
+                cursor = row_id
+            if len(rows) < _HYDRATE_ROWS:
+                break
 
 
 def _pre_filter(
