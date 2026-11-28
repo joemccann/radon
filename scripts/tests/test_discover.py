@@ -11,23 +11,9 @@ from discover import (
     analyze_darkpool_day,
     calculate_score,
     discover_targeted,
-    is_market_open,
     WEIGHTS,
 )
 from clients.uw_client import UWAPIError, UWRateLimitError, UWServerError
-
-
-# ── is_market_open ──────────────────────────────────────────────────
-
-class TestIsMarketOpen:
-    def test_weekday_open(self):
-        assert is_market_open(datetime(2026, 3, 3)) is True
-
-    def test_weekend_closed(self):
-        assert is_market_open(datetime(2026, 3, 7)) is False
-
-    def test_holiday_closed(self):
-        assert is_market_open(datetime(2026, 1, 19)) is False
 
 
 # ── analyze_darkpool_day ────────────────────────────────────────────

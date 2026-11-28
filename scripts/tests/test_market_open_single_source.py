@@ -79,23 +79,8 @@ def _freeze(monkeypatch, instant, *modules):
 # ── regular-session (RTH) gates ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("instant,expected", RTH_CASES)
-def test_cri_scan_is_market_open(instant, expected):
-    import cri_scan
-    assert cri_scan.is_market_open(instant) is expected
-
-
-@pytest.mark.parametrize("module_name", ["gex_scan", "vcg_scan", "fetch_menthorq_cta", "gamma_rotation_gap"])
-@pytest.mark.parametrize("instant,expected", RTH_CASES)
-def test_scanner_is_market_open(monkeypatch, module_name, instant, expected):
-    module = __import__(module_name)
-    _freeze(monkeypatch, instant, module)
-    assert module.is_market_open() is expected
-
-
-@pytest.mark.parametrize("instant,expected", RTH_CASES)
-def test_market_hours_is_market_open(instant, expected):
-    from utils import market_hours
-    assert market_hours.is_market_open(instant) is expected
+def test_canonical_is_market_open_et(instant, expected):
+    assert market_calendar.is_market_open_et(instant) is expected
 
 
 def test_market_hours_status_names_the_holiday():
@@ -103,19 +88,6 @@ def test_market_hours_status_names_the_holiday():
     is_open, status = market_hours.get_market_status(THANKSGIVING_11)
     assert is_open is False
     assert "holiday" in status.lower()
-
-
-@pytest.mark.parametrize("instant,expected", RTH_CASES)
-def test_price_cache_is_market_hours(monkeypatch, instant, expected):
-    from utils import price_cache
-    _freeze(monkeypatch, instant, price_cache)
-    assert price_cache.is_market_hours() is expected
-
-
-@pytest.mark.parametrize("instant,expected", RTH_CASES)
-def test_incident_classify_is_market_open(instant, expected):
-    from incident_watchdog import classify
-    assert classify._is_market_open(instant) is expected
 
 
 # ── trading-day gates ───────────────────────────────────────────────────────
@@ -223,6 +195,39 @@ def test_watchdog_market_state(instant, expected):
 _FIXED_ET_OFFSET = re.compile(
     r"(timedelta|_td)\(hours=-[45]\)|now\w*\)? - (timedelta|_td)\(hours=[45]\)"
 )
+
+
+_DEF_IS_MARKET_OPEN = re.compile(r"^\s*def is_market_open\s*\(", re.M)
+_DEF_PRIVATE_IS_MARKET_OPEN = re.compile(r"^\s*def _is_market_open\s*\(", re.M)
+_MARKET_HOLIDAYS_CONST = re.compile(r"^MARKET_HOLIDAYS_\d+\s*=", re.M)
+
+
+def test_no_parallel_market_open_predicate():
+    """One RTH predicate: utils.market_calendar.is_market_open_et.
+
+    A second ``def is_market_open`` is either a pass-through or, in
+    fetch_flow / fetch_ticker / discover, a date-only trading-day check
+    wearing the RTH name. Year-stamped holiday sets are the same leak.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "scripts"],
+        cwd=REPO_ROOT, capture_output=True, check=True,
+    ).stdout.split(b"\0")
+    offenders = []
+    for raw in listed:
+        if not raw.endswith(b".py"):
+            continue
+        rel = raw.decode()
+        if "/tests/" in f"/{rel}" or rel.startswith("scripts/tests/"):
+            continue
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        if _DEF_IS_MARKET_OPEN.search(text):
+            offenders.append(f"{rel}:def is_market_open")
+        if _DEF_PRIVATE_IS_MARKET_OPEN.search(text):
+            offenders.append(f"{rel}:def _is_market_open")
+        if _MARKET_HOLIDAYS_CONST.search(text):
+            offenders.append(f"{rel}:MARKET_HOLIDAYS_*")
+    assert offenders == []
 
 
 def test_no_hardcoded_eastern_offset_in_scripts():
