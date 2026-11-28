@@ -162,10 +162,10 @@ def load_prior_payload() -> Optional[dict[str, Any]]:
 
 
 def persist_json(payload: dict[str, Any]) -> None:
-    """Atomic write of data/skew2d.json."""
+    """Atomic write of data/skew2d.json — compact separators (PERF-067)."""
     SKEW2D_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = SKEW2D_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, SKEW2D_JSON)
 
 

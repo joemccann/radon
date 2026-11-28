@@ -467,9 +467,10 @@ def first_exact_date(series: list[dict[str, Any]]) -> Optional[str]:
 
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
+    """Atomic write of data/divyield.json — compact separators (PERF-066)."""
     DIVYIELD_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = DIVYIELD_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.write_text(json.dumps(payload, separators=(",", ":")))
     os.replace(tmp, DIVYIELD_JSON)
 
 

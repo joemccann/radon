@@ -1,6 +1,6 @@
 ## Summary
 
-Verified vendor CLI pin bump. Each artifact's SHA-512 matched the publisher metadata, the Darwin team id stayed Google's, and the architecture matched the pin.
+Verified vendor CLI pin bump. Each manifest came from the pinned manifest host, each artifact was downloaded from an allowlisted publisher host and its SHA-512 matched that manifest, and the architecture matched the pin. The Darwin pin keeps Google's team id, which the installer's codesign check enforces at install time; this bump verifies no signature.
 
 ## What changed
 
@@ -8,7 +8,7 @@ Verified vendor CLI pin bump. Each artifact's SHA-512 matched the publisher meta
 
 ## Test plan
 
-- [x] Focused local: `python3 scripts/ci/bump_vendor_cli_pins.py --apply` verified checksum, team id, and arch before writing
+- [x] Focused local: `python3 scripts/ci/bump_vendor_cli_pins.py --apply` verified host, checksum, and arch before writing
 - [x] CI: this workflow
 
 ## Risk and rollback
