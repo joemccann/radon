@@ -1470,6 +1470,11 @@ Per-finding pre-commit focused gates passed 133 (T-538), 361 (T-540), 8 (T-541) 
 | T-600 | DONE | Hourly mutation: panel 27 passed, hook poll 1 failed (`expected 1 to be 2`, `/tmp/t600-red.log`). Restored `300_000`. Green 2 passed ×3. Product source unchanged. Closing rounds: root pytest load flake then serial green each round; 20,201 passed / 11 skipped / 40 subtests. Vitest 11,692 passed / 21 skipped / 1,220 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed against `194f62060`. |
 | T-601 | DONE | Dropped `with shared_browser():` left the substring check 3 passed (`/tmp/t601-harm-green.log`). AST walk 1 failed at `generate_gex_share.py:663` (`/tmp/t601-red.log`). Restored wrapper. Green 4 passed ×3. Product source unchanged. Closing rounds: same as T-600. |
 | T-602 | DONE | Serial `OSError: AF_UNIX path too long` (`/tmp/pytest-1-serial.log`). Socket under `/tmp`. Green 1 passed; file 23 passed ×3. Product source unchanged. Closing rounds: same as T-600. |
+## 2026-11-25
+
+| ID | Status | Evidence |
+|---|---|---|
+| T-603 | DONE | Live gateway call 1 failed in 43.41s (`/tmp/cta-serial-1.log`). Equality stayed green after one recorded `chat` (`/tmp/t603-harm.log`). Token-absent skip: 1 failed (`assert [] == ['chat']`, `/tmp/t603-red.log`), reverted. Green 33 passed ×3. Product source unchanged. Closing rounds: publisher AF_UNIX remains (T-602 on #1654). R1/r3 credentials xdist flake, serial 2 passed. Vitest 11,690 passed / 21 skipped / 1,218 files each round. Cloud 58 failed / 4,307 passed / 23 skipped each round, 0 added / 0 removed vs origin/main `4d6687cf5`. |
 ## 2026-11-27
 
 | ID | Status | Evidence |
