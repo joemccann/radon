@@ -165,7 +165,7 @@ Past about 50k rows, revisit a compact index (`compress_neighbors=float8`, `max_
 
 - `embedding_v2` column exists post-migration 0087.
 - `idx_knowledge_embedding_v2` is created by 0087 and dropped by 0089; `idx_knowledge_embedding` is dropped by 0090. Both are `-- radon-migrate: manual` and are not applied by boot.
-- `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d exact scan only after full backfill.
+- `v2_coverage_ready` logic: queries use 384-d while any NULL exists; 2048-d exact scan only after full backfill. The decision and its 60-second cache live in `scripts/model_gateway/embed_rules.py`. The app client and the native NVIDIA client each bind their own query transport.
 - Dual-write env var parsing matches `dual_write_enabled()`.
 
 Run: `python3.13 -m pytest scripts/tests/test_knowledge_embed_v2.py scripts/tests/test_migrate.py -q`
